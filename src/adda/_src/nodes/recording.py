@@ -143,10 +143,27 @@ class RecordingMixin:
         diagnostic + strategizer notification the instant it flags
         contradictory system instructions (the cheapest, highest-value
         failure mode to catch). Best-effort; never raises.
+
+        A Done() call that ACTUALLY ARRIVED with non-empty text is always
+        recorded here, even when ``_extract_report_section`` fails to find
+        a ``### Retrospective`` heading in it — never silently dropped. Only
+        genuinely empty text (nothing submitted at all) returns without
+        writing anything. This matters because ``write_fallback_retrospective``
+        (infra/watchdog_cleanup.py) trusts "no entry for this role in
+        retrospectives.jsonl" to mean "the retrospective never arrived" and
+        synthesizes a claim saying so; if a real, substantive reply arrived
+        but merely failed to parse (run 20260926T124841's regex bug, now
+        fixed — see _extract_report_section), silently dropping it here made
+        that downstream claim FALSE — the run's own record said a retrospective
+        "never arrived" when one, in fact, had. Recording a parse-failure
+        entry (with the raw text preserved) keeps that claim honest without
+        needing write_fallback_retrospective itself to know the difference.
         """
         try:
-            retro = _extract_report_section(report_text or "", "Retrospective")
-            if not retro:
+            report_text = report_text or ""
+            retro = _extract_report_section(report_text, "Retrospective")
+            parse_failed = bool(report_text.strip()) and not retro
+            if not retro and not parse_failed:
                 return
             notes = self._current_notes_dir
             if notes is None:
@@ -154,11 +171,21 @@ class RecordingMixin:
             import json as _json
             import re as _re
             debug_dir = Path(notes).parent
-            flagged = bool(_re.search(r"CONSISTENCY:\s*flagged", retro, _re.I))
+            scan_text = retro or report_text
+            flagged = bool(_re.search(r"CONSISTENCY:\s*flagged", scan_text, _re.I))
             now = datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
+            if parse_failed:
+                body = (
+                    "PARSE FAILURE: a retrospective turn arrived but its "
+                    "### Retrospective section could not be parsed. Raw "
+                    f"text follows.\n\n{report_text}"
+                )
+            else:
+                body = retro
             rec = {
                 "ts": now, "source_id": source_id, "role": role,
-                "flagged": flagged, "text": retro[:_RETRO_TEXT_CAP],
+                "flagged": flagged, "text": body[:_RETRO_TEXT_CAP],
+                "parse_failed": parse_failed,
             }
             with (debug_dir / "retrospectives.jsonl").open(
                     "a", encoding="utf-8") as f:
@@ -167,7 +194,7 @@ class RecordingMixin:
                 drec = {
                     "ts": now, "node": role, "tool": "Retrospective",
                     "error_type": "CONSISTENCY_FLAG", "fault": "system",
-                    "message": retro[:300],
+                    "message": body[:300],
                 }
                 with (debug_dir / "diagnostics.jsonl").open(
                         "a", encoding="utf-8") as f:

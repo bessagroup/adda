@@ -659,15 +659,34 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   (`source_id` prefixed `SYNTHESIZED:`). "Capture, don't request": the
   post-Done exit interview asks for one more cooperative Done() call, and
   nothing used to enforce the reply actually arrived.
+- **The claim must stay true.** `_record_retrospective` (nodes/recording.py)
+  used to silently drop a Done() summary that arrived but whose `###
+  Retrospective` heading carried trailing text (e.g. "### Retrospective
+  (System & Framework)") — `_extract_report_section`'s regex required
+  nothing but whitespace before the newline. That made THIS mechanism's own
+  claim false: `write_fallback_retrospective`'s "never arrived" reason fired
+  even though a real, substantive reply had (run 20260926T214835 — a
+  self-consistency wet-test finding, not from a crash). Fixed two ways:
+  the extraction regex now only requires a word boundary after the heading
+  name (rejects a genuinely different heading like "### RetrospectiveNotes",
+  accepts trailing text on the same line); and `_record_retrospective` now
+  records ANY non-empty Done() summary even if the section still fails to
+  parse for some other reason — flagged `"parse_failed": true`, raw text
+  preserved — rather than silently returning. Both close the same class of
+  gap: a real reply must never be indistinguishable from one that never
+  arrived.
 - **Where:** `watchdog_cleanup.py` `write_fallback_retrospective` (shares its
   disk-reading/append core with `write_watchdog_retrospective` rather than
   duplicating it); called from `agent_runtime.py`
   `AgenticRun._fallback_retrospective`, wired at both the normal close
   (`_finalize_run`) and the crash path (`_invoke_graph`'s
   `except BaseException`, before the re-raise). Idempotent — a compliant
-  close's real entry is never duplicated. **Status:** done for every
-  in-process close; a watchdog kill is a SEPARATE case, covered by
-  `write_watchdog_retrospective` instead (see #12 above).
+  close's real entry (including a parse-failed one — it is still non-
+  synthesized) is never duplicated. `nodes/parsing.py`
+  `_extract_report_section`; `nodes/recording.py`
+  `_record_retrospective`. **Status:** done for every in-process close; a
+  watchdog kill is a SEPARATE case, covered by `write_watchdog_retrospective`
+  instead (see #12 above).
 
 ### KB (handbook) entries
 - **What:** curated knowledge the agents consult (incl. running on SLURM, pipeline
