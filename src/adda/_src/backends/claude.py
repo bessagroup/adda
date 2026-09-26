@@ -305,7 +305,7 @@ class ClaudeAdapter:
         # backgroundTaskId (from auto-background on timeout) had no tool to act
         # on it. Granting them by declaration closes that awareness gap.
         "BashOutput", "KillShell",
-        "Task", "WebFetch", "WebSearch", "computer",
+        "Task", "WebFetch", "WebSearch",
     })
 
     @classmethod
@@ -446,7 +446,7 @@ class ClaudeAdapter:
         if self.extra_mcp_servers:
             mcp_servers.update(self.extra_mcp_servers)
 
-        _base_disallowed = ["WebSearch", "WebFetch", "Task", "ExitPlanMode", "computer"]
+        _base_disallowed = ["WebSearch", "WebFetch", "Task", "ExitPlanMode"]
         # Under permission_mode="bypassPermissions" the allowed_tools allowlist
         # is NOT enforced — disallowed_tools is the only thing that binds. So a
         # native tool the agent never declared (e.g. Bash/Write for a read-only

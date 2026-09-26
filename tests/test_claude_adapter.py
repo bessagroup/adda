@@ -222,6 +222,26 @@ def test_non_buffer_stream_error_still_raises():
             [{"role": "user", "content": "hi"}])
 
 
+def test_no_stale_computer_tool_in_native_tools_or_disallowed():
+    """Regression (wet-test self-consistency finding #3, run 20260926T214835):
+    'computer' was listed in NATIVE_TOOLS as if it were a real, selectable
+    native SDK tool, and unconditionally denied in _base_disallowed for every
+    agent — but no bare 'computer' tool exists in the bundled CLI (its real
+    Computer Use surface is an MCP server, not a native tool type adda ever
+    wires up), so the CLI printed "Permission deny rule 'computer' matches no
+    known tool" on every single agent session in the run. Confirmed by
+    `strings` on the bundled CLI binary: no bare 'computer' native tool type
+    exists there either."""
+    from adda._src.backends.claude import ClaudeAdapter
+    assert "computer" not in ClaudeAdapter.NATIVE_TOOLS
+
+    cap: dict = {}
+    _install_fake_sdk(query=_capture_options_gen(cap))
+    adapter = _get_adapter()("claude-3", "sys", None, [])
+    adapter.invoke([{"role": "user", "content": "hi"}])
+    assert "computer" not in cap["options"]["disallowed_tools"]
+
+
 def test_session_is_hermetic_setting_sources_empty():
     """#1 fresh hooks: sessions load NO filesystem settings, so worker/critic
     subprocesses don't inherit the developer's global ~/.claude hooks."""
