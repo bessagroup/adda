@@ -256,7 +256,11 @@ def test_ollama_implementer_contains_get_evaluator():
 
 def test_run_paths_renders_delegations_not_workspace():
     """RUN_PATHS_PREAMBLE_TEMPLATE must render 'delegations', not
-    '/workspace', as workspace_dir."""
+    '/workspace', as its delegations-dir path — and must not call it
+    'workspace_dir' at all, since that word is reserved for the study's OWN
+    workspace/ (report 1, run 20260926T214835: the same bare word used for
+    two different directories caused a worker to write a study-workspace
+    deliverable via a path meant for its delegation sandbox)."""
     out = RUN_PATHS_PREAMBLE_TEMPLATE.format(
         study_dir="/s",
         run_dir="/s/runs/T",
@@ -270,8 +274,12 @@ def test_run_paths_renders_delegations_not_workspace():
     assert "delegations" in out, (
         "RUN_PATHS_PREAMBLE_TEMPLATE did not render 'delegations'"
     )
-    assert "workspace_dir         = /s/runs/T/debug/delegations" in out, (
-        "RUN_PATHS_PREAMBLE_TEMPLATE's workspace_dir is not the delegations dir"
+    assert "delegations_dir       = /s/runs/T/debug/delegations" in out, (
+        "RUN_PATHS_PREAMBLE_TEMPLATE's delegations_dir is not the delegations dir"
+    )
+    assert "workspace_dir" not in out, (
+        "RUN_PATHS_PREAMBLE_TEMPLATE must not reuse 'workspace_dir' — that "
+        "collides with the study's own workspace/ convention"
     )
 
 

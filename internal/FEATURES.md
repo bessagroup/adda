@@ -205,6 +205,42 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   (`_reproduction_gate`) and `nodes/tools/routing/` (`RunNotebook`, scratch).
 - **Status:** telemetry/ergonomics, not a new cap. Run 20260705T181941 friction.
 
+### Sandboxed Write also reaches the study's workspace/
+- **What:** `build_sandboxed_write` (a worker's `Write` tool) used to hard-reject
+  any path outside the delegation's own `D###/` subfolder, full stop — but study
+  problem statements routinely name deliverable paths under the study's OWN
+  `workspace/` (e.g. `studies/lcp_matlab_regression/PROBLEM_STATEMENT.md`'s
+  "workspace/km_baseline.m", the same convention `config.yaml`'s
+  `evaluator.entrypoint` uses), and a worker had no sanctioned way to satisfy
+  that instruction (run 20260926T124841/20260926T214835: rejected, then written
+  via Bash instead — trusted and unsandboxed, so invisible to this guard
+  entirely; Elvis's decision: keep Bash trusted, extend Write instead of
+  sandboxing Bash). `Write` now accepts an OPTIONAL second permitted root, the
+  study's `workspace/`, passed as `study_workspace=` at both call sites
+  (`node.py::_setup_sandboxed_write`, `delegation.py::_setup_worker_write`). A
+  bare relative path (`workspace/foo.m`, or exactly `workspace`) resolves
+  against the STUDY root rather than the delegation root; an absolute path
+  that already resolves under the study's workspace/ is accepted either way.
+  Both permitted roots resolve symlinks/`..` before the containment check, so
+  the allowance can't be used to escape into `runs/<other>/` or the study root.
+  The rejection message now states BOTH permitted directories honestly — no
+  implied sandbox the toolset lacks, and no mention of Bash (a separate,
+  deliberately-unsandboxed boundary, not this guard's concern).
+- **Naming fix, same commit:** the corpus used "workspace"/"workspace_dir" for
+  TWO different directories — the study's own `workspace/` (this feature) and
+  the per-delegation sandbox root (`<run>/debug/delegations/`) — under the
+  SAME bare word. `RUN_PATHS_PREAMBLE_TEMPLATE`, `WORKSPACE_PREAMBLE_TEMPLATE`,
+  the `<bash_tool>` block, and `deliverable_format.py` now say "delegation
+  directory" / "delegations_dir" / "delegation_root" for the sandbox root,
+  reserving "workspace/" exclusively for the study folder everywhere an agent
+  reads it.
+- **Where:** `nodes/tools/routing/delegation.py` (`build_sandboxed_write`,
+  `_setup_worker_write`); `nodes/node.py` (`_setup_sandboxed_write`);
+  `prompts/agent_prompts.py`; `prompts/deliverable_format.py`.
+- **Status:** done. Bash remains trusted and unsandboxed by design — not
+  addressed here; see the (deferred) Bash-boundary discussion this same
+  finding raised.
+
 ### Output-column guidance fix
 - **What:** notebook guidance requires naming the objective column EXPLICITLY. The
   earlier "first non-provenance output" auto-detect was unsafe: `output_names` is

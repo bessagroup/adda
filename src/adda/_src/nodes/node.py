@@ -261,7 +261,12 @@ class Node(
         # resolves a closure_tools["Write"] = <name> rebind to the function
         # <name> refers to — can still find this tool's docstring after the
         # move into the shared builder.
-        Write = build_sandboxed_write(self._workspace_dir)
+        _study_ws = (
+            Path(self._study_dir) / "workspace"
+            if self._study_dir is not None else None
+        )
+        Write = build_sandboxed_write(
+            self._workspace_dir, study_workspace=_study_ws)
         self.adapter.closure_tools["Write"] = Write
 
     def _build_eval_closures(self) -> dict:
