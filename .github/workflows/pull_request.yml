@@ -11,6 +11,20 @@ on:
     # 410ac0d) surface even between merges.
     - cron: "0 6 * * *"
 
+# A rapid run of small commits pushed straight to main (this repo's own
+# workflow -- no PR ceremony) queues one full run per push, six deep on one
+# busy day, each waiting out the full matrix before the NEXT one even starts
+# -- pure backlog, since only the LAST commit's result is what anyone acts
+# on. `github.event_name` in the group key keeps push/PR/schedule fully
+# separate queues (so this only ever touches OTHER pushes to main, never a
+# PR's own run or the nightly full matrix); cancel-in-progress only for
+# push means an in-flight run for an older main commit is cancelled the
+# moment a newer one supersedes it -- a PR's repeated pushes still just
+# queue, unaffected, and the nightly schedule shares no group with either.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
 jobs:
   run-tests:
     strategy:
