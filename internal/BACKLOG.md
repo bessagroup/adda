@@ -29,6 +29,7 @@ before. Until one is answered or closed, treat it as known, not news.
 - [ ] **#17** Closure + budget-severity model (Memory>Time>Eval; dynamic constraints) — *open, §4 user-owned* — Done() prompt iterated (`0400a653`); runtime nudge + severity model deferred
 - [ ] **#19** Scientific adequacy is enforced as vibes while reproduction is enforced hard — *§4, partially addressed (`8ae9a402`, `93e6f0f2`); the load-bearing question is OPEN and empirical* — see §19 below
 - [ ] **#18** Critic should flag an infeasible-extremum headline on a constrained study — *open, §4 user-owned* — grounding moved to the critic (`6494489b`) but it only checks the value is real, not feasible
+- [ ] **#42** Same study, two Haiku runs, opposite gate outcomes (RunScratch vs. a token Delegate()-registered oracle) — *open, §4 user-owned* — see §42 below
 
 ## Actionable
 
@@ -207,6 +208,86 @@ constraint to the critic (it is the epistemic-contract owner's decision).
 the constraint or what counts as feasible generically without more config; the
 critic already reads the deliverable's stated objective, so it is the better
 place to judge feasibility-of-headline. See `6494489b` and `agents/critic.py`.
+
+## 42. Same study, two Haiku runs, opposite gate outcomes — RunScratch vs. a token Delegate()-registered oracle
+
+**Status: open, §4 user-owned.** Raised by run 20260927T034538
+(`studies/lcp_matlab_regression`, SHA `26039fa`, the final wet Haiku
+self-consistency re-run before the planned Sonnet/Oscar run) — a genuine
+self-consistency finding, not a structural gate defect (corrected from an
+earlier draft of this entry, which wrongly concluded the gate could never
+pass for this study; it demonstrably can and has, twice).
+
+`RunNotebook(gate=True)`/`Done()`'s pre-critic reproduction gate refuses
+outright with "canonical store has no evaluations yet. Run at least one
+evaluation campaign before checking the gate" (`nodes/reproduction_gate.py`)
+whenever the canonical store holds zero oracle rows. `lcp_matlab_regression`
+is a direct MATLAB-vs-MATLAB comparison, so nothing about the SCIENCE
+requires a canonical-store row — but **two earlier runs of this exact same
+study, same graph, same config (`6689734`/20260926T124841 and
+`f48da54`/20260926T214835) both reached GATED**, because their strategizer
+delegated a step explicitly to satisfy this precondition: D004 in the
+`20260926T214835` delegation log reads "Create and register a minimal
+oracle for store population... wraps the KM baseline MATLAB model...
+Register via `register_evaluator_entrypoint()`" — a token, one-purpose
+oracle whose only job is populating one canonical-store row so the gate
+will look. This run's strategizer (`26039fa`) instead did everything
+itself via `RunScratch` — never called `Delegate()` a single time in the
+whole run — got numerically identical, equally conclusive results (5 test
+cases, max error 0.0 against pre-registered tolerances) but with no
+canonical-store row to show for it, bounced off the gate 6 times exactly as
+told, and closed UNGATED/FAILED. Same study, same difficulty, opposite
+formal outcome, purely as a function of which of two equally-reasonable
+strategies the strategizer happened to pick this run. `run_status.json`:
+`"status": "FAILED", "reviewed": false`.
+
+The agent self-diagnosed accurately and honestly either way — it did not
+hallucinate a PASS, and its retrospective named the exact mismatch (ledger/
+gate tooling assumes every study is a `Delegate()`-based evaluator loop;
+this one measures success by re-running MATLAB directly). That accuracy is
+the good news. The bad news is the inconsistency itself: whether a
+zero-eval validation study gates or not currently depends on the
+strategizer happening to think of the token-oracle workaround, not on
+anything about the science.
+
+**Proposed (not built, needs the user's call):** (a) prompt-level — tell
+the strategizer explicitly, for zero-eval studies, to register a minimal
+oracle purely for gate compliance (codifies the workaround `20260926T214835`
+found on its own, but is exactly the kind of overfit-to-one-run rule §2
+warns against unless stated as a general principle); (b) gate-level — let
+the gate accept zero oracle rows as a valid terminal state when a study
+declares itself evaluator-free (e.g. in `config.yaml`), checking only that
+the notebook executes cleanly and its claims are internally consistent;
+(c) leave it as-is and accept that a token oracle is simply how any
+non-optimization study is expected to close, documenting the pattern
+rather than changing anything. This touches the epistemic reproduction
+contract (what "reproduced" means), not formatting, so it is not this
+agent's call to make unilaterally.
+
+**A related honesty gap, same root cause:** the run's own final closing
+report (`run.py`'s printed `AgenticRun.execute()` return, the text a human
+running this study actually reads) states flatly "**Hypothesis Status**
+(all SUPPORTED via test_comparison.m): H1 ... SUPPORTED, H2 ... SUPPORTED"
+for all five. The formal ledger (`debug/strategizer_notes/hypotheses.json`)
+never recorded any of them past `OPEN` — every `status_log` entry's own
+comment says so explicitly ("Would close SUPPORTED if a delegation ID were
+available; evidence supports hypothesis at 99% confidence" — posterior
+raised to 0.99, status left `OPEN`). The prose the strategizer chose for
+its human-facing summary overstates what its own formal record shows,
+even though the underlying evidence is genuinely strong (max error 0.0). A
+reader trusting only the printed report would not know these hypotheses
+never formally closed.
+
+**Instrumentation checked clean, narrower than intended:** the plumbing
+this run was meant to validate (SystemMessage transcript recording, the
+entry-node run-context binding from `822dfdc`) behaved correctly wherever
+it was exercised — 126 `"system"`-typed transcript records confirmed
+present (`init`x2, `status`x124), zero spurious
+`STREAM_ENDED_WITHOUT_RESULT`, zero `REPORT_RETRY` fired. But because this
+run never delegated at all, the critic gate's and verdict-validator's own
+run-context binding (also added in `822dfdc`) were never exercised —
+confirmed clean only where the run's own shape happened to reach that
+code path, not a full confirmation of all four binding sites.
 
 ## 1. Reconcile cancelled-but-completed delegations
 **Status:** partially mitigated 2026-06-15 (cancel hardened + eval-count now
