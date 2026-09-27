@@ -23,6 +23,18 @@ from pathlib import Path
 
 import pytest
 
+# The full build (see `data` below) assembles all 5 roles' prompts from the
+# live corpus -- ~170s, measured. Every test in this module needs the SAME
+# build, so it is session-scoped (not just module-scoped): the only two
+# fixtures below are the sole source of that build in this file, and
+# ``test_the_committed_map_matches_the_code`` used to bypass them entirely
+# and call `promptmap_sync.live_data()`, which re-imports promptmap.py and
+# reruns build() a SECOND time -- two ~170s builds in one file, one of them
+# invisible to `data`'s cache. Marked `promptmap` so CI can run this module's
+# tests once (in check_promptmap) instead of once per matrix leg (see
+# pyproject.toml's markers and .github/workflows/pull_request.yml).
+pytestmark = pytest.mark.promptmap
+
 _ROOT = Path(__file__).resolve().parents[1]
 _GEN = _ROOT / "internal" / "tools" / "promptmap.py"
 
@@ -34,7 +46,7 @@ def _load():
     return module
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def promptmap():
     if not _GEN.exists():  # pragma: no cover - the generator is checked in
         # internal/tools/promptmap.py is committed to this repo, not an
@@ -47,7 +59,7 @@ def promptmap():
     return _load()
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def data(promptmap):
     return promptmap.build()
 
@@ -469,7 +481,7 @@ def test_the_computed_resource_stanza_is_reachable(data):
 
 # --- the gap these tests had ------------------------------------------------
 
-def test_the_committed_map_matches_the_code(promptmap):
+def test_the_committed_map_matches_the_code(data):
     """Every test above builds the map FRESH and asserts against that, so a
     stale ``internal/promptmap.html`` passed all of them.
 
@@ -483,6 +495,13 @@ def test_the_committed_map_matches_the_code(promptmap):
     arrow, committed file -> published artifact, goes through the Artifact
     tool and cannot be reached from here; ``promptmap_sync.py`` reports that
     one, and a scheduled session acts on it.
+
+    ``live`` is the SAME ``data`` every other test in this module already
+    built (the ``data`` fixture above IS ``promptmap.build()``, byte-for-byte
+    what ``promptmap_sync.live_data()`` would also produce by re-importing
+    and re-running the same generator) -- calling ``live_data()`` here used
+    to rebuild the whole prompt corpus a second time (measured ~170s) for a
+    result identical to what ``data`` already held.
     """
     import importlib.util
 
@@ -491,7 +510,7 @@ def test_the_committed_map_matches_the_code(promptmap):
     sync = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(sync)
 
-    committed, live = sync.committed_data(), sync.live_data()
+    committed, live = sync.committed_data(), data
     drift = sync.differences(committed, live)
     assert sync.content_hash(committed) == sync.content_hash(live), (
         "internal/promptmap.html is stale. Run `make promptmap` and commit it."

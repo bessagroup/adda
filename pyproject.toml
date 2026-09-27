@@ -89,6 +89,7 @@ tests = [
   "playwright>=1.47",
   "pytest>=8.4.1",
   "pytest-cov>=6.2.1",
+  "pytest-xdist>=3.6.1",
   "tomli>=2.0; python_version < '3.11'"
 ]
 # Read-only live run viewer (`python -m adda.viewer <study-dir>`). Starlette
@@ -137,7 +138,8 @@ markers = [
   "requires_dependency(name): mark the test as it requires a certain dependency",
   "ollama: marks tests that require a running Ollama server (skip with -m 'not ollama')",
   "integration: wet tests that hit real LLMs and external APIs (skip with -m 'not integration')",
-  "corpus: needs a third-party corpus nobody can ship (Abaqus docs, a Basilisk checkout). OPTIONAL in CI -- the f3dasm and adda retrieval suites are not, and are required on every push"
+  "corpus: needs a third-party corpus nobody can ship (Abaqus docs, a Basilisk checkout). OPTIONAL in CI -- the f3dasm and adda retrieval suites are not, and are required on every push",
+  "promptmap: rebuilds the whole prompt corpus (~170s) to check internal/promptmap.html's provenance. Runs once in CI's check_promptmap job, not per matrix leg (skip locally with -m 'not promptmap')"
 ]
 minversion = "6.0"
 pythonpath = [".", "src"]

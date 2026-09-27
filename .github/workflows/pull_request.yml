@@ -48,6 +48,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -59,9 +61,15 @@ jobs:
         run: |
           python -m playwright install chromium ${{
             runner.os == 'Linux' && '--with-deps' || '' }}
+      # `promptmap` tests are excluded here: they rebuild the whole prompt
+      # corpus (~340s combined) and would otherwise pay that cost in EVERY
+      # matrix leg; check_promptmap runs them once instead (see that job
+      # below). -n auto runs the rest under pytest-xdist; pytest-cov combines
+      # each worker's coverage automatically, so --cov-fail-under still gates
+      # the same `adda` package, just measured across parallel workers.
       - name: Test with pytest
         run: |
-          pytest -m "not integration and not ollama and not corpus"
+          pytest -n auto -m "not integration and not ollama and not corpus and not promptmap"
   build-docs:
     strategy:
       matrix:
@@ -76,6 +84,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -97,10 +107,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --editable '.[all]'
+          python -m pip install --editable '.[tests,all]'
       # internal/promptmap.html is a committed, generated artifact -- its
       # whole value is that a reader can open it without running anything.
       # Regenerate it with no flags (the committed copy carries no build
@@ -121,6 +133,18 @@ jobs:
             diff internal/promptmap.html /tmp/promptmap.html || true
             exit 1
           fi
+      # The deeper provenance checks (test_promptmap.py: every gate symbol
+      # resolves, every prompt section's citation is real, the committed map
+      # matches the code) run HERE, once, instead of in every run-tests
+      # matrix leg (moved out in the same commit — see that job's comment).
+      # --no-cov: this job never claimed the --cov-fail-under=85 gate (it
+      # used to be a raw diff script with no pytest at all), and this
+      # marker's tests alone touch too small a slice of `adda` to mean
+      # anything against that gate — run-tests' own coverage run is
+      # unaffected by this job either way.
+      - name: Run the promptmap provenance tests
+        run: |
+          pytest -m promptmap --no-cov
   check_pre-commit:
     strategy:
       matrix:
@@ -135,6 +159,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - name: Install pre-commit
         run: |
           python -m pip install --upgrade pip
