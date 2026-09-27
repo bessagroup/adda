@@ -2935,23 +2935,31 @@ def test_wrap_closure_leaves_uncoercible_strings():
 
 
 # ---------------------------------------------------------------------------
-# Delegate/Wait are topology-derived, not universal — Delegate needs an
-# outgoing edge; Wait needs ANY edge (Elvis's correction: Wait is the
-# general "block until something addressed to me arrives" primitive, so a
-# pure worker with only incoming edges needs it too, not just a delegator)
+# Delegate/Wait are topology-derived, not universal — BOTH need an outgoing
+# edge (spec 12, design item 4: Wait is the delegator's tool for collecting
+# finished delegations; a pure worker uses SendMessage(wait_for_reply=True)
+# instead, once spec 12 lands). This re-tightens an intermediate widening
+# (commit f613427) that briefly gave Wait to any node with an edge in
+# EITHER direction, on the theory it would double as a general "something
+# arrived" primitive for workers too — spec 12 gives that job to
+# SendMessage instead, so Wait goes back to exactly what it already was.
 # ---------------------------------------------------------------------------
 
-def test_delegate_and_wait_absent_with_no_edges_at_all():
-    """A node with no edges in EITHER direction (isolated in the graph) must
-    not offer Delegate or Wait — task B's roster review (Elvis, via
-    adda-boss-whopper) caught the prompt-vs-tool contradiction of Delegate
-    existing unconditionally: calling it on a leaf always errored ('ERROR:
-    unknown target ... Valid targets: []'). Reply/FollowUp stay universal."""
+def test_delegate_and_wait_absent_with_no_outgoing_edges():
+    """A node with nowhere to delegate TO must not offer Delegate or Wait —
+    task B's roster review (Elvis, via adda-boss-whopper) caught the
+    prompt-vs-tool contradiction of Delegate existing unconditionally:
+    calling it on a leaf always errored ('ERROR: unknown target ... Valid
+    targets: []'). Reply/FollowUp stay universal (retired together, once
+    SendMessage exists to replace both)."""
     from adda._src.nodes import Node
 
     node = Node(
-        StubAdapter(), name="isolated", outgoing=[],
-        spec=_minimal_spec(),  # its edges never name "isolated" at all
+        # _minimal_spec()'s one edge is strategizer -> implementer, so
+        # "implementer" has an INCOMING edge and no outgoing one — and
+        # neither Delegate nor Wait cares about incoming edges any more.
+        StubAdapter(), name="implementer", outgoing=[],
+        spec=_minimal_spec(),
     )
     assert "Delegate" not in node.adapter.closure_tools
     assert "Wait" not in node.adapter.closure_tools
@@ -2970,20 +2978,20 @@ def test_delegate_and_wait_present_with_an_outgoing_edge():
     assert "Wait" in node.adapter.closure_tools
 
 
-def test_wait_present_but_not_delegate_with_only_an_incoming_edge():
-    """A pure worker (no outgoing edges of its own) still needs Wait — it
-    can receive a message addressed to it — but has nowhere to Delegate
-    TO."""
+def test_wait_absent_with_only_an_incoming_edge():
+    """A pure worker (no outgoing edges of its own) does NOT get Wait —
+    only a delegator (>=1 outgoing edge) collects delegations. This is the
+    re-tightening itself: an intermediate commit (f613427) gave Wait to
+    this exact node shape; spec 12 revoked that once SendMessage took over
+    the "something addressed to me arrives" job for a pure worker."""
     from adda._src.nodes import Node
 
     node = Node(
-        # _minimal_spec()'s one edge is strategizer -> implementer, so
-        # "implementer" has an INCOMING edge and no outgoing one.
         StubAdapter(), name="implementer", outgoing=[],
         spec=_minimal_spec(),
     )
     assert "Delegate" not in node.adapter.closure_tools
-    assert "Wait" in node.adapter.closure_tools
+    assert "Wait" not in node.adapter.closure_tools
 
 
 def test_wrap_closure_recall_history_regression():

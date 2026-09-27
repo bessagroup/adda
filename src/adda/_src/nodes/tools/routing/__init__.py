@@ -58,30 +58,31 @@ def build_routing_tools(node) -> dict:
     # adda-boss-whopper): offering Delegate() on a node with nowhere to
     # delegate TO was a prompt-vs-tool contradiction -- the tool was always
     # present, calling it on such a node always errored ("ERROR: unknown
-    # target ...  Valid targets: []", Delegate's own _resolve_target), and
-    # this comment already claimed the tool "derives from having outgoing
-    # edges" without the code actually gating on that fact. Now it does:
-    # Delegate exists only for a node with >=1 outgoing edge. Wait is
-    # broader on purpose (correction after the first review): it is the
-    # single blocking primitive for "something addressed to me arrives" --
-    # a finished delegation's report for a delegator, but ALSO a message
-    # for a worker with only INCOMING edges (no outgoing of its own) -- so
-    # it exists for any node with an edge in EITHER direction; only a node
-    # with no edges at all (isolated in the graph) gets neither. Reply/
-    # FollowUp stay universal for now (retired instead in spec 12's
-    # Delegate/SendMessage/Wait design, not yet built): FollowUp routes to
-    # whoever delegated to THIS node (or a human, for the entry node)
-    # regardless of this node's own outgoing edges, and Reply answers a
-    # FollowUp this node received as a delegator.
+    # target ...  Valid targets: []", Delegate's own _resolve_target).
+    # Delegate/Wait now BOTH exist only for a node with >=1 outgoing edge --
+    # the node that started work is the only one entitled to collect it
+    # (spec 12, internal/specs/12-peer-interaction.md, design item 4).
+    #
+    # Wait was briefly widened to "any edge, either direction" between the
+    # two reviews of this same fix (commit f613427), on the theory that a
+    # pure worker needed it too to block on "something addressed to me."
+    # Spec 12's SendMessage(wait_for_reply=True) now owns all peer-reply
+    # waiting for such a worker -- Wait goes back to being exactly what it
+    # already was: the delegator's tool for collecting finished
+    # delegations, including fan-out. This is a deliberate UN-shipping of
+    # that widening, not an oversight -- see spec 12's own Risk note on it.
+    #
+    # Reply/FollowUp stay for now (retired together in a later commit, once
+    # SendMessage exists to replace both): FollowUp routes to whoever
+    # delegated to THIS node (or a human, for the entry node) regardless of
+    # this node's own outgoing edges, and Reply answers a FollowUp this
+    # node received as a delegator.
     closures: dict = {
         "Reply": _dele["Reply"],
         "FollowUp": _dele["FollowUp"],
     }
-    _has_incoming = node._spec is not None and any(
-        e.target == node._name for e in getattr(node._spec, "edges", ()))
     if node._outgoing:
         closures["Delegate"] = _dele["Delegate"]
-    if node._outgoing or _has_incoming:
         closures["Wait"] = _dele["Wait"]
 
     if node._delegation_log is not None:
