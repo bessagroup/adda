@@ -24,6 +24,7 @@ import re
 import threading
 import time
 import traceback
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -102,6 +103,35 @@ def resolve_target(
         if _norm_target(roles.get(t, "")) == rn:
             return t
     return None
+
+
+def _resolve_send_target(
+    node: Any, to: str
+) -> tuple[str, dict] | str:
+    """Resolve a delegator's SendMessage ``to`` to (delegation_id, entry).
+
+    Unlike Confer's ``target`` (delegation.py:279-296, which broadcasts to
+    every LIVE delegation matching a bare role name), SendMessage requires
+    an UNAMBIGUOUS single addressee (spec 12, design item 3's addressing
+    rule) — a role name that currently matches more than one live
+    delegation is an ERROR naming the candidates, never a guess.
+    """
+    with node._registry_lock:
+        if to in node._registry:
+            return to, node._registry[to]
+        candidates = sorted(
+            did for did, e in node._registry.items()
+            if e.get("target") == to and e.get("status") in ("Working", "FollowUp")
+        )
+        if len(candidates) == 1:
+            return candidates[0], node._registry[candidates[0]]
+        if len(candidates) > 1:
+            return (
+                f"ERROR: {to!r} matches {len(candidates)} live delegations "
+                f"({', '.join(candidates)}) — address one by its delegation "
+                "id, not the role name."
+            )
+    return f"ERROR: no live delegation found for {to!r}."
 
 
 def build_sandboxed_write(
@@ -1552,7 +1582,17 @@ class DelegationTools:
         started_at: str,
     ) -> None:
         """Open this delegation's registry entry."""
+        from ....backends.base import get_delegation_id
         node = self.node
+        # This delegation's DELEGATOR identity, resolved from the CALLING
+        # thread's own thread-local delegation_id (SendMessage, spec 12) --
+        # "entry" if the call came from the orchestrating node's own turn,
+        # else the delegation_id of whichever worker thread is itself
+        # delegating further (e.g. implementer/D001 dispatching math_expert
+        # gives the new entry parent="D001", not just "implementer" --
+        # D001 and a concurrent D002 of the same role share this Node
+        # object but must never see each other's children's messages).
+        parent = get_delegation_id() or "entry"
         with node._registry_lock:
             node._registry[delegation_id] = {
                 "status": "Working",
@@ -1575,6 +1615,18 @@ class DelegationTools:
                 # (fire-once anti-nag). The Done()-gate dangling check is
                 # content-based and independent of this flag.
                 "reconciled": False,
+                # SendMessage (spec 12): this delegation's own delegator
+                # identity (see the comment above), a FIFO queue of
+                # messages FROM the delegator TO this worker and one the
+                # other way, and a Condition the WORKER itself waits on for
+                # its own inbound queue (the delegator side waits on the
+                # AGGREGATE per-parent Condition instead --
+                # node._get_delegator_cond(parent) -- since a delegator may
+                # be collecting from several children at once).
+                "parent": parent,
+                "to_worker": deque(),
+                "to_delegator": deque(),
+                "worker_cond": threading.Condition(),
             }
 
     def _compose_task_message(
@@ -2027,13 +2079,25 @@ class DelegationTools:
         return self._wait_for_one(delegation_id, prefix)
 
     def _wait_for_any(self, prefix: str) -> str:
-        """Wait for whichever delegation finishes first.
+        """Wait for whichever delegation finishes first -- OR (spec 12,
+        peer_interaction) a SendMessage question from any of THIS caller's
+        own children, whichever arrives first.
 
-        There is no join() across threads, so poll the registry: a short tick
-        for responsiveness, draining notifications and monitor drift on the
-        same ~10s cadence :meth:`_wait_for_one` uses.
+        There is no join() across threads, so poll the registry: a short
+        tick for responsiveness, draining notifications and monitor drift
+        on the same ~10s cadence :meth:`_wait_for_one` uses. The tick is a
+        Condition wait, not a bare sleep, so a SendMessage to one of this
+        delegator's children wakes this loop immediately rather than
+        waiting out the tick -- but nothing can ever notify that Condition
+        unless SendMessage is actually called (the peer_interaction
+        feature's own tool), so this is a no-op change in duration when
+        that feature is off: identical to a bare sleep(_tick) with nothing
+        to wake early.
         """
+        from ....backends.base import get_delegation_id
         node = self.node
+        my_identity = get_delegation_id() or "entry"
+        cond = node._get_delegator_cond(my_identity)
         _tick, _n = 1.0, 0
         while True:
             with node._registry_lock:
@@ -2051,6 +2115,15 @@ class DelegationTools:
                     body = (f"[{did}] {entry['status']}\n\n"
                             f"{entry.get('result', '')}")
                     return prefix + body + (("\n\n" + cp) if cp else "")
+                messaged = [
+                    (i, e) for i, e in node._registry.items()
+                    if e.get("parent") == my_identity and e.get("to_delegator")
+                ]
+                if messaged:
+                    did, entry = messaged[0]
+                    sender_label, msg = entry["to_delegator"].popleft()
+                    return prefix + (
+                        f"[{did}] message from {sender_label}: {msg}")
                 open_ids = sorted(
                     i for i, e in node._registry.items()
                     if e.get("status") in ("Working", "FollowUp")
@@ -2098,7 +2171,8 @@ class DelegationTools:
                     "ERROR: waiting cannot make progress; every in-flight "
                     "delegation is " + "; and ".join(bits) + "."
                 )
-            time.sleep(_tick)
+            with cond:
+                cond.wait(timeout=_tick)
             _n += 1
             if _n % 10 == 0:
                 prefix += self._drain_while_waiting()
@@ -2184,6 +2258,129 @@ class DelegationTools:
             evt = entry["followup_event"]
         evt.set()
         return f"Reply sent to {delegation_id}. Worker resuming."
+
+    # ── SendMessage: spec 12, peer_interaction feature (default OFF) ─────────
+    # ONE shared, node-level closure -- exactly like Delegate/Wait -- used by
+    # EVERY thread regardless of role: the entry node's own turn, a pure
+    # worker (only incoming edges) messaging its delegator, and a node that
+    # is BOTH a worker AND a delegator (e.g. implementer, which itself
+    # delegates to math_expert) messaging in EITHER direction from the same
+    # tool call. "My own identity" is resolved per CALL from the calling
+    # thread's own thread-local delegation_id (never fixed at construction,
+    # since one Node object is shared across concurrent same-role
+    # delegations that are each their own separate identity -- D001 and a
+    # concurrent D002 must never see each other's traffic).
+
+    def _my_identity(self) -> str:
+        from ....backends.base import get_delegation_id
+        return get_delegation_id() or "entry"
+
+    def _sender_label(self) -> str:
+        my_id = self._my_identity()
+        return (self.node._name if my_id == "entry"
+                else f"{self.node._name} ({my_id})")
+
+    @tool_examples(
+        "SendMessage('D004', 'Which surrogate is that R2=0.91 from?')",
+        "SendMessage('D004', 'Approved.', approve=True)",
+        "SendMessage('strategizer', 'Stopping at 40 evals.', "
+        "wait_for_reply=True)",
+    )
+    def SendMessage(self, to: str, message: str,
+                     wait_for_reply: bool = False,
+                     approve: bool = False) -> str:
+        """Ask, answer, or approve — the one tool for peer and human
+        messaging (spec 12). ``message`` is REQUIRED; empty is an error,
+        never a silent no-op. ``to`` is a delegation id (unambiguous), your
+        OWN delegator's name (if you are a worker — resolved to whoever
+        actually delegated to you, not looked up), or another role name —
+        but a role name matching more than one currently-running
+        delegation of that role is an ERROR naming the candidates, never a
+        guess: address the specific id instead. ``wait_for_reply=True``
+        blocks and returns the reply IN THIS SAME CALL — it wakes on ANY
+        message from that peer, whichever arrives (their reply, or a fresh
+        question of their own), so two peers SendMessage-ing each other at
+        once never both hang. ``to="human"`` is offered only to the entry
+        node — every other node has no direct path to a person and should
+        route a human-worthy question through its own delegator instead.
+        """
+        msg = (message or "").strip()
+        if not msg:
+            return "ERROR: message is required and cannot be empty."
+        node = self.node
+        my_id = self._my_identity()
+
+        if to == "human":
+            if my_id != "entry" or getattr(
+                    node._spec, "entry", None) != node._name:
+                return (
+                    "ERROR: only the entry node may SendMessage a human "
+                    "directly — route this through your own delegator "
+                    "instead.")
+            return self.FollowUp(msg)
+
+        # Downward: `to` names one of MY OWN children (I am delegating to
+        # it, regardless of whether I am also myself a worker elsewhere).
+        resolved = _resolve_send_target(node, to)
+        if not isinstance(resolved, str):
+            delegation_id, entry = resolved
+            if entry.get("parent") == my_id:
+                return self._send_downward(
+                    node, my_id, delegation_id, entry, msg, wait_for_reply)
+
+        # Upward: I am a worker (my_id != "entry") with no matching CHILD
+        # for `to`, so this must be addressed to my own delegator instead
+        # -- resolved via my own entry's recorded parent, not by looking
+        # `to` up a second time (a worker's delegator is never ambiguous).
+        if my_id != "entry":
+            with node._registry_lock:
+                my_entry = node._registry.get(my_id)
+            if my_entry is not None:
+                return self._send_upward(
+                    node, my_id, my_entry, msg, wait_for_reply)
+
+        # Neither: `to` did not resolve to a child of mine, and I have no
+        # delegator of my own to fall back to (I am the entry node).
+        if isinstance(resolved, str):
+            return resolved
+        return f"ERROR: {to!r} is not one of your delegations."
+
+    def _send_downward(self, node, my_id, delegation_id, entry, msg,
+                        wait_for_reply) -> str:
+        sender_label = self._sender_label()
+        with entry["worker_cond"]:
+            entry["to_worker"].append((sender_label, msg))
+            entry["worker_cond"].notify_all()
+        if not wait_for_reply:
+            return f"Delivered to {delegation_id}."
+        cond = node._get_delegator_cond(my_id)
+        with cond:
+            woke = cond.wait_for(
+                lambda: bool(entry.get("to_delegator")), timeout=300)
+        if not woke:
+            return (f"No reply from {delegation_id} within 300s. Proceed "
+                     "with best judgment.")
+        reply_sender, reply_msg = entry["to_delegator"].popleft()
+        return f"[{delegation_id}] {reply_sender}: {reply_msg}"
+
+    def _send_upward(self, node, my_id, my_entry, msg,
+                      wait_for_reply) -> str:
+        parent = my_entry.get("parent", "entry")
+        sender_label = self._sender_label()
+        cond = node._get_delegator_cond(parent)
+        with cond:
+            my_entry["to_delegator"].append((sender_label, msg))
+            cond.notify_all()
+        if not wait_for_reply:
+            return "Delivered to your delegator."
+        with my_entry["worker_cond"]:
+            woke = my_entry["worker_cond"].wait_for(
+                lambda: bool(my_entry["to_worker"]), timeout=300)
+        if not woke:
+            return ("No reply from your delegator within 300s. Proceed "
+                     "with best judgment.")
+        reply_sender, reply_msg = my_entry["to_worker"].popleft()
+        return f"{reply_sender}: {reply_msg}"
 
     # ── Asking the human ─────────────────────────────────────────────────────
 
@@ -2442,6 +2639,7 @@ def build_delegation_closures(node) -> dict:
         "Wait": t.Wait,
         "Reply": t.Reply,
         "FollowUp": t.FollowUp,
+        "SendMessage": t.SendMessage,
         "RecallHistory": t.RecallHistory,
         "CancelDelegation": t.CancelDelegation,
         # One Confer for every node: the orchestrator's used to be a wrapper

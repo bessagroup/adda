@@ -72,6 +72,18 @@ class OrchestrationMixin:
         self._registry: dict[str, dict] = {}
         self._registry_lock = threading.Lock()
         self._threads: dict[str, threading.Thread] = {}
+        # SendMessage (spec 12, peer_interaction feature, not yet default-on):
+        # one threading.Condition PER DELEGATOR IDENTITY -- keyed by that
+        # delegator's OWN delegation_id, or "entry" for the orchestrating
+        # node itself -- not per Node. Two concurrent delegations of the
+        # SAME role sharing this Node object (e.g. two "implementer"
+        # delegations D001/D002, each possibly delegating further) are
+        # DIFFERENT delegator identities and must never wake each other's
+        # waits or see each other's children's messages. Lazily created
+        # (one dict entry per identity that ever waits), guarded by its own
+        # lock since Condition creation itself must be race-free.
+        self._delegator_conds: dict[str, threading.Condition] = {}
+        self._delegator_conds_lock = threading.Lock()
         # Push notifications: background threads append here; tool calls drain it.
         self._notifications: list[str] = []
         self._notifications_lock = threading.Lock()
@@ -461,6 +473,18 @@ class OrchestrationMixin:
         with self._confer_inbox_lock:
             self._confer_seq += 1
             return self._confer_seq
+
+    def _get_delegator_cond(self, identity: str) -> threading.Condition:
+        """The one Condition a given delegator identity waits on and is
+        woken through (SendMessage, spec 12). ``identity`` is a
+        delegation_id or ``"entry"`` — see ``__init__``'s comment on
+        ``_delegator_conds``. Lazily created, race-free."""
+        with self._delegator_conds_lock:
+            cond = self._delegator_conds.get(identity)
+            if cond is None:
+                cond = threading.Condition()
+                self._delegator_conds[identity] = cond
+            return cond
 
     def _build_routing_closures(self) -> dict:
         from .tools.routing import build_routing_tools

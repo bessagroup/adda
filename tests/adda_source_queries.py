@@ -169,6 +169,9 @@ KNOB = [
      [S + "agents/implementer.py"]),
     ("k12", "how do I stop it requiring the notebook to reproduce",
      [S + "runtime/features.py", S + "nodes/reproduction_gate.py"]),
+    ("k13", "how do I turn on the new peer-messaging tool",
+     [S + "runtime/features.py",
+      S + "nodes/tools/routing/delegation.py"]),
 ]
 
 #: Which query is the way to ASK FOR each declared feature knob.
@@ -188,6 +191,7 @@ KNOB_COVERAGE = {
     "verdict_validator": "k08",
     "pipeline_deliverable": "k10",
     "reproduction_gate": "k12",
+    "peer_interaction": "k13",
 }
 
 TIERS = {"name": NAME, "concept": CONCEPT, "error": ERROR,

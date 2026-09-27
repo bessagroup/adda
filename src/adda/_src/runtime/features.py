@@ -186,6 +186,25 @@ FEATURES: tuple[Feature, ...] = (
         # authored notebook must additionally prove it reproduces.
         behaviours=("reproduction_gate_check",),
     ),
+    Feature(
+        key="peer_interaction",
+        # DEFAULT FALSE — an intentional, TEMPORARY exception to every other
+        # feature's default-True/"off makes a normal run worse" posture.
+        # This one is being built INCREMENTALLY across several commits
+        # (internal/specs/12-peer-interaction.md), each required to leave
+        # main self-consistent: while it is off, a run sees exactly today's
+        # Confer/FollowUp/Reply surface (unaffected by anything landing
+        # under this flag); flipping it on exposes the new SendMessage tool
+        # and prompt sections instead, for testing the new contract in
+        # isolation before it becomes the only surface. The final commit of
+        # the series flips this default to True and performs the migration
+        # sweep (retiring Confer/FollowUp/Reply/ReportProgress) in one step
+        # — at which point this becomes an ordinary ablation arm like every
+        # other Feature here, and this comment should be trimmed down to
+        # match their style.
+        default=False,
+        tools=frozenset({"SendMessage"}),
+    ),
 )
 
 FEATURE_KEYS: frozenset[str] = frozenset(f.key for f in FEATURES)

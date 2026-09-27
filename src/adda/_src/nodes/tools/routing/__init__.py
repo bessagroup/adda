@@ -85,6 +85,18 @@ def build_routing_tools(node) -> dict:
         closures["Delegate"] = _dele["Delegate"]
         closures["Wait"] = _dele["Wait"]
 
+    # SendMessage (spec 12): behind its own feature, default OFF until the
+    # migration-sweep commit that retires Reply/FollowUp/Confer in favour
+    # of it -- see runtime/features.py's own comment on why this one
+    # Feature is a temporary exception to "every feature defaults True".
+    # Granted unconditionally otherwise (like Reply/FollowUp above): a node
+    # with no edges at all is never dispatched, so the tool being present
+    # but practically unreachable there is harmless, matching Reply/
+    # FollowUp's own existing posture.
+    from ....runtime import features as _features
+    if _features.enabled("peer_interaction"):
+        closures["SendMessage"] = _dele["SendMessage"]
+
     if node._delegation_log is not None:
         closures["RecallHistory"] = _dele["RecallHistory"]
 

@@ -95,8 +95,18 @@ def test_done_is_never_owned_by_a_feature():
 # --- behaviour: off means gone ---------------------------------------------
 
 def test_all_defaults_withhold_nothing():
-    """A run with no ablate config must be byte-identical to today."""
-    assert features.disabled_tool_names() == frozenset()
+    """A run with no ablate config must be byte-identical to today.
+
+    ``peer_interaction`` is the one deliberate, TEMPORARY exception
+    (spec 12, internal/specs/12-peer-interaction.md): its default is False
+    while it is being built across several commits, precisely so a run
+    with no ablate config stays byte-identical to today WHILE it lands --
+    "today" just doesn't have SendMessage yet either. The migration-sweep
+    commit that flips this default to True is also the one that makes
+    "byte-identical to today" mean something new; this assertion updates
+    then, not before.
+    """
+    assert features.disabled_tool_names() == frozenset({"SendMessage"})
     prompt = _prompt_for(None)
     assert features.strip_disabled_sections(prompt) == prompt
 

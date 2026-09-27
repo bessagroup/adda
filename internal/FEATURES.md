@@ -199,6 +199,49 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   (`seed_defaults(include_reproduction_gate=...)`, `ORACLE_GOLD_STATE`).
   **Status:** core — ablation only; does not change WHAT the gate checks.
 
+### `SendMessage` — the peer/human messaging tool (spec 12, in progress)
+- **What:** one tool for all peer and human messaging —
+  `SendMessage(to, message, wait_for_reply=False, approve=False)` —
+  eventually replacing `Confer`/`FollowUp`/`Reply` (`internal/specs/
+  12-peer-interaction.md`, not yet built in full). This first commit adds
+  the tool itself: a shared, node-level closure (used by every thread
+  regardless of role, exactly like `Delegate`/`Wait` — the calling
+  thread's own thread-local delegation id resolves "who am I" per call,
+  since one Node object is shared across concurrent same-role
+  delegations that are each their own separate delegator identity) that
+  can message either a node's own children (downward) or its own
+  delegator (upward) from the SAME call, disambiguated by whether `to`
+  resolves to one of the caller's own children. `wait_for_reply=True`
+  blocks and returns the reply in the same call, with a DEADLOCK GUARD:
+  it wakes on ANY message from that peer (their reply, or a fresh
+  question of theirs), so two peers `SendMessage`-ing each other at once
+  never both hang — verified with real `threading.Thread`s, not mocked
+  waits (`tests/test_send_message.py`): a two-worker fan-out where both
+  ask at once (each answer reaches only its own asker), the two-sided
+  deadlock case, a delegator blocked in `Wait()` waking on a worker's
+  question mid-fan-out, and a nested worker-delegator only ever seeing
+  its OWN children's messages, never a sibling delegation's.
+- **Ablation, temporarily inverted:** gated behind `peer_interaction`
+  (`runtime/features.py`), the one Feature in this codebase that
+  currently defaults **False** rather than True — a deliberate, TEMPORARY
+  exception while spec 12 is built across several commits without
+  disturbing `Confer`/`FollowUp`/`Reply`, which stay the live surface
+  until the final migration-sweep commit flips this default and retires
+  them. `Wait` was also re-tightened to outgoing-edges-only in this same
+  series (a separate commit, `1d7e14c`) — see BACKLOG's spec 12 entry.
+- **Where:** `nodes/tools/routing/delegation.py` (`DelegationTools.
+  SendMessage`, `_resolve_send_target`, the `parent`/`to_worker`/
+  `to_delegator`/`worker_cond` fields `_register_dispatch` now stamps on
+  every registry entry), `nodes/orchestration.py`
+  (`_get_delegator_cond`, the per-delegator-identity `Condition` registry
+  this all synchronizes through), `nodes/tools/routing/__init__.py`
+  (`build_routing_tools`'s feature gate), `runtime/features.py`
+  (`peer_interaction`). **Status:** in progress — see `internal/specs/
+  12-peer-interaction.md` for what remains (session-resumption report
+  review, the pending-for-you notice mechanism, `to="human"`'s
+  entry-node-only gating already lands here but the migration sweep that
+  retires the old tools does not).
+
 ### Per-cell notebook debugger (#13)
 - **What:** run pipeline.ipynb against a *copy* of the ledger and get a per-cell
   pass/error trace, so a failing cell can be pinpointed instead of guessing.
