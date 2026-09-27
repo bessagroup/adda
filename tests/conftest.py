@@ -1,10 +1,37 @@
 # Source for the markers:
 # https://doc.pytest.org/en/latest/example/markers.html#custom-marker-and-command-line-option-to-control-test-runs
 
+# Thread-pool caps, set BEFORE numpy/torch/BLAS get a chance to read them at
+# import time (this module is pytest's own conftest -- always imported first,
+# in every xdist worker process too, before any test module's own imports
+# run). `-n auto` starts one worker PER CORE; without this, each worker's own
+# torch/OpenMP/BLAS then ALSO spawns a per-core thread pool -- N workers x N
+# threads on a small CI runner, oversubscribing every physical core and
+# slowing every numeric test, not just the docling ones that happened to trip
+# a timeout over it (CI run 36347982615/f6760e9, adda-boss-whopper's
+# diagnosis). The workflow's own step env sets these too (belt-and-suspenders
+# for the CI case, where env-before-process-start is the more reliable of the
+# two); this covers local `-n auto` runs the workflow env doesn't reach.
+import os as _os
+
+for _v in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+           "TORCH_NUM_THREADS"):
+    _os.environ.setdefault(_v, "1")
+
 import logging
 import re
 
 import pytest
+
+# Redundant safety net for a process where torch was already imported (by an
+# earlier plugin/fixture) before this file's env-vars above could take
+# effect -- torch reads OMP_NUM_THREADS at its OWN init time, not lazily, so
+# the env var alone can lose this race depending on import order.
+try:
+    import torch as _torch
+    _torch.set_num_threads(1)
+except ImportError:
+    pass
 
 
 def pytest_addoption(parser):

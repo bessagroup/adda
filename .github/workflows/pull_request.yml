@@ -89,6 +89,18 @@ jobs:
       # each worker's coverage automatically, so --cov-fail-under still gates
       # the same `adda` package, just measured across parallel workers.
       - name: Test with pytest
+        env:
+          # -n auto starts one worker per core; without this, each worker's
+          # OWN torch/OpenMP/BLAS then ALSO spawns a per-core thread pool --
+          # N workers x N threads oversubscribing every physical core on a
+          # small CI runner. tests/conftest.py sets these too (belt-and-
+          # suspenders for local -n auto runs); setting them here is the
+          # more reliable of the two for CI, since it's in place before the
+          # pytest process (and anything it imports) even starts.
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          OPENBLAS_NUM_THREADS: "1"
+          TORCH_NUM_THREADS: "1"
         run: |
           pytest -n auto -m "not integration and not ollama and not corpus and not promptmap"
   build-docs:
