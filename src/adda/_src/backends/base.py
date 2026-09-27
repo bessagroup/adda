@@ -11,6 +11,7 @@ import random
 import re
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
@@ -77,6 +78,34 @@ def set_run_config_path(path: str | None) -> None:
 
 def get_run_config_path() -> str | None:
     return getattr(_transcript_tls, "run_config_path", None)
+
+
+@contextmanager
+def bind_run_context(delegation_id: str | None, run_config_path: str | None):
+    """Bind this thread's delegation id + run_config path for one call,
+    restoring whatever was bound before on exit.
+
+    ``WorkerSession._bind_backend_context`` (delegation.py) is the only place
+    that bound these before this helper existed — so every ``ClaudeAdapter``
+    invocation OUTSIDE a worker delegation (the entry node's own turns, the
+    critic gate, the verdict validator, the pre-run problem-statement review)
+    ran with neither set, and a backend-level diagnostic keyed on them
+    (``_record_stream_diagnostic``'s ``CONTEXT_COMPACTED`` /
+    ``STREAM_ENDED_WITHOUT_RESULT``) silently found nowhere to write — on
+    exactly the sessions most likely to run long enough to hit a forced
+    compaction (the entry node's own turn is the longest-lived session in a
+    run). Use around any such call so the diagnostic reaches
+    ``debug/diagnostics.jsonl`` regardless of which node's thread made it.
+    """
+    _prev_did = get_delegation_id()
+    _prev_rc = get_run_config_path()
+    set_delegation_id(delegation_id)
+    set_run_config_path(run_config_path)
+    try:
+        yield
+    finally:
+        set_delegation_id(_prev_did)
+        set_run_config_path(_prev_rc)
 
 
 def set_namespace(namespace: str | None) -> None:

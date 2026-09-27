@@ -878,6 +878,9 @@ class OrchestrationMixin:
         # DEBUG: stream this turn's full reasoning + tool-calls to
         # debug/transcripts/strategizer/turn_NNN.jsonl.
         from ..backends.base import (
+            bind_run_context as _bind_rc,
+        )
+        from ..backends.base import (
             debug_enabled as _dbg,
         )
         from ..backends.base import (
@@ -888,7 +891,12 @@ class OrchestrationMixin:
             _set_sink(str(
                 self._current_notes_dir.parent / "transcripts"
                 / "strategizer" / f"turn_{self._turn_count:03d}.jsonl"))
-        text = self.adapter.invoke(messages)
+        _notes = self._current_notes_dir
+        _rc_path = (
+            str(_notes.parent / "run_config.json") if _notes is not None else None
+        )
+        with _bind_rc(f"{self._name}-turn-{self._turn_count:03d}", _rc_path):
+            text = self.adapter.invoke(messages)
         # Accumulate this node's own token usage.
         self._record_usage(
             getattr(self.adapter, "last_usage", {}) or {},

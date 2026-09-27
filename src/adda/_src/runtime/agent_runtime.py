@@ -1256,6 +1256,7 @@ class AgenticRun:
         (possibly augmented) problem text.  NEVER blocks an autonomous run: any
         reviewer failure falls back to the original statement unchanged.
         """
+        from ..backends.base import bind_run_context as _bind_rc
         from ..epistemics.reviewer import (
             ProblemStatementReviewerAgent,
             format_review_markdown,
@@ -1269,7 +1270,9 @@ class AgenticRun:
                     "problem_statement_reviewer",
                     ProblemStatementReviewerAgent(),
                 )
-            raw = adapter.invoke([{"role": "user", "content": problem}])
+            _rc_path = str(debug_dir / "run_config.json")
+            with _bind_rc("problem_statement_reviewer", _rc_path):
+                raw = adapter.invoke([{"role": "user", "content": problem}])
             review = parse_review(raw)
         except Exception:  # noqa: BLE001 — advisory, never blocks
             return problem

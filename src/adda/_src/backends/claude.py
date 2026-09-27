@@ -236,9 +236,12 @@ def _record_stream_diagnostic(event_type: str, message: str, **extra: Any) -> No
     append in the identical shape those methods use — one diagnostics.jsonl,
     written from wherever the fact is first known.
 
-    No-op, never raises, if the path isn't bound on this thread (e.g. an
-    entry node's own turn, which has no delegation_id/run_config of its own)
-    — silence here is a missed diagnostic, never a broken turn.
+    No-op, never raises, if the path isn't bound on this thread — every
+    ``ClaudeAdapter`` call site binds it (worker delegations directly in
+    ``delegation.py``; the entry node's own turns, the critic gate, the
+    verdict validator, and the pre-run problem-statement review via
+    ``backends.base.bind_run_context``) — so this is a genuine "no run
+    context available" case (e.g. a bare unit test), not a routine gap.
     """
     try:
         from .base import get_delegation_id, get_run_config_path

@@ -418,6 +418,37 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   needed no viewer change — only a regression test confirming it. **Status:**
   core — observability only.
 
+### CONTEXT_COMPACTED/STREAM_ENDED_WITHOUT_RESULT now fire on every node, not just worker delegations
+- **What:** `_record_stream_diagnostic` (above) finds `debug/` through the
+  thread-local `run_config_path`, and `WorkerSession._bind_backend_context`
+  (`nodes/tools/routing/delegation.py`) was the ONLY place that ever bound
+  it — so any `ClaudeAdapter.invoke()` call OUTSIDE a worker delegation ran
+  with neither `run_config_path` nor `delegation_id` set, and the diagnostic
+  silently found nowhere to write. That reached the entry node's OWN turns
+  (`orchestration.py::_invoke_turn`) — the longest-lived sessions in a run
+  (one Oscar strategizer session measured 542k tokens) and thus the most
+  likely to hit a forced compaction — plus the critic gate's two call sites
+  (`critic_gate.py::_invoke_critic`, `_invoke_verdict_validator` — the
+  latter a per-strategizer-tool-round nested side-query) and the one-shot
+  pre-run problem-statement review (`runtime/agent_runtime.py`,
+  `_review_problem_statement`). A new context manager,
+  `backends/base.py::bind_run_context`, binds both thread-locals for the
+  duration of a call and restores whatever was bound before on exit; all
+  four call sites now wrap their `adapter.invoke()`/`worker.invoke()` with
+  it, each keyed to a stand-in id (`"{node}-turn-{NNN}"`, `"critic-{n}"`,
+  `"verdict-validator"`, `"problem_statement_reviewer"`) since none of these
+  calls has a real delegation id. One writer (`_record_stream_diagnostic`),
+  no new global state — only the binding reaches more call sites.
+  Separately checked: the SDK's `init` SystemMessage's `data` (now recorded
+  verbatim per the entry above) was confirmed via a live probe to carry no
+  token/credential value — `cwd`, `session_id` (a UUID), `model`, tool/skill/
+  agent lists, capability flags, and a `memory_paths` directory path, nothing
+  secret.
+- **Where:** `backends/base.py` (`bind_run_context`); `nodes/orchestration.py`
+  (`_invoke_turn`); `nodes/critic_gate.py` (`_invoke_critic`,
+  `_invoke_verdict_validator`); `runtime/agent_runtime.py`
+  (`_review_problem_statement`). **Status:** core — observability only.
+
 ### Delegation-bounded version control of the run workspace
 - **What:** one git repository per run, rooted at the run's own
   `debug/delegations/` workspace, with one commit per delegation (DONE and

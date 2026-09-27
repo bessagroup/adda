@@ -4041,3 +4041,102 @@ def test_report_retry_is_recorded_as_a_diagnostic(tmp_path):
     assert len(report_retries) == 1
     assert report_retries[0]["fault"] == "nudge"
     assert "malformed" in report_retries[0]["message"].lower()
+
+
+class _FakeSdkMcpTool:
+    """Node always populates real routing closures onto the adapter, so
+    building it always reaches the SdkMcpTool(...) construction path — the
+    fake SDK's bare ``object`` stand-in (test_claude_adapter.py) rejects
+    kwargs there. A minimal stand-in that just stores what it's given."""
+
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+def _make_claude_adapter_node(tmp_path, *, query_gen, **install_extra):
+    """Build a real Node whose adapter is a real ClaudeAdapter (fake SDK
+    stream underneath), with notes_dir set so the entry node's OWN turn
+    resolves a run_config path — exactly the binding
+    ``bind_run_context`` (backends/base.py) now supplies in
+    ``orchestration.py::_invoke_turn``."""
+    from tests.test_claude_adapter import _get_adapter, _install_fake_sdk
+
+    _install_fake_sdk(
+        query=query_gen, SdkMcpTool=_FakeSdkMcpTool, **install_extra)
+    ClaudeAdapter = _get_adapter()
+    adapter = ClaudeAdapter("claude-3", "sys", None, [])
+
+    from adda._src.nodes import Node
+    notes = tmp_path / "debug" / "strategizer_notes"
+    notes.mkdir(parents=True)
+    spec = _minimal_spec()
+    node = Node(
+        adapter, name="strategizer", outgoing=["implementer"], spec=spec,
+        notes_dir=notes, study_dir=_default_study_dir(),
+    )
+    return node
+
+
+def test_entry_node_turn_records_compact_boundary_diagnostic(tmp_path):
+    """adda-boss-whopper review of a3041f5/c2fb1cb: _record_stream_diagnostic
+    only finds debug/ via the thread-local run_config_path, and only
+    WorkerSession._bind_backend_context (delegation.py) ever bound it — so
+    the entry node's OWN turns (the strategizer's, the longest-lived
+    sessions in a run and thus the most likely to hit a forced compaction)
+    left CONTEXT_COMPACTED with nowhere to write. _invoke_turn now binds the
+    same run context via backends.base.bind_run_context."""
+    import json as _json
+
+    from tests.test_claude_adapter import (
+        _AssistantMessage,
+        _ResultMessage,
+        _SystemMessage,
+        _TextBlock,
+    )
+
+    async def _gen_compacts_mid_turn(prompt, options):
+        yield _SystemMessage(
+            subtype="compact_boundary",
+            data={"trigger": "auto", "preTokens": 500000},
+        )
+        yield _AssistantMessage([_TextBlock("still here")])
+        yield _ResultMessage()
+
+    node = _make_claude_adapter_node(tmp_path, query_gen=_gen_compacts_mid_turn)
+    node(make_state(study_dir=str(_default_study_dir())))
+
+    diag_path = tmp_path / "debug" / "diagnostics.jsonl"
+    assert diag_path.exists()
+    records = [_json.loads(ln) for ln in diag_path.read_text().splitlines() if ln]
+    hits = [r for r in records if r.get("error_type") == "CONTEXT_COMPACTED"]
+    assert len(hits) == 1
+    assert hits[0]["compaction_data"] == {"trigger": "auto", "preTokens": 500000}
+    assert hits[0]["node"] == "strategizer-turn-001"
+
+
+def test_entry_node_turn_records_stream_ended_without_result_diagnostic(tmp_path):
+    """Same gap, the other diagnostic: a stream that dies mid-tool with no
+    ResultMessage on the entry node's OWN turn must also reach
+    diagnostics.jsonl now, not just on a worker delegation's thread."""
+    import json as _json
+
+    from tests.test_claude_adapter import (
+        _AssistantMessage,
+        _ToolUseBlockWithName,
+    )
+
+    async def _gen_dies_mid_tool(prompt, options):
+        yield _AssistantMessage([_ToolUseBlockWithName("Bash", {"command": "sleep 20"})])
+        return
+
+    node = _make_claude_adapter_node(
+        tmp_path, query_gen=_gen_dies_mid_tool, ToolUseBlock=_ToolUseBlockWithName)
+    node(make_state(study_dir=str(_default_study_dir())))
+
+    diag_path = tmp_path / "debug" / "diagnostics.jsonl"
+    assert diag_path.exists()
+    records = [_json.loads(ln) for ln in diag_path.read_text().splitlines() if ln]
+    hits = [r for r in records if r.get("error_type") == "STREAM_ENDED_WITHOUT_RESULT"]
+    assert len(hits) == 1
+    assert hits[0]["last_tool_in_flight"] == "Bash"
+    assert hits[0]["node"] == "strategizer-turn-001"

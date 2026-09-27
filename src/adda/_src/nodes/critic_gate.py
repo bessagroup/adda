@@ -209,6 +209,9 @@ class CriticGateMixin:
         self._critic_calls = getattr(self, "_critic_calls", 0) + 1
         _n = self._critic_calls
         from ..backends.base import (
+            bind_run_context as _bind_rc,
+        )
+        from ..backends.base import (
             debug_enabled as _dbg,
         )
         from ..backends.base import (
@@ -219,6 +222,9 @@ class CriticGateMixin:
         )
         _notes = self._current_notes_dir
         _prev_sink = _get_sink()
+        _rc_path = (
+            str(_notes.parent / "run_config.json") if _notes is not None else None
+        )
         # Cleared up front so a failed invoke cannot leave the PREVIOUS
         # call's usage to be logged against this delegation.
         self._last_critic_usage = {}
@@ -228,9 +234,10 @@ class CriticGateMixin:
                 _notes.parent / "transcripts" / "critic"
                 / f"call_{_n:03d}.jsonl"))
         try:
-            critique = worker.invoke(
-                [{"role": "user", "content": task_msg}]
-            )
+            with _bind_rc(f"critic-{_n}", _rc_path):
+                critique = worker.invoke(
+                    [{"role": "user", "content": task_msg}]
+                )
             _ok = True
         except Exception as _exc:  # noqa: BLE001
             # An infrastructure failure invoking the critic — NOT a problem with
@@ -290,19 +297,28 @@ class CriticGateMixin:
             return ""
         adapter = self._worker_adapters[critic_name]
         worker = adapter.copy() if hasattr(adapter, "copy") else adapter
+        from ..backends.base import (
+            bind_run_context as _bind_rc,
+        )
+        _notes = self._current_notes_dir
+        _rc_path = (
+            str(_notes.parent / "run_config.json") if _notes is not None else None
+        )
         # Tight budget: this advisory judge must NOT inherit a real agent turn's
         # 5×600s stream/retry budget. A hung CLI stream once froze a whole run
         # for ~89 min here (run 20260627T211310). idle=120 + retry_max=1 abort
         # ~2 min after the stream goes silent; the call is advisory, so on any
         # failure the verdict stands (see _run_verdict_validator).
         try:
-            reply = worker.invoke(
-                [{"role": "user", "content": prompt}],
-                idle_timeout=120.0, retry_max=1,
-            )
-        except TypeError:
-            # A backend/stub without the budget kwargs — fall back gracefully.
-            reply = worker.invoke([{"role": "user", "content": prompt}])
+            with _bind_rc("verdict-validator", _rc_path):
+                try:
+                    reply = worker.invoke(
+                        [{"role": "user", "content": prompt}],
+                        idle_timeout=120.0, retry_max=1,
+                    )
+                except TypeError:
+                    # A backend/stub without the budget kwargs — fall back gracefully.
+                    reply = worker.invoke([{"role": "user", "content": prompt}])
         except Exception:  # noqa: BLE001
             return ""
         self._record_usage(
