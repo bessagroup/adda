@@ -19,7 +19,7 @@ Priority order (highest first) and how they compose:
 | [07](07-duplicate-evaluation-detection.md) | Duplicate/redundant design-point evaluation detection | medium | **DONE (shipped simplified)** |
 | [10](10-math-expert-agent.md) | MathExpert: symbolic-derivation verification node | medium | spec |
 | [11](11-delegation-bounded-version-control.md) | Delegation-bounded version control of the workspace | medium | **DONE** (workspace relocation remains) |
-| [12](12-peer-interaction.md) | Peer-interaction contract: Delegate/SendMessage/Wait | high | spec (open questions for Elvis) |
+| [12](12-peer-interaction.md) | Peer-interaction contract: Delegate/SendMessage/Wait | high | **ratified 2026-09-27, build in progress** |
 
 **Dependency graph (build order matters):**
 - **01 + 02 + 06 are one cluster.** 06 *detects* a stuck/slow delegation; 02

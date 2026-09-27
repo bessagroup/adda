@@ -1,6 +1,6 @@
 # Spec 12 — Peer-interaction contract: Delegate / SendMessage / Wait
 
-**Status:** spec only — not built. **Priority:** high (touches the delegation
+**Status:** ratified 2026-09-27 — build starting. **Priority:** high (touches the delegation
 record format and every worker/delegator tool surface; sequencing with other
 in-flight work matters). **Depends on:** nothing structurally, but see
 Migration — it retires spec 02's design entirely (Confer/FollowUp/Reply are
@@ -158,35 +158,63 @@ through its own delegator via `SendMessage`** — it has no direct path to
 path to escalate a human-worthy question: upward, through the chain of
 delegators, to the entry node, which is the one node that can actually ask.
 
-### 3. Reporting BLOCKS until approval — with NO separate tool
+### 3. The delegation stays open until approval — by SESSION RESUMPTION, not a blocking tool call
 
-A worker's report submission itself is a BLOCKING call: it does not
-return until the delegator approves it, or asks something first. There
-is no separate "wait for review" tool on the worker's side (an earlier
-draft of this spec proposed one; superseded) — the report call already
-holds the turn open, exactly the shape `FollowUp`'s `evt.wait(...)`
-(delegation.py:429-435) uses today, reused rather than reinvented.
+Resolved ambiguity (an earlier draft of this item proposed a blocking
+report call held open via `evt.wait(...)`, mirroring `FollowUp`;
+superseded — Elvis's decision, with the reason below).
 
-Mechanism:
-
-- On report delivery, the report text (as the delegator receives it via
-  `Wait`) carries an `<adda-note>` (the existing wrapping convention,
-  `nodes/notices.py`) reading approximately: *"analyse this thoroughly and
-  ask about anything unclear; take advantage of this moment, because you
-  might not be able to wake this node again."*
-- If the delegator sends a question via `SendMessage` before approving,
-  it arrives as the RETURN VALUE of the worker's still-blocked report
-  call — the worker's thread never left that call. Framed with its own
-  `<adda-note>`: *"you got this message from `<delegator>` — the
-  delegation needs clarification; take your time if needed."*
-- The worker can redo work, steer its own next actions, and submit a
-  REVISED report — which blocks again, exactly like the first one. This
-  repeats until the delegator calls `SendMessage(..., approve=True)`.
-- Because the report call itself is the worker's blocking primitive, a
-  worker needs no `Wait`-like tool of its own for this purpose — answers
-  to ITS OWN questions (asked via `SendMessage(..., wait_for_reply=True)`
-  toward ITS delegator or a peer, e.g. mid-task steering) still go
-  through `SendMessage`'s own blocking mode, not through the report call.
+- **The report itself is unchanged**: the worker's final turn's plain
+  text, validated by `_classify_response` against `report_sections`
+  exactly as today. No new tool, nothing new for the agent to remember to
+  call, no validation change.
+- **On that final text, the runtime does NOT call `_finish_ok`.** The
+  delegation moves to an OPEN-FOR-REVIEW state instead, recording the
+  worker's CLI session id (`AssistantMessage.session_id` — already read
+  in one diagnostic path today, `backends/claude.py:831`'s
+  `cli_session_id=getattr(last_assistant, "session_id", None)`) and, for
+  the `openai_compatible` backends (which have no server-side session to
+  resume), its retained message history instead.
+- **When the delegator `SendMessage`s that delegation** (a question, or
+  `approve=True`), the runtime RESUMES THE SAME WORKER SESSION rather
+  than holding anything open in the meantime: for Claude,
+  `ClaudeAgentOptions(resume=session_id)` (confirmed present in the
+  installed SDK — `resume: str | None`, "Session ID to resume. Loads the
+  conversation history from the specified session"; `fork_session` stays
+  `False` so review resumes the SAME session rather than branching);
+  for `openai_compatible`, append to the retained history and re-invoke.
+  The message arrives as the next user turn in the worker's own
+  context, framed with an `<adda-note>` (the existing wrapping
+  convention, `nodes/notices.py`): *"you got this message from
+  `<delegator>` — the delegation needs clarification; take your time if
+  needed."* The worker can redo work, steer, and its new final text
+  becomes the REVISED report, validated again exactly as the first was.
+  Repeats until `approve=True`; only then does `_finish_ok` run, spec
+  11's workspace commit fires, and the record becomes terminal.
+- **Why resumption instead of a held-open blocking call:** a review can
+  take arbitrarily long — the delegator may be fanning out several other
+  workers first — and holding a live CLI stream open that long is exactly
+  where report 7 and the class of idle-timeout failures it named live
+  (see item 7's note on scope). With resumption, nothing is held open
+  between review turns, so the review cannot be killed by any stream or
+  idle timeout, however long the delegator takes to get to it.
+- **Fallback, never silent.** If session resume is unavailable or fails
+  (the SDK errors, the session expired, ...), fall back to re-invoking
+  with the worker's own recorded history plus the new message — and
+  record that fallback as a diagnostic event (the established
+  `_record_stream_diagnostic` pattern, `backends/claude.py`), never
+  silently. A resumed-vs-reconstructed session is a fact worth knowing
+  when reading a run after the fact, the same reasoning that motivated
+  recording `CONTEXT_COMPACTED`/`STREAM_ENDED_WITHOUT_RESULT` earlier
+  this session.
+- On report delivery (the delegator's side, via `Wait`), the report text
+  still carries an `<adda-note>` reading approximately: *"analyse this
+  thoroughly and ask about anything unclear; take advantage of this
+  moment, because you might not be able to wake this node again"* — now
+  literally true in a stronger sense than the earlier blocking-call draft
+  claimed: the worker's ORIGINAL CLI process really has exited between
+  review turns; "waking it" means resuming its session, not just calling
+  back into an already-suspended one.
 
 ### 4. `Delegate` and `Wait` are for delegators only
 
@@ -236,14 +264,29 @@ run). Acceptance is never hidden or implicit — there is always exactly
 one explicit `SendMessage(..., approve=True)` call that resolves a
 review, findable in the delegation record.
 
-### 7. The idle-timeout carve-out needs only a test, not a change
+### 7. The idle-timeout carve-out: needed for `SendMessage`, NOT for report review
 
-`_stream_with_idle_timeout`'s `classify` callback already suspends the
-idle window uncapped for ANY pending tool call (see Problem section) — a
-worker's now-blocking report call and a delegator's
-`SendMessage(..., wait_for_reply=True)` are both ordinary pending tool
-calls from that mechanism's point of view. Test only (item 6 below,
-report-7 regression coverage), no mechanism change.
+Narrower than an earlier draft of this item claimed, now that item 3 is
+resumption-based rather than a held-open blocking call:
+
+- **Report review no longer needs it at all.** Nothing stays blocked
+  inside a live CLI stream between a report and its review — the worker's
+  session fully exits after each turn, and review resumes it fresh. There
+  is no stream for an idle timeout to misfire against.
+- **`SendMessage(..., wait_for_reply=True)` still needs it, unchanged.**
+  That call IS a genuine blocking wait inside a live, ongoing turn (a
+  worker asking its delegator something mid-task, or a delegator asking a
+  worker something while the delegator's OWN turn is still open) —
+  exactly today's `FollowUp` shape (`evt.wait(...)`, delegation.py:429-435)
+  and exactly what the existing carve-out already covers.
+  `_stream_with_idle_timeout`'s `classify` callback (backends/claude.py:171,
+  `_phase` at :639) already suspends the idle window uncapped for ANY
+  pending tool call generically — confirmed by reading `_phase`'s
+  `ToolUseBlock`-presence classification, not assumed. No mechanism
+  change needed; only a test (item 7's own test in the Tests section)
+  confirming `SendMessage(..., wait_for_reply=True)` specifically doesn't
+  trip a false idle timeout, the same report-7 regression class as
+  `FollowUp`'s existing coverage.
 
 ### 8. Provenance
 
@@ -292,10 +335,12 @@ The concrete form of the design rule ratified above:
     ANY message from that peer (the deadlock guard, item 1), AND its
     return carries a pending-for-you notice if something else arrived in
     the meantime.
-  - A worker blocked in its report-for-approval call (item 3) wakes on
-    the delegator's question OR its approval — already true by
-    construction (those are the only two things that call resolves on),
-    stated here for completeness.
+  - A worker under review (item 3) is not "blocked" in the stream sense
+    at all — its session has exited and is resumed fresh per review
+    turn — so there is nothing to wake early; each resume already IS the
+    delegator's next question or its approval, by construction. Restated
+    here only so a reader of this list does not go looking for a
+    blocking-call analogue that no longer exists for this path.
 
 ### 11. Migration — every Confer/FollowUp/Reply/ReportProgress reference, one sweep
 
@@ -308,6 +353,14 @@ commit(s) that build this:
 - **Tools added:** `SendMessage(to, message, wait_for_reply=False,
   approve=False)`, gated per item 1 (any node with an edge) and item 2
   (`to="human"` restricted to the entry node by topology).
+- **Session resumption plumbing (item 3), new:** capturing and recording
+  the worker's CLI `session_id` at report time (already read once today,
+  `backends/claude.py:831`); a resume path through the same backend
+  (`ClaudeAgentOptions(resume=session_id)` for Claude; retained-history
+  re-invocation for `openai_compatible`); the OPEN-FOR-REVIEW delegation
+  state itself (a new status alongside today's `Working`/`Done`/`Errored`
+  in the delegation registry, `nodes/tools/routing/delegation.py`); and
+  the fallback-with-diagnostic path when resume fails.
 - **`Delegate`/`Wait` gating (`nodes/tools/routing/__init__.py::
   build_routing_tools`):** `Delegate` stays outgoing-edges-only (task B,
   already shipped). `Wait` TIGHTENS from task B's "any edge" back to
@@ -375,14 +428,23 @@ commit(s) that build this:
 - `test_non_entry_node_routes_a_human_question_through_its_delegator` —
   a worker with a human-worthy question sends it to its OWN delegator,
   not `to="human"` directly.
-- `test_report_call_blocks_until_approved` — a worker's report submission
-  does not return until `SendMessage(..., approve=True)` is called on it.
-- `test_a_review_question_arrives_as_the_reports_own_return_value` — a
+- `test_report_moves_to_open_for_review_not_finish_ok` — a worker's final
+  turn text does NOT call `_finish_ok`; the delegation records an
+  OPEN-FOR-REVIEW state plus a resumable CLI `session_id` (or, for
+  `openai_compatible`, its retained history) instead.
+- `test_a_review_question_resumes_the_same_worker_session` — a
   delegator's `SendMessage` (no approve) to an open report causes the
-  WORKER's still-blocked report call to return with that question, not a
-  separate wake mechanism.
-- `test_worker_revises_report_after_a_review_question` — the worker's
-  updated report call replaces the delegation's final recorded report.
+  runtime to RESUME the worker's recorded session (mocked
+  `ClaudeAgentOptions(resume=...)`/SDK equivalent) with the question as
+  its next user turn, framed with the `<adda-note>`; asserts the resume
+  parameter used, not a fresh unrelated session.
+- `test_worker_revises_report_after_a_review_question` — the resumed
+  session's new final text replaces the delegation's recorded report, and
+  it is validated by `_classify_response` again exactly as the first was.
+- `test_resume_failure_falls_back_and_is_recorded_as_a_diagnostic` — a
+  mocked resume failure (SDK error / expired session) falls back to
+  reconstructing from recorded history AND fires a diagnostic event
+  (never silent) naming the fallback.
 - `test_delegate_refused_while_any_review_is_open` — with two reports
   open for review, a new `Delegate` is refused referencing BOTH open
   reviews, not just the first (open question 1).
@@ -398,9 +460,11 @@ commit(s) that build this:
 - `test_wait_still_collects_during_an_open_review_with_a_nudge` — open
   question 4: `Wait()` for OTHER delegations still returns normally while
   a review is open, accompanied by a nudge naming the open review(s).
-- `test_the_blocking_report_call_does_not_trip_the_idle_timeout` — a
-  mocked stream with a long gap while the report call is pending does
-  not raise `STREAM_ENDED_WITHOUT_RESULT` (report-7 regression coverage).
+- `test_send_message_wait_for_reply_does_not_trip_the_idle_timeout` — a
+  mocked stream with a long gap while `SendMessage(...,
+  wait_for_reply=True)` is pending does not raise
+  `STREAM_ENDED_WITHOUT_RESULT` (item 7 — report-7 regression coverage;
+  NOT needed for report review itself, which holds no stream open).
 - `test_review_dialogue_is_recorded_on_the_delegation` — every
   `SendMessage` exchanged about a delegation appears, in order, on that
   delegation's record.
@@ -438,6 +502,14 @@ commit(s) that build this:
   land as its OWN commit with its own root-cause body when spec 12 is
   built, not silently folded into a larger diff — the git history should
   show that `Wait`'s gating changed twice, and why, not once.
+- **Risk — session resumption's cross-backend parity.** Item 3's
+  mechanism is native for Claude (`resume=session_id`) but emulated for
+  `openai_compatible` backends (replay retained history) — these are not
+  the same guarantee (a genuinely resumed session may retain state a
+  replayed-history reconstruction cannot, e.g. anything the CLI itself
+  cached). Whoever builds this should verify the two paths' BEHAVIORAL
+  equivalence with a real test on each backend, not assume parity from
+  the design alone.
 - **Out of scope:** streaming/live bidirectional chat beyond the
   deadlock-guarded blocking exchange above (the worker is still a
   synchronous SDK session between tool calls); reviewing a delegation's
