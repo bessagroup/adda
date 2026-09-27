@@ -421,7 +421,7 @@ class F3dasmImplementerAgent(Agent):
         "external solver or simulator via Bash, or f3dasm's data-driven "
         "pipeline (sampling, surrogate fitting, surrogate-guided exploit) "
         "when the study is an f3dasm loop. f3dasm is its default toolkit, "
-        "not its limit. The only agent that evaluates designs."
+        "not its limit."
     )
     report_sections = (
         "### Actions taken",

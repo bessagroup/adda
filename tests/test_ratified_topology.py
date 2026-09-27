@@ -365,9 +365,17 @@ def test_implementer_prompt_only_agent_evaluates():
 
 
 def test_implementer_agent_class_description_matches_spec():
+    """Elvis revised the ratified description 2026-09-27: it no longer
+    states an exclusivity claim ("the only agent that evaluates designs")
+    — a hand-written uniqueness claim can go stale the day the wiring
+    changes, so the roster-facing description stays general capability
+    (Bash/external-solver/f3dasm's pipeline), not a hardcoded fact about
+    the rest of the graph. The system prompt's OWN exclusivity statement
+    (test_implementer_prompt_only_agent_evaluates, above) is unaffected —
+    that is the implementer instructing itself, not a roster summary read
+    by every other node."""
     from adda._src.agents.implementer import F3dasmImplementerAgent
     desc = F3dasmImplementerAgent.description
-    assert "only agent that evaluates" in desc.lower()
     assert "surrogate" in desc.lower()
 
 
