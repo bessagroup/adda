@@ -417,10 +417,11 @@ class F3dasmImplementerAgent(Agent):
     reset_on_checkpoint = True
     role = "implementer"
     description = (
-        "Runs the f3dasm data-driven pipeline end-to-end: executes the "
-        "experimental design (sampling), runs the DataGenerator Block to "
-        "produce data, fits surrogates, and runs surrogate-guided "
-        "optimization. The only agent that evaluates designs."
+        "Runs any computational work the study needs: arbitrary code, or an "
+        "external solver or simulator via Bash, or f3dasm's data-driven "
+        "pipeline (sampling, surrogate fitting, surrogate-guided exploit) "
+        "when the study is an f3dasm loop. f3dasm is its default toolkit, "
+        "not its limit. The only agent that evaluates designs."
     )
     report_sections = (
         "### Actions taken",

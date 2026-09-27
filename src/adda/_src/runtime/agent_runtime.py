@@ -1327,9 +1327,27 @@ class AgenticRun:
         exist. A campaign logged 15 delegations to an absent 'implementer'.
 
         Lists the nodes REACHABLE from the entry, in edge-declaration order,
-        each with who hands it work. A node declared but wired to nothing is
-        left out: listing it would be a name an agent can see but not reach.
-        Returns "" for a graph of one node, which has no one to name.
+        each with who hands it work and who IT may hand work to. A node
+        declared but wired to nothing is left out: listing it would be a
+        name an agent can see but not reach. Returns "" for a graph of one
+        node, which has no one to name.
+
+        Topology, not prose, is what fixes a specific failure (run
+        20260927T034538, Elvis's diagnosis): a strategizer reasoned "no
+        MATLAB specialist... implementer is for f3dasm pipelines" and did a
+        MATLAB implementation task itself rather than delegating it. The
+        outgoing edge ("delegates to: ...") is GENERATED from the live
+        graph, so it can never go stale the way hand-written prose can.
+
+        Deliberately NOT a per-node tool list (an earlier draft added one,
+        generated via a throwaway Node construction against a stub
+        adapter — see git history if that mechanism is ever needed again):
+        Elvis's call was that generality beats exhaustiveness here — a full
+        tool enumeration is exactly the kind of detail an agent should not
+        need memorized from a roster to reason about what a peer can do.
+        `description` stays short and general on purpose, capability not
+        domain, and is shown after the objective topology facts, not in
+        place of them.
         """
         spec = self._graph_spec
         entry = getattr(spec, "entry", None)
@@ -1350,9 +1368,14 @@ class AgenticRun:
                 e.source for e in edges if e.target == n))
             where = ("entry" if n == entry
                      else "tasks from " + ", ".join(senders))
+            delegates_to = list(dict.fromkeys(
+                e.target for e in edges if e.source == n and e.target in order))
             desc = (getattr(agent, "description", "") or "").strip()
-            lines.append(f"  {n}  (role: {role}; {where})"
-                         + (f"\n      {desc}" if desc else ""))
+            header = f"  {n}  (role: {role}; {where}"
+            header += (f"; delegates to: {', '.join(delegates_to)})"
+                       if delegates_to else ")")
+            lines.append(
+                header + (f"\n      {desc}" if desc else ""))
         return TEAM_ROSTER_TEMPLATE.format(members="\n".join(lines), name=name)
 
     def _resource_stanza(self, run_dir, *, for_worker: bool) -> str:

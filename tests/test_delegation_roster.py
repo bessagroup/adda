@@ -131,8 +131,26 @@ def test_the_roster_says_who_hands_each_agent_work():
                Edge("critic", "lit")),
         entry="lead")
     out = _roster(g, "lit")
-    assert "lead  (role: strategizer; entry)" in out
+    assert "lead  (role: strategizer; entry; delegates to: critic, lit)" in out
     assert "lit  (role: literature_reviewer; tasks from lead, critic)" in out
+
+
+def test_the_roster_shows_outgoing_delegation_targets_only_within_the_team():
+    """A node's outgoing edges are its capability to delegate onward — shown
+    for every node, not just the entry's own targets, so an agent reading
+    about a PEER can see what that peer may do next, not only who feeds it."""
+    from adda._src.agents.implementer import F3dasmImplementerAgent
+    from adda._src.agents.math_expert import MathExpertAgent
+    g = Graph(
+        nodes={"lead": StrategizerAgent(),
+               "implementer": F3dasmImplementerAgent(),
+               "math_expert": MathExpertAgent()},
+        edges=(Edge("lead", "implementer"), Edge("implementer", "math_expert")),
+        entry="lead")
+    out = _roster(g, "lead")
+    assert "implementer  (role: implementer; tasks from lead; delegates to: math_expert)" in out
+    assert "math_expert  (role:" in out and "delegates to:" not in out.split(
+        "math_expert  (role:")[1].splitlines()[0]
 
 
 def test_the_worker_preamble_names_the_entry_from_the_graph():
