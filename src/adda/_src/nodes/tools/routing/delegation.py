@@ -105,6 +105,24 @@ def resolve_target(
     return None
 
 
+# A delegation's terminal registry statuses -- once one is reached, nothing
+# will ever notify its `to_delegator` queue again, so a delegator blocked in
+# SendMessage(wait_for_reply=True) on that delegation must wake on this too,
+# not only on a reply arriving.
+_TERMINAL_STATUSES = frozenset({"Done", "Errored", "Cancelled"})
+
+
+def _peer_message_timeout() -> float:
+    """How long SendMessage(wait_for_reply=True) waits, from config.
+
+    A documented, validated runtime knob (``peer_message_wait_s``), not a
+    magic number -- Elvis's standing rule is explicit config over env flags
+    or hardcoded constants.
+    """
+    from ....runtime.settings import get_int as _get_int
+    return _get_int("peer_message_wait_s", 300)
+
+
 def _resolve_send_target(
     node: Any, to: str
 ) -> tuple[str, dict] | str:
@@ -843,6 +861,18 @@ class WorkerSession:
                 # error streak (the repeated-errors halt is for a
                 # target stuck failing, not one that recovers).
                 node._consecutive_errors[target] = 0
+            # SendMessage (spec 12): wake a delegator blocked in
+            # SendMessage(wait_for_reply=True) on THIS delegation -- once
+            # Done/Cancelled, nothing will ever notify its `to_delegator`
+            # queue again, so the delegator must not sit out the whole
+            # timeout waiting on a question this now-finished worker will
+            # never answer. Nested inside registry_lock (outer) -> cond
+            # (inner), the same order used everywhere else this cond is
+            # acquired.
+            _parent = node._registry[delegation_id].get("parent", "entry")
+            _cond = node._get_delegator_cond(_parent)
+            with _cond:
+                _cond.notify_all()
         with node._notifications_lock:
             node._notifications.append(
                 f"[Delegation {delegation_id} "
@@ -1017,6 +1047,13 @@ class WorkerSession:
             node._consecutive_errors[target] = (
                 node._consecutive_errors.get(target, 0) + 1
             )
+            # SendMessage (spec 12): see the matching comment in _finish_ok
+            # -- a delegator blocked on this now-Errored delegation must
+            # wake rather than sit out the full timeout.
+            _parent = node._registry[delegation_id].get("parent", "entry")
+            _cond = node._get_delegator_cond(_parent)
+            with _cond:
+                _cond.notify_all()
         with node._notifications_lock:
             node._notifications.append(
                 f"[Delegation {delegation_id} Errored]"
@@ -2115,15 +2152,28 @@ class DelegationTools:
                     body = (f"[{did}] {entry['status']}\n\n"
                             f"{entry.get('result', '')}")
                     return prefix + body + (("\n\n" + cp) if cp else "")
-                messaged = [
-                    (i, e) for i, e in node._registry.items()
-                    if e.get("parent") == my_identity and e.get("to_delegator")
-                ]
-                if messaged:
-                    did, entry = messaged[0]
-                    sender_label, msg = entry["to_delegator"].popleft()
-                    return prefix + (
-                        f"[{did}] message from {sender_label}: {msg}")
+                # Every access to a `to_delegator` queue -- append (in
+                # _send_upward), or check-and-pop (here) -- must share ONE
+                # lock acquisition with its own check, under the SAME
+                # per-parent-identity Condition (`cond`, already `my_identity`
+                # 's own). Checking and popping as two separate acquisitions
+                # (the previous shape) let a second consumer of this same
+                # queue pop between them: a lost or double-consumed message,
+                # or an IndexError on an empty deque. Lock order is
+                # registry_lock (outer, already held) -> cond (inner) --
+                # the same order used everywhere else this cond is touched,
+                # so nesting it here cannot deadlock.
+                with cond:
+                    messaged = [
+                        (i, e) for i, e in node._registry.items()
+                        if e.get("parent") == my_identity
+                        and e.get("to_delegator")
+                    ]
+                    if messaged:
+                        did, entry = messaged[0]
+                        sender_label, msg = entry["to_delegator"].popleft()
+                        return prefix + (
+                            f"[{did}] message from {sender_label}: {msg}")
                 open_ids = sorted(
                     i for i, e in node._registry.items()
                     if e.get("status") in ("Working", "FollowUp")
@@ -2297,12 +2347,19 @@ class DelegationTools:
         but a role name matching more than one currently-running
         delegation of that role is an ERROR naming the candidates, never a
         guess: address the specific id instead. ``wait_for_reply=True``
-        blocks and returns the reply IN THIS SAME CALL — it wakes on ANY
-        message from that peer, whichever arrives (their reply, or a fresh
-        question of their own), so two peers SendMessage-ing each other at
-        once never both hang. ``to="human"`` is offered only to the entry
-        node — every other node has no direct path to a person and should
-        route a human-worthy question through its own delegator instead.
+        blocks and returns IN THIS SAME CALL — it wakes on ANY message from
+        that peer, whichever arrives (their reply, or a fresh question of
+        their own, labelled as what it is, not implied to answer this one),
+        so two peers SendMessage-ing each other at once never both hang. If
+        the peer ends (finishes/errors) before replying, you are told that
+        instead of waiting out the full timeout. If nothing arrives before
+        the timeout (config: ``peer_message_wait_s``, default 300s), your
+        message is NOT dropped — it stays queued and its answer, once the
+        pending-for-you mechanism lands, will surface in a later tool
+        result; the timeout return says so rather than reading as "no
+        reply". ``to="human"`` is offered only to the entry node — every
+        other node has no direct path to a person and should route a
+        human-worthy question through its own delegator instead.
         """
         msg = (message or "").strip()
         if not msg:
@@ -2353,15 +2410,60 @@ class DelegationTools:
             entry["worker_cond"].notify_all()
         if not wait_for_reply:
             return f"Delivered to {delegation_id}."
+        timeout = _peer_message_timeout()
         cond = node._get_delegator_cond(my_id)
+        # The predicate AND the pop happen under the SAME lock this queue's
+        # other consumer (a bare Wait() draining `to_delegator` for the same
+        # parent identity, see _wait_for_any) also uses — checking then
+        # popping as two separate acquisitions let a second consumer pop
+        # between them (a lost message, a double-consumed one, or an
+        # IndexError on an empty deque). Also wakes on the TARGET reaching a
+        # terminal status (_finish_ok/_finish_error notify this same cond)
+        # so a delegator never sits out the full timeout waiting on a
+        # question a dead worker will never answer.
+        #
+        # KNOWN GAP (deferred to the pending-for-you commit, design item
+        # 10): `cond` here is keyed by MY identity, not by `delegation_id`
+        # -- it is the SAME Condition every one of my other children's
+        # SendMessage-upward calls notify too (any child's message wakes
+        # whichever of my SendMessage/Wait calls is currently blocked on
+        # this cond). The predicate above only looks at THIS ONE entry, so
+        # a DIFFERENT child's message wakes this wait, finds the predicate
+        # false, and goes straight back to sleep -- that child's message is
+        # still safely queued in its own `to_delegator` (Wait() or a later
+        # SendMessage will surface it), but I am not told about it NOW,
+        # which is exactly what "no agent is ever left waiting unaware"
+        # forbids. Fixing this needs the pending-for-you notice mechanism
+        # itself (item 10) to report it, not a bigger predicate here.
         with cond:
             woke = cond.wait_for(
-                lambda: bool(entry.get("to_delegator")), timeout=300)
+                lambda: bool(entry.get("to_delegator"))
+                or entry.get("status") in _TERMINAL_STATUSES,
+                timeout=timeout,
+            )
+            if woke and entry.get("to_delegator"):
+                reply_sender, reply_msg = entry["to_delegator"].popleft()
+                # Labelled as what it IS -- a message from that sender --
+                # never as "the reply", since the deadlock guard means an
+                # older unrelated message already queued there is returned
+                # here too, and calling it a reply implies an answer to
+                # THIS question that it may not be.
+                return f"[{delegation_id}] message from {reply_sender}: {reply_msg}"
         if not woke:
-            return (f"No reply from {delegation_id} within 300s. Proceed "
-                     "with best judgment.")
-        reply_sender, reply_msg = entry["to_delegator"].popleft()
-        return f"[{delegation_id}] {reply_sender}: {reply_msg}"
+            # NOT "no reply" -- that reads as dropped. It is still queued;
+            # a later tool result will carry the answer once it lands (the
+            # pending-for-you mechanism, design item 10, not yet built).
+            return (
+                f"No reply yet from {delegation_id} after {timeout}s — "
+                "your message is still queued there, not dropped. Its "
+                "answer, if any, will surface in a later tool result once "
+                "the pending-for-you mechanism is built. Proceed with "
+                "other work meanwhile if you can."
+            )
+        return (
+            f"{delegation_id} ended ({entry.get('status')}) without "
+            "replying to your message."
+        )
 
     def _send_upward(self, node, my_id, my_entry, msg,
                       wait_for_reply) -> str:
@@ -2373,14 +2475,29 @@ class DelegationTools:
             cond.notify_all()
         if not wait_for_reply:
             return "Delivered to your delegator."
+        timeout = _peer_message_timeout()
+        # See _send_downward's comment: predicate check + pop must share one
+        # lock acquisition with any other consumer of `to_worker`.
+        #
+        # No peer-death wake here: the delegator side of a delegation has no
+        # terminal "status" of its own to notice (only WORKERS — registry
+        # entries — do), so a worker waiting upward can still sit out the
+        # full timeout if its delegator never replies. Deferred, same as
+        # the pending-for-you mechanism this whole timeout message points
+        # at.
         with my_entry["worker_cond"]:
             woke = my_entry["worker_cond"].wait_for(
-                lambda: bool(my_entry["to_worker"]), timeout=300)
-        if not woke:
-            return ("No reply from your delegator within 300s. Proceed "
-                     "with best judgment.")
-        reply_sender, reply_msg = my_entry["to_worker"].popleft()
-        return f"{reply_sender}: {reply_msg}"
+                lambda: bool(my_entry["to_worker"]), timeout=timeout)
+            if woke:
+                reply_sender, reply_msg = my_entry["to_worker"].popleft()
+                return f"message from {reply_sender}: {reply_msg}"
+        return (
+            f"No reply yet from your delegator after {timeout}s — your "
+            "message is still queued there, not dropped. Its answer, if "
+            "any, will surface in a later tool result once the "
+            "pending-for-you mechanism is built. Proceed with other work "
+            "meanwhile if you can."
+        )
 
     # ── Asking the human ─────────────────────────────────────────────────────
 

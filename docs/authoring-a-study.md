@@ -89,6 +89,7 @@ rather than silently reverting to the default.
 | `run_backstop_multiple` | multiple of the wall budget after which the run is force-closed | `2.0` |
 | `delegate_cutoff_multiple` | multiple of the wall budget past which NEW delegations are refused (in-flight ones are never touched); must stay below `run_backstop_multiple` or it can never fire. `0` disables | `1.5` |
 | `followup_wait_s` | how long a `FollowUp` waits for a human answer | `600` |
+| `peer_message_wait_s` | how long `SendMessage(wait_for_reply=True)` waits for a peer's reply before returning (spec 12, behind `peer_interaction`) | `300` |
 | `llm_retry_max` | retry attempts for a failed model call | `5` |
 | `llm_retry_base` | base seconds for retry backoff | `2.0` |
 | `llm_stream_idle_timeout` | seconds of stream silence before a call is abandoned (`0` disables) | `600.0` |

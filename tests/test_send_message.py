@@ -105,8 +105,8 @@ def test_two_worker_fan_out_questions_are_correctly_attributed():
     t2.join(timeout=5)
     assert not t1.is_alive() and not t2.is_alive()
     assert "D001" in seen and "D002" in seen
-    assert results["D001"] == "strategizer: answer for D001"
-    assert results["D002"] == "strategizer: answer for D002"
+    assert results["D001"] == "message from strategizer: answer for D001"
+    assert results["D002"] == "message from strategizer: answer for D002"
 
 
 def test_deadlock_guard_both_sides_return_with_the_others_message():
@@ -226,6 +226,123 @@ def test_nested_worker_delegator_only_sees_its_own_childrens_messages():
     assert not t_wait.is_alive()
     assert "from D010" in d001_wait_result["out"]
     assert "from D020" not in d001_wait_result["out"]
+
+
+def test_two_consumers_racing_on_one_queue_never_lose_or_duplicate_a_message():
+    """Regression for the check-then-pop race (adda-boss-whopper review of
+    6f4f980, item 1): predicate check and pop must share ONE lock
+    acquisition. Pre-queues N messages on D001's to_delegator, then races
+    TWO different consumers of that same queue -- a bare Wait() and a
+    SendMessage(wait_for_reply=True) -- to drain it. Every message must be
+    seen exactly once: no loss, no duplicate, no IndexError."""
+    node = _make_node()
+    _register(node, "D001", "implementer")
+    dt = DelegationTools(node)
+
+    n = 100
+    produced = [f"m{i}" for i in range(n)]
+    set_delegation_id("D001")
+    for m in produced:
+        dt.SendMessage("strategizer", m, wait_for_reply=False)
+    set_delegation_id(None)
+
+    seen: list[str] = []
+    seen_lock = threading.Lock()
+    tickets = list(range(n))  # one ticket per message actually queued
+    tickets_lock = threading.Lock()
+
+    def _take_ticket() -> bool:
+        with tickets_lock:
+            if tickets:
+                tickets.pop()
+                return True
+        return False
+
+    def _consumer_wait():
+        set_delegation_id(None)
+        while _take_ticket():
+            out = dt.Wait()
+            assert "message from" in out, out
+            with seen_lock:
+                seen.append(out.rsplit(": ", 1)[-1])
+
+    def _consumer_send_message():
+        set_delegation_id(None)
+        while _take_ticket():
+            out = dt.SendMessage("D001", "ack", wait_for_reply=True)
+            assert "message from" in out, out
+            with seen_lock:
+                seen.append(out.rsplit(": ", 1)[-1])
+
+    t1 = threading.Thread(target=_consumer_wait)
+    t2 = threading.Thread(target=_consumer_send_message)
+    t1.start(); t2.start()
+    t1.join(timeout=15)
+    t2.join(timeout=15)
+
+    assert not t1.is_alive() and not t2.is_alive()
+    assert sorted(seen) == sorted(produced), (
+        "lost or duplicated messages -- the check-then-pop race is back")
+
+
+def test_delegator_wakes_promptly_when_the_target_ends_without_replying():
+    """Regression for item 2: a SendMessage(wait_for_reply=True) to D001
+    must not sit out the whole timeout when D001 reaches a terminal status
+    (Done/Errored/Cancelled) without ever replying -- it wakes as soon as
+    that happens (the same notify _finish_ok/_finish_error now perform),
+    with a message naming what happened rather than a generic timeout."""
+    node = _make_node()
+    _register(node, "D001", "implementer")
+    dt = DelegationTools(node)
+
+    result = {}
+
+    def _delegator():
+        set_delegation_id(None)
+        result["out"] = dt.SendMessage(
+            "D001", "question", wait_for_reply=True)
+        result["at"] = time.monotonic()
+
+    start = time.monotonic()
+    t = threading.Thread(target=_delegator)
+    t.start()
+    time.sleep(0.2)  # SendMessage is now blocked waiting for a reply
+
+    # Exactly what WorkerSession._finish_ok/_finish_error do on completion:
+    # flip the status, then notify the parent's Condition.
+    with node._registry_lock:
+        node._registry["D001"]["status"] = "Done"
+        cond = node._get_delegator_cond(
+            node._registry["D001"].get("parent", "entry"))
+        with cond:
+            cond.notify_all()
+
+    t.join(timeout=5)
+    assert not t.is_alive()
+    elapsed = result["at"] - start
+    assert elapsed < 0.8, f"took {elapsed:.2f}s -- did not wake on peer death"
+    assert "D001 ended (Done)" in result["out"]
+    assert "without replying" in result["out"]
+
+
+def test_wait_for_reply_labels_an_already_queued_message_honestly():
+    """Regression for item 4: if the target's queue already held an
+    older, unrelated message when wait_for_reply=True is called, the
+    deadlock guard returns it immediately -- but labelled as a message
+    FROM its sender, never implied to be the answer to what was just
+    sent."""
+    node = _make_node()
+    _register(node, "D001", "implementer")
+    dt = DelegationTools(node)
+
+    set_delegation_id("D001")
+    dt.SendMessage(
+        "strategizer", "an older, unrelated question", wait_for_reply=False)
+    set_delegation_id(None)
+
+    out = dt.SendMessage("D001", "a brand new question", wait_for_reply=True)
+    assert "message from strategizer (D001)" in out
+    assert "an older, unrelated question" in out
 
 
 def test_send_message_empty_message_is_a_hard_error():

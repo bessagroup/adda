@@ -67,6 +67,7 @@ KNOWN_KEYS: frozenset[str] = frozenset({
     "max_output_tokens",
     "milestones_enabled",
     "peer_interaction",
+    "peer_message_wait_s",
     "pipeline_deliverable",
     "recursion_limit",
     "reproduction_gate",
