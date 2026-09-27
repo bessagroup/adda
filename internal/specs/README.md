@@ -19,13 +19,20 @@ Priority order (highest first) and how they compose:
 | [07](07-duplicate-evaluation-detection.md) | Duplicate/redundant design-point evaluation detection | medium | **DONE (shipped simplified)** |
 | [10](10-math-expert-agent.md) | MathExpert: symbolic-derivation verification node | medium | spec |
 | [11](11-delegation-bounded-version-control.md) | Delegation-bounded version control of the workspace | medium | **DONE** (workspace relocation remains) |
+| [12](12-peer-interaction.md) | Peer-interaction contract: Delegate/SendMessage/Wait | high | spec (open questions for Elvis) |
 
 **Dependency graph (build order matters):**
 - **01 + 02 + 06 are one cluster.** 06 *detects* a stuck/slow delegation; 02
   supplies the *actuators* (`grant_budget`/`abort`) to respond; 01 *reconciles*
   whatever a cancelled/aborted-but-completed delegation already stamped. Building
   02 first gives 01 a clean `abort` and 06 a real lever; build **02 → 01 → 06**.
+- **12 supersedes 02 entirely** — Confer/FollowUp/Reply/ReportProgress are
+  retired in favor of Delegate/SendMessage/Wait, not extended with typed
+  escalation. If 12 is built, 02 becomes historical (do not build both).
 - **03, 04, 05, 07, 10, 11 are independent** of that cluster and of each other.
+  **11 and 12 interact:** 12's review window moves 11's per-delegation
+  workspace commit from report-time to approval-time — see 12's own Risks
+  section.
 
 Every spec separates the **mechanism claim** (tests pass) from the **behavioral
 claim** (KPI improves on a re-run) and says which is which.

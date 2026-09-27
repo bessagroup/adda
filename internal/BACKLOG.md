@@ -40,7 +40,7 @@ before. Until one is answered or closed, treat it as known, not news.
 
 ## Parked — deferred on purpose
 
-- [ ] **#2** Richer delegator↔worker comms (typed blocker/escalation) — *deferred*
+- [ ] **#2** Richer delegator↔worker comms (typed blocker/escalation) — *deferred; superseded by spec [12](specs/12-peer-interaction.md) if built (Delegate/SendMessage/Wait replaces Confer/FollowUp/Reply rather than extending them — do not build both)*
 - [ ] **#3** ProblemDefinerAgent pre-strategizer intake stage — *deferred*
 - [ ] **#20** Open design-space discovery (agent invents new low-D parametrizations) — *spec approved, §4 user-owned, awaiting 2D experiment* — see [`OPEN_DESIGN_SPACE_FRAMEWORK.md`](OPEN_DESIGN_SPACE_FRAMEWORK.md); branch `exp/open-design-space`
 - [ ] **#23** Rename `literature_reviewer` → `consultant` + give it live-web tools so it answers tech-stack/API/doc questions, not only academic literature — *spec, not built (user decision 2026-06-30)* — see §23 below
