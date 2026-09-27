@@ -12,6 +12,18 @@ from typing import Any
 
 __all__ = ["ClaudeAdapter"]
 
+# SystemMessage subtypes that are pure per-token/streaming noise at
+# transcript granularity — everything else (init, status, compact_boundary,
+# any subtype not seen yet) is recorded verbatim rather than guessed at, so
+# a new subtype defaults to VISIBLE, not silently dropped like every
+# SystemMessage used to be. Measured via a raw claude_agent_sdk.query()
+# session (bypassing this file's own filtering) with debug logging: a
+# single short (~5-8s) Haiku turn produced 50-119 SystemMessages, the
+# overwhelming majority (47-103 of them) subtype "thinking_tokens" —
+# stream_evt already covers liveness, so recording every one of these too
+# would just be volume, not signal.
+_SYSTEM_MESSAGE_NOISE_SUBTYPES = frozenset({"thinking_tokens"})
+
 # The in-process MCP server name every f3dasm closure is registered under. The
 # Claude SDK exposes each closure to the model ONLY by its qualified name
 # ``mcp__<server>__<tool>`` (that is also what allowed_tools carries), so the
@@ -426,6 +438,7 @@ class ClaudeAdapter:
             ResultMessage,
             SdkMcpTool,
             StreamEvent,
+            SystemMessage,
             TextBlock,
             ToolUseBlock,
             UserMessage,
@@ -663,6 +676,22 @@ class ClaudeAdapter:
                 return {"type": "result",
                         "usage": getattr(msg, "usage", None),
                         "cost_usd": getattr(msg, "total_cost_usd", None)}
+            if isinstance(msg, SystemMessage):
+                # SystemMessage used to be invisible here entirely (this
+                # function returned None for anything it didn't recognize) —
+                # so a real compact_boundary (the SDK's own context-
+                # compaction event) left NO trace in debug/transcripts/,
+                # the viewer, or any post-run analysis. Confirmed empirically
+                # (a short forced-window test): a single short session
+                # produced 50-119 SystemMessages, the overwhelming majority
+                # subtype "thinking_tokens" — a per-token streaming heartbeat,
+                # pure noise at transcript granularity (stream_evt already
+                # covers liveness). Record everything ELSE verbatim,
+                # including (especially) compact_boundary's own metadata.
+                if msg.subtype in _SYSTEM_MESSAGE_NOISE_SUBTYPES:
+                    return None
+                return {"type": "system", "subtype": msg.subtype,
+                        "data": msg.data}
             return None
 
         _capture = debug_enabled()
@@ -732,6 +761,16 @@ class ClaudeAdapter:
                         _rec = _record(msg)
                         if _rec is not None:
                             append_transcript(_rec)
+                if isinstance(msg, SystemMessage) and msg.subtype == "compact_boundary":
+                    # Unconditional (not gated on _capture/debug mode): a
+                    # compaction is a run-level fact an analyst should never
+                    # have to enable debug transcripts to discover.
+                    _record_stream_diagnostic(
+                        "CONTEXT_COMPACTED",
+                        "The SDK compacted this session's context "
+                        "mid-turn (compact_boundary).",
+                        compaction_data=msg.data,
+                    )
                 if isinstance(msg, AssistantMessage):
                     last_assistant = msg
                     if self.route_watcher and self.route_watcher():

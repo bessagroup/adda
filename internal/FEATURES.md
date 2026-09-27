@@ -392,6 +392,32 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   only; the underlying retry-on-a-possibly-in-flight-turn behaviour is a
   deliberate open question, not addressed here.
 
+### SystemMessage is a transcript record, not a silent drop
+- **What:** `ainvoke()`'s `_record()` (backends/claude.py) mapped every
+  `claude_agent_sdk.SystemMessage` to `None` — including `compact_boundary`,
+  the SDK's own signal that it force-compacted a session's context mid-turn.
+  A run that got compacted mid-delegation left no trace anywhere: not the
+  transcript, not diagnostics, nothing an analyst could grep for short of
+  reasoning backward from a sudden context/behaviour discontinuity. A live
+  probe of a real short session's raw message stream (bypassing adda's own
+  filtering) showed the actual subtype distribution is `{'init': 1,
+  'status': 2, 'thinking_tokens': 47}` — `thinking_tokens` alone accounts for
+  the bulk (measured 47-103 of 50-119 SystemMessages per short session) and
+  carries no information an analyst needs. `_record()` now denylists only
+  that one subtype (`_SYSTEM_MESSAGE_NOISE_SUBTYPES`) and records everything
+  else — including any future/unknown subtype, which defaults to VISIBLE —
+  as a `{"type": "system", "subtype": ..., "data": ...}` transcript record.
+  `compact_boundary` additionally fires an unconditional `CONTEXT_COMPACTED`
+  diagnostics event (`_record_stream_diagnostic`, thread-local delegation
+  id/run dir, the SDK's own compaction metadata verbatim) so the event shows
+  up in `debug/diagnostics.jsonl` without anyone reading transcripts.
+- **Where:** `backends/claude.py` (`_SYSTEM_MESSAGE_NOISE_SUBTYPES`,
+  `_record()`'s new `SystemMessage` branch, the `compact_boundary` check in
+  `ainvoke`). The viewer (`viewer/app.py::_bubble_html`) already renders any
+  unrecognized event type as an empty fragment, so the new `"system"` type
+  needed no viewer change — only a regression test confirming it. **Status:**
+  core — observability only.
+
 ### Delegation-bounded version control of the run workspace
 - **What:** one git repository per run, rooted at the run's own
   `debug/delegations/` workspace, with one commit per delegation (DONE and

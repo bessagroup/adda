@@ -26,6 +26,12 @@ class _StreamEvent:
     pass
 
 
+class _SystemMessage:
+    def __init__(self, subtype, data=None) -> None:
+        self.subtype = subtype
+        self.data = data or {}
+
+
 class _UserMessage:
     def __init__(self, blocks=None) -> None:
         self.content = blocks or []
@@ -55,6 +61,7 @@ def _install_fake_sdk(**extra):
     mod.TextBlock = _TextBlock
     mod.SdkMcpTool = object  # not used in these tests
     mod.StreamEvent = _StreamEvent
+    mod.SystemMessage = _SystemMessage
     mod.UserMessage = _UserMessage
     mod.ToolUseBlock = _ToolUseBlockType
     mod.ClaudeAgentOptions = lambda **kw: kw
@@ -563,3 +570,107 @@ def test_route_watcher_break_does_not_record_stream_diagnostic(tmp_path):
     hits = [r for r in _read_diagnostics(diag_path)
             if r.get("error_type") == "STREAM_ENDED_WITHOUT_RESULT"]
     assert hits == []
+
+
+# ---------------------------------------------------------------------------
+# SystemMessage: used to be entirely invisible (a compact_boundary would
+# leave no trace anywhere an analyst could see).
+# ---------------------------------------------------------------------------
+
+def test_compact_boundary_is_recorded_and_flagged_as_a_diagnostic(tmp_path, monkeypatch):
+    """A real compact_boundary must reach BOTH the transcript (so an analyst
+    reading it directly sees it) and diagnostics.jsonl (so they don't have
+    to — CONTEXT_COMPACTED), unconditionally, not gated on debug mode."""
+    from adda._src.backends.base import set_transcript_sink
+
+    async def _gen_with_compaction(prompt, options):
+        yield _SystemMessage("compact_boundary", {"trigger": "auto", "preTokens": 190000})
+        yield _AssistantMessage([_TextBlock("continuing after compaction")])
+        yield _ResultMessage()
+
+    monkeypatch.setenv("F3DASM_DEBUG", "1")
+    _install_fake_sdk(query=_gen_with_compaction)
+    ClaudeAdapter = _get_adapter()
+    adapter = ClaudeAdapter("claude-3", "sys", None, [])
+    sink = tmp_path / "D001.jsonl"
+    set_transcript_sink(str(sink))
+
+    diag_path = _bind_delegation_diagnostics(tmp_path)
+    try:
+        adapter.invoke([{"role": "user", "content": "hi"}])
+    finally:
+        set_transcript_sink(None)
+        _unbind_delegation_diagnostics()
+
+    import json
+    recs = [json.loads(x) for x in sink.read_text().strip().splitlines()]
+    system_recs = [r for r in recs if r["type"] == "system"]
+    assert len(system_recs) == 1
+    assert system_recs[0]["subtype"] == "compact_boundary"
+    assert system_recs[0]["data"]["trigger"] == "auto"
+
+    hits = [r for r in _read_diagnostics(diag_path)
+            if r.get("error_type") == "CONTEXT_COMPACTED"]
+    assert len(hits) == 1
+    assert hits[0]["compaction_data"]["preTokens"] == 190000
+
+
+def test_thinking_tokens_system_message_is_noise_not_recorded(tmp_path, monkeypatch):
+    """The overwhelming majority (measured: 47-103 per short session) of
+    SystemMessages are subtype 'thinking_tokens' — a per-token heartbeat
+    stream_evt already covers. Recording every one would be volume, not
+    signal, and must not fire a diagnostic either."""
+    from adda._src.backends.base import set_transcript_sink
+
+    async def _gen_with_heartbeat(prompt, options):
+        yield _SystemMessage("thinking_tokens", {"count": 12})
+        yield _AssistantMessage([_TextBlock("hi")])
+        yield _ResultMessage()
+
+    monkeypatch.setenv("F3DASM_DEBUG", "1")
+    _install_fake_sdk(query=_gen_with_heartbeat)
+    ClaudeAdapter = _get_adapter()
+    adapter = ClaudeAdapter("claude-3", "sys", None, [])
+    sink = tmp_path / "D001.jsonl"
+    set_transcript_sink(str(sink))
+
+    diag_path = _bind_delegation_diagnostics(tmp_path)
+    try:
+        adapter.invoke([{"role": "user", "content": "hi"}])
+    finally:
+        set_transcript_sink(None)
+        _unbind_delegation_diagnostics()
+
+    import json
+    recs = [json.loads(x) for x in sink.read_text().strip().splitlines()]
+    assert not [r for r in recs if r["type"] == "system"]
+    assert not [r for r in _read_diagnostics(diag_path)
+                if r.get("error_type") == "CONTEXT_COMPACTED"]
+
+
+def test_unknown_system_subtype_defaults_to_recorded(tmp_path, monkeypatch):
+    """A subtype this file has never seen before (e.g. 'init', or anything
+    added to the SDK later) must default to VISIBLE — the noise list is an
+    explicit denylist, not an allowlist, so a new subtype is never silently
+    dropped the way every SystemMessage used to be."""
+    from adda._src.backends.base import set_transcript_sink
+
+    async def _gen_with_init(prompt, options):
+        yield _SystemMessage("init", {"model": "claude-haiku-4-5-20251001"})
+        yield _AssistantMessage([_TextBlock("hi")])
+        yield _ResultMessage()
+
+    monkeypatch.setenv("F3DASM_DEBUG", "1")
+    _install_fake_sdk(query=_gen_with_init)
+    ClaudeAdapter = _get_adapter()
+    adapter = ClaudeAdapter("claude-3", "sys", None, [])
+    sink = tmp_path / "D001.jsonl"
+    set_transcript_sink(str(sink))
+    adapter.invoke([{"role": "user", "content": "hi"}])
+    set_transcript_sink(None)
+
+    import json
+    recs = [json.loads(x) for x in sink.read_text().strip().splitlines()]
+    system_recs = [r for r in recs if r["type"] == "system"]
+    assert len(system_recs) == 1
+    assert system_recs[0]["subtype"] == "init"

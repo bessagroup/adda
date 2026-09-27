@@ -722,6 +722,22 @@ def test_a_tool_name_cannot_inject_an_event_handler(tmp_path):
     assert "&#39;" in html
 
 
+def test_system_message_event_renders_safely(tmp_path):
+    """The transcript writer now records SystemMessage (incl. compact_boundary)
+    as a ``"system"`` event type. _bubble_html only knows how to render
+    assistant/HumanMessage bubbles, so an unrecognized type must degrade to
+    an empty fragment rather than raise.
+    """
+    from adda._src.viewer.app import _bubble_html
+
+    html = _bubble_html({
+        "type": "system",
+        "subtype": "compact_boundary",
+        "data": {"trigger": "auto", "preTokens": 123456},
+    })
+    assert html == ""
+
+
 def test_malformed_client_input_does_not_500(tmp_path):
     """Unauthenticated endpoints on a network-bound server."""
     study = _make_study(tmp_path)
