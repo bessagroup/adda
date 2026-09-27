@@ -117,19 +117,37 @@ def test_reap_governor_pids_kills_all_registered(tmp_path):
 def test_memory_cap_actually_kills_a_real_over_cap_process(tmp_path):
     """End-to-end proof of the RSS-based hard cap: a real subprocess that holds
     ~300 MB resident, registered with its true start time, is killed by
-    check_memory_and_kill under a 100 MB cap — via the real psutil backend."""
+    check_memory_and_kill under a 100 MB cap — via the real psutil backend.
+
+    check_memory_and_kill takes ONE RSS sample per call — a single sample
+    taken too early (before the child has finished allocating and become
+    resident) reads under-cap and kills nothing. A fixed sleep before that
+    one sample is a race against however long the OS takes to schedule and
+    fault in 300 MB, which is NOT bounded under heavy contention (e.g. many
+    parallel xdist workers competing for a runner's cores) — this test used
+    to assume 1.5s was always enough and failed exactly this way in CI
+    (macos-latest, py3.11, under `-n auto`: killed == [] instead of
+    ['D001']). Poll the call itself instead: keep sampling until the kill
+    registers or a generous deadline passes, so this proves what the
+    watchdog is actually for — it kills an over-cap process whenever it
+    BECOMES over-cap, not only if that happens within an arbitrary window."""
     # Hold ~300 MB resident (bytearray is zero-filled → resident), then idle.
     child = subprocess.Popen([
         sys.executable, "-c",
         "x=bytearray(300*1024*1024); import time; time.sleep(120)",
     ])
     try:
-        time.sleep(1.5)  # let it allocate
         start = psutil.Process(child.pid).create_time()  # the TRUE ownership token
         debug = tmp_path / "debug"; debug.mkdir(parents=True)
         (debug / "governor_pids.jsonl").write_text(json.dumps(
             {"delegation_id": "D001", "pid": child.pid, "start_time": start}) + "\n")
-        killed = check_memory_and_kill(tmp_path, cap_bytes=100 * 1024 ** 2)  # real backend
+        killed: list[str] = []
+        deadline = time.monotonic() + 30.0
+        while time.monotonic() < deadline:
+            killed = check_memory_and_kill(tmp_path, cap_bytes=100 * 1024 ** 2)
+            if killed:
+                break
+            time.sleep(0.1)
         assert killed == ["D001"]
         for _ in range(40):
             if child.poll() is not None:
