@@ -9,6 +9,8 @@ tests/test_agent_runtime_extra.py against the run-ending sweep).
 """
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 from adda._src.backends.base import Agent, Edge, Graph, set_delegation_id
@@ -56,6 +58,23 @@ class _FakeWorker:
         if self._raises:
             raise RuntimeError("worker exploded")
         return self._text
+
+
+class _BlockingFakeWorker(_FakeWorker):
+    """Like _FakeWorker, but a resumed (``resume=``) invoke blocks on a
+    gate Event until the test releases it -- lets a test deterministically
+    observe the ``Revising`` window instead of racing a near-instant
+    fake."""
+
+    def __init__(self, *a, resume_gate: threading.Event | None = None,
+                 **kw):
+        super().__init__(*a, **kw)
+        self.resume_gate = resume_gate or threading.Event()
+
+    def invoke(self, messages, resume=None):
+        if resume is not None:
+            self.resume_gate.wait(timeout=5)
+        return super().invoke(messages, resume=resume)
 
 
 def _spec() -> Graph:
@@ -563,3 +582,114 @@ def test_resume_failure_falls_back_and_records_a_diagnostic(tmp_path):
     assert fallback_rec["session_id"] == "sess-1"
     assert "resume failed" in fallback_rec["reason"]
 
+
+
+# ---------------------------------------------------------------------------
+# adda-boss-whopper's review of bc2a097: three correctness gaps before the
+# migration sweep -- approve-during-Revising must be refused; a second
+# message during revision must still reach the worker (and be noted if
+# still unread when the revision finishes); and the "read" enforcement
+# (spec item 4) must actually be checked, not just documented.
+# ---------------------------------------------------------------------------
+
+
+def test_approve_while_revising_is_refused_then_succeeds_after_reopen():
+    """Approving WHILE resume_and_revise is still running would finalize
+    the STALE report while a newer one is mid-flight -- must be refused,
+    naming why. Once the revision re-opens (and is actually read), the
+    SAME approve call succeeds and records the REVISED report."""
+    gate = threading.Event()
+    worker = _BlockingFakeWorker(session_id="sess-1", resume_gate=gate)
+    node = _make_node(worker=worker)
+    dt = DelegationTools(node)
+    set_delegation_id(None)
+
+    dt.Delegate("implementer", "do the thing", "a report", wait=True)
+    did = next(iter(node._registry))
+
+    dt.SendMessage(did, "clarify this")  # starts revising, blocks on gate
+    assert node._registry[did]["status"] == "Revising"
+
+    out = dt.SendMessage(did, "ignored", approve=True)
+    assert out.startswith("ERROR:")
+    assert "revising its report" in out
+    assert node._registry[did]["status"] == "Revising"  # unchanged
+
+    gate.set()
+    _join_resume_thread(node, did)
+    assert node._registry[did]["status"] == "OpenForReview"
+
+    # The read enforcement: the REVISED report resets "waited" -- must
+    # read it again before approving.
+    dt.Wait(did)
+    out2 = dt.SendMessage(did, "approved", approve=True)
+    assert "Approved" in out2
+    assert node._registry[did]["status"] == "Done"
+    assert "A revised report." in node._registry[did]["result"]
+
+
+def test_second_message_during_revision_reaches_the_worker_and_is_noted_if_unread():
+    """A second SendMessage while the first is still being revised must
+    still reach the worker -- observable via the worker's OWN
+    pending-for-you notice, exactly what its next resumed tool call
+    would carry -- and, if the revision finishes before anything reads
+    it, the delegator is told explicitly it's still sitting there
+    unread, never silently lost."""
+    gate = threading.Event()
+    worker = _BlockingFakeWorker(session_id="sess-1", resume_gate=gate)
+    node = _make_node(worker=worker)
+    dt = DelegationTools(node)
+    set_delegation_id(None)
+
+    dt.Delegate("implementer", "do the thing", "a report", wait=True)
+    did = next(iter(node._registry))
+
+    dt.SendMessage(did, "first question")  # starts revising, blocks
+    assert node._registry[did]["status"] == "Revising"
+
+    out2 = dt.SendMessage(did, "second question, urgent")
+    assert "resuming its session" not in out2  # queued, not re-triggered
+
+    pending = node._pending_for_you(did)
+    assert "your delegator sent you a message" in pending
+    assert "second question, urgent" in pending
+
+    gate.set()
+    _join_resume_thread(node, did)
+
+    assert node._registry[did]["status"] == "OpenForReview"
+    notices = "\n".join(node._notifications)
+    assert "UNREAD message still queued" in notices
+    assert did in notices
+
+
+def test_feedback_or_approval_on_an_unread_report_is_refused():
+    """spec item 4 / design item 3's open question 3: a report never
+    actually delivered to the delegator (through Wait or a
+    Delegate(wait=True) result) cannot be approved or given feedback --
+    the mechanical guard against "approve without reading"."""
+    node = _make_node()
+    dt = DelegationTools(node)
+    set_delegation_id(None)
+
+    # Async dispatch: the report exists but was never DELIVERED (no
+    # Wait(id), no Delegate(wait=True) inline result).
+    dt.Delegate("implementer", "do the thing", "a report", wait=False)
+    did = next(iter(node._registry))
+    node._threads[did].join(timeout=5)
+    assert node._registry[did]["status"] == "OpenForReview"
+
+    out_feedback = dt.SendMessage(did, "what does this mean?")
+    assert out_feedback.startswith("ERROR:")
+    assert "not been delivered" in out_feedback
+
+    out_approve = dt.SendMessage(did, "ignored", approve=True)
+    assert out_approve.startswith("ERROR:")
+    assert node._registry[did]["status"] == "OpenForReview"  # untouched
+
+    # Reading it via Wait(id) satisfies the guard -- both now succeed.
+    read_out = dt.Wait(did)
+    assert "A fine report." in read_out
+    out_ok = dt.SendMessage(did, "approved", approve=True)
+    assert "Approved" in out_ok
+    assert node._registry[did]["status"] == "Done"

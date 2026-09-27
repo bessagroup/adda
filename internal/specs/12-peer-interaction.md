@@ -235,14 +235,46 @@ raised) records a `REVIEW_RESUME_FALLBACK` diagnostic naming the
 delegation, the session id, and the reason. A revised report re-opens
 for review through the SAME `_open_for_review` path the first one used
 (a new delegation-log `OPEN_FOR_REVIEW` row, last-wins over the
-previous one), not a special second mechanism. NOT built: the
-corrective retry-on-malformed cycle `_invoke_with_report_retry` gives
-the FIRST report (a revised report is accepted as-is, unvalidated by
-`_classify_response`); a second SendMessage to an already-`Revising`
-entry is not specially handled (it queues in `to_worker` like an
-ordinary downward message, unread by anything, since `resume_and_revise`
-takes its message as a direct argument, not from that queue) — a narrow,
-real gap, not yet hit by any test.
+previous one), not a special second mechanism.
+
+**Accepted, not a gap** (adda-boss-whopper, ratified): the corrective
+retry-on-malformed cycle `_invoke_with_report_retry` gives the FIRST
+report is deliberately NOT repeated for a revised one — a revised
+report is accepted as-is, unvalidated by `_classify_response`. This is
+fine because every revision is reviewed by the delegator anyway (the
+"read" enforcement below forces it): a malformed revision is simply a
+worse report the delegator's own next read will notice and can send
+straight back with another question, rather than machinery re-detecting
+it. Adding the retry cycle here would be validating a check the
+delegator is already going to perform.
+
+**Built** (2026-09-27, second review round): three correctness fixes
+before the migration sweep --
+1. **Approve-while-Revising is refused.** `SendMessage(id, ...,
+   approve=True)` while `resume_and_revise` is still running would
+   finalize the STALE pre-revision report while a newer one is
+   mid-flight — refused with a clear reason
+   (`nodes/tools/routing/delegation.py`'s `SendMessage` dispatch, the
+   `Revising` branch). Approving AFTER the revision re-opens (and is
+   read again) succeeds normally.
+2. **A second message during revision still reaches the worker.**
+   `resume_and_revise` takes its message as a direct argument (not from
+   `to_worker`), so a SECOND `SendMessage` sent while the first is still
+   resuming queues in `to_worker` exactly like an ordinary downward
+   message — reachable via the worker's own pending-for-you peek on its
+   next tool call once THAT session resumes in turn. If the revision
+   finishes while that queued message is still unread,
+   `_open_for_review`'s re-open explicitly notifies the delegator that
+   an unread message is still sitting there — never silently lost.
+3. **The "read" enforcement (spec item 4, design item 3's open question
+   3), actually checked.** `_handle_review_message` refuses BOTH
+   `approve=True` and any feedback message when the registry entry's
+   "waited" flag (reused, same meaning it already has for a collected
+   Done/Errored delegation) is not set — the mechanical signal that the
+   report text was actually RETURNED to the delegator via `Wait(id)`,
+   `Wait(id, block=False)`, or a `Delegate(wait=True)` result. Resets
+   to `False` on every `_open_for_review` (original or revised), so a
+   revised report must be read again too, not just the first one.
 
 **Trigger, ratified explicitly (Elvis, via adda-boss-whopper, 2026-09-27,
 after the core mechanism above was reviewed in code):** review is

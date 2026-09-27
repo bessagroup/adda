@@ -320,17 +320,32 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   `REVIEW_RESUME_FALLBACK` diagnostic (delegation id, session id,
   reason) — never silently. The revised report re-opens for review
   through the SAME `_open_for_review` path the first report used.
+  Three more correctness fixes on top (second review round): approving
+  WHILE a revision is in flight is refused (it would finalize the STALE
+  pre-revision report); a second `SendMessage` sent during that same
+  window still reaches the worker (queued in `to_worker`, surfaced via
+  its own pending-for-you peek) and, if the revision finishes before
+  anything reads that queued message, `_open_for_review`'s re-open
+  explicitly tells the delegator it's still sitting there unread; and
+  the "read" enforcement (spec item 4) is now actually CHECKED, not just
+  documented — `_handle_review_message` refuses both `approve=True` and
+  feedback unless the entry's `"waited"` flag (reused from its existing
+  Done/Errored meaning) shows the report was actually delivered via
+  `Wait`/`Wait(block=False)`/`Delegate(wait=True)`, reset on every
+  `_open_for_review` so a revised report must be read again too.
   **Where:** `nodes/tools/routing/delegation.py`
   (`WorkerSession.resume_and_revise`/`_try_resume`/
   `_fallback_reconstructed_invoke`/`_record_resume_fallback`,
   `_handle_review_message`, the `Revising` status in
-  `_check_open_reviews`/`_wait_for_any`/`_status`), `backends/claude.py`
+  `_check_open_reviews`/`_wait_for_any`/`_status`, `_open_for_review`'s
+  `"waited"` reset and unread-message notice), `backends/claude.py`
   (`ainvoke`/`invoke`'s `resume` parameter).
   **Status:** in progress — see `internal/specs/12-peer-interaction.md`
-  for what remains (the "read" enforcement; the corrective retry-on-
-  malformed cycle for a REVISED report, unlike the first one; a second
-  message to an already-`Revising` entry; the migration sweep that
-  retires `Confer`/`FollowUp`/`Reply`).
+  for what remains (the migration sweep that retires
+  `Confer`/`FollowUp`/`Reply`, and the eventual default-True flip). The
+  corrective retry-on-malformed cycle NOT repeating for a revised report
+  is a deliberate, accepted tradeoff (every revision is reviewed by the
+  delegator anyway), not an open gap.
 
 ### Per-cell notebook debugger (#13)
 - **What:** run pipeline.ipynb against a *copy* of the ledger and get a per-cell

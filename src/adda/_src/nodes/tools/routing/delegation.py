@@ -815,11 +815,20 @@ class WorkerSession:
         whenever ``peer_interaction`` is on -- no opt-in, no implicit
         close). ``_finish_ok`` does not run until an explicit
         ``SendMessage(to=<id>, message=..., approve=True)`` calls
-        :meth:`finalize_after_review` below; anything else just queues a
-        message for the worker (session-resumption itself -- actually
-        RESUMING the worker's CLI session with that message as its next
-        turn -- is spec 12's own separately-scoped follow-up, not built
-        yet; the queued message is recorded but not yet delivered).
+        :meth:`finalize_after_review` below; anything else RESUMES the
+        worker's session (:meth:`resume_and_revise`) with that message.
+
+        Called on the FIRST report and on every REVISED one alike (the
+        same path, not a special case): ``"waited"`` resets to False
+        each time, since a fresh report -- original or revised -- must be
+        delivered to the delegator again (through ``Wait`` or a
+        ``Delegate(wait=True)`` result) before it can be approved or
+        given feedback on (the "read" enforcement, spec item 4/design
+        item 3's open question 3). If a SECOND message arrived in
+        ``to_worker`` while this report was being (re)written -- the
+        worker's session took it as a direct argument, never drained
+        that queue -- it is still sitting there unread; noted to the
+        delegator explicitly rather than lost silently.
 
         Everything ``_finish_ok`` will eventually need is stashed on the
         registry entry now, since this WorkerSession instance itself is
@@ -842,7 +851,8 @@ class WorkerSession:
         node, delegation_id = self.node, self.delegation_id
         session_id = getattr(self.worker, "last_session_id", None)
         with node._registry_lock:
-            node._registry[delegation_id].update({
+            entry = node._registry[delegation_id]
+            entry.update({
                 "status": "OpenForReview",
                 "result": text,
                 "evals": evals,
@@ -850,7 +860,18 @@ class WorkerSession:
                 "_review_off_ledger": off_ledger,
                 "_review_stamped": stamped,
                 "session_id": session_id,
+                # Reset on EVERY (re-)open, original or revised: a fresh
+                # report must be delivered to the delegator again (Wait,
+                # Delegate(wait=True), or Wait(id, block=False) -- see
+                # each of those three sites for where this flips back to
+                # True) before it can be approved or given feedback on.
+                # Reuses "waited" (the SAME meaning "waited" already has
+                # for a collected Done/Errored delegation) rather than a
+                # second field for the same concept.
+                "waited": False,
             })
+        with entry["worker_cond"]:
+            unread_pending = bool(entry.get("to_worker"))
         if node._delegation_log is not None:
             from ....runtime.constraint_snapshot import snapshot_for_node
             node._delegation_log.record(
@@ -885,6 +906,14 @@ class WorkerSession:
                 "SendMessage(id, ..., approve=True) to finalize it, or "
                 "ask a question first]"
             )
+            if unread_pending:
+                node._notifications.append(
+                    f"[Delegation {delegation_id} re-reported with an "
+                    "UNREAD message still queued for it -- it may not "
+                    "have seen your last SendMessage before revising; "
+                    "check and resend if it still applies, not lost, "
+                    "just not yet acted on]"
+                )
 
     def finalize_after_review(
         self, evals: int, usage: dict, off_ledger: bool, stamped: int,
@@ -1624,6 +1653,13 @@ class DelegationTools:
                 # peer_interaction on: a successful sync Delegate() still
                 # does not finalize on its own (spec 12 item 3) -- the
                 # report is real and readable now, just not yet approved.
+                # This delivery IS a "read" event (design item 3's open
+                # question 3) -- mark it so approval/feedback isn't
+                # refused as unread.
+                with node._registry_lock:
+                    _live = node._registry.get(delegation_id)
+                    if _live is not None:
+                        _live["waited"] = True
                 return (
                     f"[{delegation_id}] report ready but OPEN FOR REVIEW "
                     f"-- {entry.get('result', '')}\n\nSendMessage("
@@ -2021,6 +2057,9 @@ class DelegationTools:
             # a successful-but-unapproved report is neither Working nor
             # an error -- reporting it as "Errored:" would be a false
             # negative on a real, readable report.
+            # Delivering the full report text IS a "read" event (design
+            # item 3's open question 3) -- mark it.
+            entry["waited"] = True
             return (
                 f"[{delegation_id}] report ready but OPEN FOR REVIEW -- "
                 f"{entry['result']}"
@@ -2644,9 +2683,30 @@ class DelegationTools:
         if not isinstance(resolved, str):
             delegation_id, entry = resolved
             if entry.get("parent") == my_id:
-                if entry.get("status") == "OpenForReview":
+                status = entry.get("status")
+                if status == "OpenForReview":
                     return self._handle_review_message(
                         node, delegation_id, entry, msg, approve)
+                if status == "Revising":
+                    if approve:
+                        # The report being approved would be the STALE
+                        # one -- a newer one is mid-flight on its own
+                        # thread right now. Refuse rather than finalize
+                        # something that is about to be superseded.
+                        return (
+                            f"ERROR: {delegation_id!r} is revising its "
+                            "report; approve once it re-opens for "
+                            "review, not while it is still being "
+                            "written."
+                        )
+                    # A second message while revising: still recorded
+                    # for the worker (queued in to_worker) -- never
+                    # silently dropped, and _open_for_review's re-open
+                    # notice names it if the revision finishes before
+                    # anything reads it.
+                    return self._send_downward(
+                        node, my_id, delegation_id, entry, msg,
+                        wait_for_reply)
                 return self._send_downward(
                     node, my_id, delegation_id, entry, msg, wait_for_reply)
 
@@ -2679,7 +2739,27 @@ class DelegationTools:
         exactly like an async ``Delegate`` -- the delegator collects the
         REVISED report the same way it collected the first one, via
         ``Wait`` or another ``SendMessage``).
+
+        The "read" enforcement (spec item 4, design item 3's open
+        question 3, ratified mechanical definition): feedback OR
+        approval on a report never actually delivered to the delegator
+        -- through ``Wait``, ``Wait(id, block=False)``, or a
+        ``Delegate(wait=True)`` result, the three sites that flip
+        ``"waited"`` back to True -- is refused. This is the guard
+        against "approve without reading," not a formality: an LLM can
+        be handed a report and never engage with it, so the mechanical
+        signal is that the text was actually RETURNED to the delegator
+        at least once since this report (this exact one, original or
+        revised -- ``_open_for_review`` resets it on every re-open), not
+        an unverifiable "did it think about it."
         """
+        if not entry.get("waited"):
+            return (
+                f"ERROR: {delegation_id!r}'s report has not been "
+                "delivered to you yet -- read it first with Wait(id) "
+                "(or Delegate(wait=True)'s own result), then approve or "
+                "give feedback."
+            )
         if approve:
             session = node._worker_sessions.pop(delegation_id, None)
             if session is None:
