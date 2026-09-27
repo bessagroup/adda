@@ -216,6 +216,37 @@ superseded — Elvis's decision, with the reason below).
   review turns; "waking it" means resuming its session, not just calling
   back into an already-suspended one.
 
+**Trigger, ratified explicitly (Elvis, via adda-boss-whopper, 2026-09-27,
+after the core mechanism above was reviewed in code):** review is
+EVERY delegation, automatically, whenever `peer_interaction` is ON — no
+opt-in flag on `Delegate`, and no "only if the delegator happens to
+`SendMessage` it." An opt-in, or an implicit close when the delegator
+never writes back, would let a review be silently skipped, which is
+exactly what "no auto-approvals" and "acceptance is never hidden or
+implicit" (item 6) already rule out. So: every worker's non-error final
+report moves its delegation to OPEN-FOR-REVIEW; it becomes terminal
+(`_finish_ok`, spec 11's commit) ONLY via an explicit
+`SendMessage(to=<id>, message=..., approve=True)`. Any other message to
+an open review resumes the worker in its own session instead of
+finalizing. With the feature OFF, today's behavior (immediate
+`_finish_ok`) is unchanged.
+
+**Edge 1 — an ERRORED delegation has no report to review.** A worker that
+raises (`_finish_error`) produces no final report text, so there is
+nothing to hold open for review — it is terminal immediately, exactly as
+today, feature on or off. It must NOT count toward item 6's "any review
+open" block on the delegator's next `Delegate` call; only OPEN-FOR-REVIEW
+entries do.
+
+**Edge 2 — the run ends while reviews are still open.** `Done()`, the
+watchdog, or a budget/backstop cutoff can close a run while one or more
+delegations are still OPEN-FOR-REVIEW. These must be recorded HONESTLY —
+"open, never approved" — in both the delegation log (a distinct terminal
+status, not `DONE`) and the closing retrospective. Never silently
+recorded as approved, and never silently dropped: an unreviewed report
+that the run simply ran out of time to look at is a real fact about that
+run, not a bookkeeping inconvenience to paper over.
+
 ### 4. `Delegate` and `Wait` are for delegators only
 
 Both exist ONLY for a node with >=1 outgoing edge — the node that started
@@ -478,6 +509,15 @@ commit(s) that build this:
 - `test_feature_off_restores_todays_one_shot_report_behavior` — the
   ablation knob off: report = terminal on submission, no review window,
   commit at `_finish_ok`/`_finish_error` as today.
+- `test_errored_delegation_does_not_block_a_new_delegate` — edge 1: a
+  worker that raises finishes `Errored` immediately (no review window)
+  and a subsequent `Delegate` call is NOT refused on its account, even
+  with `peer_interaction` on.
+- `test_run_ending_with_an_open_review_is_recorded_as_never_approved` —
+  edge 2: the run closes (`Done()`) while a delegation is still
+  OPEN-FOR-REVIEW; the delegation log records it as open/never-approved
+  (a distinct status from `DONE`), and the retrospective states the same
+  — never silently treated as approved.
 
 ## Risks / out of scope
 

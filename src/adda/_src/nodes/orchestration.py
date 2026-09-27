@@ -72,6 +72,13 @@ class OrchestrationMixin:
         self._registry: dict[str, dict] = {}
         self._registry_lock = threading.Lock()
         self._threads: dict[str, threading.Thread] = {}
+        # SendMessage/review (spec 12, peer_interaction): the live
+        # WorkerSession for each OPEN-FOR-REVIEW delegation, so an
+        # approving SendMessage can finalize it (call its own _finish_ok)
+        # without re-deriving everything _finish_ok needs from the
+        # registry alone. Popped once finalized -- not a leak over a long
+        # run with many delegations.
+        self._worker_sessions: dict[str, Any] = {}
         # SendMessage (spec 12, peer_interaction feature, not yet default-on):
         # one threading.Condition PER DELEGATOR IDENTITY -- keyed by that
         # delegator's OWN delegation_id, or "entry" for the orchestrating

@@ -229,18 +229,48 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   until the final migration-sweep commit flips this default and retires
   them. `Wait` was also re-tightened to outgoing-edges-only in this same
   series (a separate commit, `1d7e14c`) — see BACKLOG's spec 12 entry.
+- **The review gate (spec 12 item 3).** With `peer_interaction` on, a
+  worker's non-error report NEVER finalizes on its own: `WorkerSession.
+  run()` calls `_open_for_review` instead of `_finish_ok`, moving the
+  delegation to a new `OpenForReview` status (recording the worker's CLI
+  `last_session_id`, captured on every `ainvoke()` — the actual RESUME
+  invocation for a non-approve message is still not built, see below).
+  Only `SendMessage(id, ..., approve=True)` runs `_finish_ok`
+  (`finalize_after_review`, reusing the stashed report/evals/usage
+  unchanged); any other message is recorded (queued) but says plainly
+  that it will not reach the worker until session-resumption itself
+  lands. Automatic, not opt-in — every delegation, whenever the feature
+  is on. `Delegate` refuses a new dispatch while ANY delegation is
+  `OpenForReview` (`_check_open_reviews`), naming every open one; an
+  ERRORED delegation never counts (it has no report to review). `Wait()`
+  treats an open review the same shape as a `FollowUp` block — named in
+  its own bucket, never silently absorbed into "nothing to wait for" —
+  while `Wait(id)` still returns its report text (the "read" event).
+  `Delegate(wait=True)` also names an open review explicitly rather than
+  misreporting a successful worker as `Errored`. If the run closes
+  (`Done()`, watchdog, budget cutoff) with reviews still open, each is
+  swept and recorded honestly as `OPEN_UNAPPROVED` in the delegation log
+  and the delegating node's retrospective — never as `DONE`, never
+  silently dropped (`AgenticRun._sweep_open_reviews`/
+  `_record_unapproved_review`, `runtime/agent_runtime.py`).
 - **Where:** `nodes/tools/routing/delegation.py` (`DelegationTools.
-  SendMessage`, `_resolve_send_target`, the `parent`/`to_worker`/
-  `to_delegator`/`worker_cond` fields `_register_dispatch` now stamps on
-  every registry entry), `nodes/orchestration.py`
-  (`_get_delegator_cond`, the per-delegator-identity `Condition` registry
-  this all synchronizes through), `nodes/tools/routing/__init__.py`
-  (`build_routing_tools`'s feature gate), `runtime/features.py`
+  SendMessage`, `_resolve_send_target`, `_check_open_reviews`,
+  `_handle_review_message`, `WorkerSession._open_for_review`/
+  `finalize_after_review`, the `parent`/`to_worker`/`to_delegator`/
+  `worker_cond` fields `_register_dispatch` now stamps on every registry
+  entry), `nodes/orchestration.py` (`_get_delegator_cond`, the
+  per-delegator-identity `Condition` registry this all synchronizes
+  through, `_worker_sessions`), `nodes/tools/routing/__init__.py`
+  (`build_routing_tools`'s feature gate), `backends/claude.py`/
+  `backends/openai_compatible.py` (`last_session_id` capture — always
+  `None` on the latter, which has no server-side session; parity with
+  `ClaudeAdapter` enforced by `tests/test_backend_parity.py`),
+  `runtime/agent_runtime.py` (the close-time sweep), `runtime/features.py`
   (`peer_interaction`). **Status:** in progress — see `internal/specs/
-  12-peer-interaction.md` for what remains (session-resumption report
-  review, the pending-for-you notice mechanism, `to="human"`'s
-  entry-node-only gating already lands here but the migration sweep that
-  retires the old tools does not).
+  12-peer-interaction.md` for what remains (the actual session-RESUME
+  invocation for a non-approve message, the pending-for-you notice
+  mechanism, the migration sweep that retires `Confer`/`FollowUp`/
+  `Reply`).
 
 ### Per-cell notebook debugger (#13)
 - **What:** run pipeline.ipynb against a *copy* of the ledger and get a per-cell

@@ -770,6 +770,12 @@ class OpenAICompatibleAdapter:
         self._oracle_nudge = OracleNudgeBudget()
         # Populated after each invoke() with token counts for run-level accounting.
         self.last_usage: dict = {}
+        # Parity with ClaudeAdapter's session-resumption capture (spec 12
+        # item 3) -- always None here. This backend has no server-side
+        # session to resume; review resumption for it replays the
+        # RETAINED HISTORY instead (a separate mechanism, not this
+        # attribute), exactly as the spec's own risk note says.
+        self.last_session_id: str | None = None
 
     def copy(self) -> OpenAICompatibleAdapter:
         """Always return self.

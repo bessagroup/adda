@@ -139,7 +139,8 @@ def _resolve_send_target(
             return to, node._registry[to]
         candidates = sorted(
             did for did, e in node._registry.items()
-            if e.get("target") == to and e.get("status") in ("Working", "FollowUp")
+            if e.get("target") == to
+            and e.get("status") in ("Working", "FollowUp", "OpenForReview")
         )
         if len(candidates) == 1:
             return candidates[0], node._registry[candidates[0]]
@@ -537,7 +538,17 @@ class WorkerSession:
             self._flag_mcp_errors(text)
             evals, off_ledger, stamped = self._reconcile_evals()
             text = self._append_budget_report(text)
-            self._finish_ok(text, evals, usage, off_ledger, stamped)
+            # Spec 12 item 3: a non-error report does not finalize itself
+            # when peer_interaction is on -- it moves to OPEN-FOR-REVIEW
+            # and only an explicit SendMessage(..., approve=True) runs
+            # _finish_ok. An ERRORED delegation (the except branch below)
+            # has no report to review and stays terminal immediately
+            # either way (edge 1).
+            from ....runtime import features as _features
+            if _features.enabled("peer_interaction"):
+                self._open_for_review(text, evals, usage, off_ledger, stamped)
+            else:
+                self._finish_ok(text, evals, usage, off_ledger, stamped)
         except Exception:  # noqa: BLE001
             self._finish_error(traceback.format_exc())
 
@@ -790,6 +801,61 @@ class WorkerSession:
         node = self.node
         return node._commit_workspace(
             f"{self.delegation_id} {node._name} -> {self.target} [{status}]")
+
+    def _open_for_review(
+        self,
+        text: str,
+        evals: int,
+        usage: dict,
+        off_ledger: bool,
+        stamped: int,
+    ) -> None:
+        """Hold this delegation open instead of finalizing it (spec 12
+        item 3, ratified trigger: every non-error report, automatically,
+        whenever ``peer_interaction`` is on -- no opt-in, no implicit
+        close). ``_finish_ok`` does not run until an explicit
+        ``SendMessage(to=<id>, message=..., approve=True)`` calls
+        :meth:`finalize_after_review` below; anything else just queues a
+        message for the worker (session-resumption itself -- actually
+        RESUMING the worker's CLI session with that message as its next
+        turn -- is spec 12's own separately-scoped follow-up, not built
+        yet; the queued message is recorded but not yet delivered).
+
+        Everything ``_finish_ok`` will eventually need is stashed on the
+        registry entry now, since this WorkerSession instance itself is
+        also kept live in ``node._worker_sessions`` for exactly that
+        later call.
+        """
+        node, delegation_id = self.node, self.delegation_id
+        session_id = getattr(self.worker, "last_session_id", None)
+        with node._registry_lock:
+            node._registry[delegation_id].update({
+                "status": "OpenForReview",
+                "result": text,
+                "evals": evals,
+                "usage": usage,
+                "_review_off_ledger": off_ledger,
+                "_review_stamped": stamped,
+                "session_id": session_id,
+            })
+        with node._notifications_lock:
+            node._notifications.append(
+                f"[Delegation {delegation_id} report ready for review -- "
+                "SendMessage(id, ..., approve=True) to finalize it, or "
+                "ask a question first]"
+            )
+
+    def finalize_after_review(
+        self, evals: int, usage: dict, off_ledger: bool, stamped: int,
+    ) -> None:
+        """Run the SAME finalization ``_finish_ok`` always ran, just
+        deferred until approval instead of running it the instant the
+        report text existed. Called by ``SendMessage(..., approve=True)``
+        via the registry entry's stashed values, never by the worker
+        itself."""
+        with self.node._registry_lock:
+            text = self.node._registry[self.delegation_id].get("result", "")
+        self._finish_ok(text, evals, usage, off_ledger, stamped)
 
     def _finish_ok(
         self,
@@ -1306,6 +1372,9 @@ class DelegationTools:
         without a graph spec (tests).
         """
         node = self.node
+        review_refusal = self._check_open_reviews()
+        if review_refusal is not None:
+            return review_refusal
         cutoff_refusal = self._check_delegate_cutoff()
         if cutoff_refusal is not None:
             return cutoff_refusal
@@ -1401,6 +1470,7 @@ class DelegationTools:
             started_at=started_at,
         )
         session.install_worker_tools()
+        node._worker_sessions[delegation_id] = session
 
         t = threading.Thread(
             target=session.run, daemon=True, name=delegation_id)
@@ -1421,12 +1491,46 @@ class DelegationTools:
                 cp = self._falsification_checkpoint(delegation_id)
                 body = f"Done\n\n{entry['result']}"
                 return body + (("\n\n" + cp) if cp else "")
+            if status == "OpenForReview":
+                # peer_interaction on: a successful sync Delegate() still
+                # does not finalize on its own (spec 12 item 3) -- the
+                # report is real and readable now, just not yet approved.
+                return (
+                    f"[{delegation_id}] report ready but OPEN FOR REVIEW "
+                    f"-- {entry.get('result', '')}\n\nSendMessage("
+                    f"{delegation_id!r}, ..., approve=True) to finalize "
+                    "it, or ask a question first."
+                )
             return f"Errored:\n{entry.get('result', '(no details)')}"
 
         return (
             f"Delegation started. ID: {delegation_id!r}. "
             f"Collect it with Wait('{delegation_id}'), or check on it with "
             f"Wait('{delegation_id}', block=False)."
+        )
+
+    def _check_open_reviews(self) -> str | None:
+        """Refuse a NEW delegation while ANY of this node's own
+        delegations is OPEN-FOR-REVIEW (spec 12 item 6/design item 1) --
+        a soft block, exactly like ``_check_delegate_cutoff`` below:
+        nothing kills the run, the delegator is refused with an
+        explanatory error naming every open review, not just the first.
+
+        ERRORED delegations do NOT count (edge 1) -- they have no report
+        to review and are already terminal; only OPEN-FOR-REVIEW does.
+        """
+        with self.node._registry_lock:
+            open_ids = sorted(
+                did for did, e in self.node._registry.items()
+                if e.get("status") == "OpenForReview"
+            )
+        if not open_ids:
+            return None
+        return (
+            "ERROR: you have report(s) open for review -- "
+            f"{', '.join(open_ids)} -- resolve every one (SendMessage("
+            "id, ..., approve=True) to finalize, or a question first) "
+            "before starting a new Delegate."
         )
 
     def _check_delegate_cutoff(self) -> str | None:
@@ -2176,7 +2280,8 @@ class DelegationTools:
                             f"[{did}] message from {sender_label}: {msg}")
                 open_ids = sorted(
                     i for i, e in node._registry.items()
-                    if e.get("status") in ("Working", "FollowUp")
+                    if e.get("status") in
+                    ("Working", "FollowUp", "OpenForReview")
                 )
                 # Classify what is actually still capable of finishing.
                 # A blocking tool call ends no turn, so the run's time
@@ -2185,13 +2290,18 @@ class DelegationTools:
                 # never be able to wait on something that will never
                 # arrive. A thread that has died without recording a
                 # terminal status is exactly that: nothing else in the
-                # runtime marks the registry on its behalf.
-                waitable, blocked, dead = [], [], []
+                # runtime marks the registry on its behalf. OPEN-FOR-
+                # REVIEW is the same shape as FollowUp here: nothing
+                # finishes it but the delegator's OWN SendMessage.
+                waitable, blocked, dead, reviewing = [], [], [], []
                 for i in open_ids:
+                    status = node._registry[i].get("status")
                     t = node._threads.get(i)
-                    if t is not None and not t.is_alive():
+                    if status == "OpenForReview":
+                        reviewing.append(i)
+                    elif t is not None and not t.is_alive():
                         dead.append(i)
-                    elif node._registry[i].get("status") == "FollowUp":
+                    elif status == "FollowUp":
                         blocked.append(i)
                     else:
                         # No registered thread means we cannot prove it is
@@ -2205,6 +2315,13 @@ class DelegationTools:
                 )
             if not waitable:
                 bits = []
+                if reviewing:
+                    bits.append(
+                        "open for review "
+                        f"({', '.join(reviewing)}) — call SendMessage(id, "
+                        "..., approve=True) to finalize it, or ask a "
+                        "question first"
+                    )
                 if blocked:
                     bits.append(
                         "parked on a FollowUp question "
@@ -2382,6 +2499,9 @@ class DelegationTools:
         if not isinstance(resolved, str):
             delegation_id, entry = resolved
             if entry.get("parent") == my_id:
+                if entry.get("status") == "OpenForReview":
+                    return self._handle_review_message(
+                        node, delegation_id, entry, msg, approve)
                 return self._send_downward(
                     node, my_id, delegation_id, entry, msg, wait_for_reply)
 
@@ -2401,6 +2521,45 @@ class DelegationTools:
         if isinstance(resolved, str):
             return resolved
         return f"ERROR: {to!r} is not one of your delegations."
+
+    def _handle_review_message(
+        self, node, delegation_id, entry, msg, approve,
+    ) -> str:
+        """SendMessage to an OPEN-FOR-REVIEW delegation (spec 12 item 3).
+
+        ``approve=True`` finalizes it now -- ``_finish_ok`` runs, the
+        workspace commits, the record becomes terminal. Anything else is
+        recorded (queued exactly like a normal downward message) but NOT
+        yet delivered: actually RESUMING the worker's CLI session with
+        this message as its next turn is spec 12's own separately-scoped
+        follow-up, not built yet -- said honestly in the return, not
+        silently swallowed.
+        """
+        if approve:
+            session = node._worker_sessions.pop(delegation_id, None)
+            if session is None:
+                return (
+                    f"ERROR: {delegation_id!r} has no live session to "
+                    "finalize -- already finalized, or the run restarted."
+                )
+            with node._registry_lock:
+                e = node._registry[delegation_id]
+                evals = e.get("evals", 0)
+                usage = e.get("usage", {}) or {}
+                off_ledger = bool(e.get("_review_off_ledger"))
+                stamped = e.get("_review_stamped", 0)
+            session.finalize_after_review(evals, usage, off_ledger, stamped)
+            return f"Approved. {delegation_id} finalized."
+        with entry["worker_cond"]:
+            entry["to_worker"].append((self._sender_label(), msg))
+            entry["worker_cond"].notify_all()
+        return (
+            f"Delivered -- but note: {delegation_id} is OPEN FOR REVIEW "
+            "and session-resumption (spec 12 item 3) is not built yet, "
+            "so this message will not reach the worker until that "
+            "mechanism lands. Use approve=True to finalize the report "
+            "as it stands."
+        )
 
     def _send_downward(self, node, my_id, delegation_id, entry, msg,
                         wait_for_reply) -> str:

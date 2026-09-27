@@ -782,6 +782,10 @@ class AgenticRun:
                     delegation_log=ctx.delegation_log,
                     checkpointer=saver,
                 )
+                # Stashed so _finalize_run can reach every live Node
+                # instance afterward (spec 12 edge 2's open-review sweep)
+                # -- `graph` itself is otherwise scoped to this block.
+                self._live_graph = graph
                 graph_input = (
                     None if ctx.resuming else ctx.initial_state
                 )
@@ -999,6 +1003,12 @@ class AgenticRun:
         # before this existed). No-op on a compliant close.
         self._fallback_retrospective(ctx.run_dir)
 
+        # spec 12 edge 2: Done()/the watchdog/a budget cutoff can all close
+        # a run while a delegation is still OPEN-FOR-REVIEW (peer_interaction).
+        # Record every one honestly -- open, never approved -- rather than
+        # silently dropping it or letting it read as accepted.
+        self._sweep_open_reviews(ctx.run_dir)
+
         # Persist the terminal gate outcome to run_status.json on the NORMAL
         # close too (the crash path writes its own). Without this a
         # cleanly-closed run leaves no run_status.json and the §1 protocol's
@@ -1080,6 +1090,78 @@ class AgenticRun:
                     "reached, or the model answered in prose instead of "
                     "calling Done() again."
                 ),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _sweep_open_reviews(self, run_dir: Path) -> None:
+        """Honestly record any delegation still OPEN-FOR-REVIEW when the
+        run closes (spec 12, peer_interaction, edge 2). ``Done()``, the
+        watchdog, or a budget/backstop cutoff can all close a run while a
+        worker's report is still awaiting an explicit
+        ``SendMessage(..., approve=True)`` -- that report must never be
+        recorded as approved (nothing approved it), and never silently
+        dropped either: it is written to the delegation log under a
+        status distinct from ``DONE``, and named in the delegating node's
+        retrospective.
+
+        Best-effort (never raises), matching ``_fallback_retrospective``'s
+        own posture right above this call site -- reaching into every
+        live Node instance through the compiled graph is exactly the kind
+        of bookkeeping that must never be allowed to break a run's close.
+        """
+        graph = getattr(self, "_live_graph", None)
+        if graph is None:
+            return
+        try:
+            node_names = list((self._graph_spec.nodes or {}).keys())
+        except Exception:  # noqa: BLE001
+            return
+        for name in node_names:
+            try:
+                node = graph.nodes[name].bound.func
+                with node._registry_lock:
+                    open_reviews = [
+                        (did, dict(e)) for did, e in node._registry.items()
+                        if e.get("status") == "OpenForReview"
+                    ]
+            except Exception:  # noqa: BLE001
+                continue
+            for delegation_id, entry in open_reviews:
+                self._record_unapproved_review(node, delegation_id, entry)
+
+    @staticmethod
+    def _record_unapproved_review(
+        node: Any, delegation_id: str, entry: dict
+    ) -> None:
+        """One OPEN-FOR-REVIEW delegation's honest close-out record."""
+        try:
+            if node._delegation_log is not None:
+                node._delegation_log.record(
+                    id=delegation_id,
+                    from_node=node._name,
+                    to_node=entry.get("target", "") or "",
+                    task="",
+                    deliverable=entry.get("result", "") or "",
+                    hypothesis_ids=entry.get("hypothesis_ids", []) or [],
+                    started_at=entry.get("started_at", "") or "",
+                    completed_at=datetime.now(
+                        tz=timezone.utc
+                    ).isoformat(timespec="seconds"),
+                    # Distinct from DONE/FAILED on purpose -- this was
+                    # never approved, and must never read as if it were.
+                    status="OPEN_UNAPPROVED",
+                    is_falsification_attempt=bool(
+                        entry.get("is_falsification_attempt")),
+                    evals=entry.get("evals", 0) or 0,
+                    phase=entry.get("phase"),
+                )
+            node._record_retrospective(
+                node._role_of(entry.get("target", "")), delegation_id,
+                f"[system] Run closed with {delegation_id}'s report still "
+                "OPEN FOR REVIEW -- nobody called SendMessage(..., "
+                "approve=True). Recorded honestly as open/never-approved, "
+                "not as accepted.",
             )
         except Exception:  # noqa: BLE001
             pass

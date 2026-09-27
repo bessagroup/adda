@@ -401,6 +401,11 @@ class ClaudeAdapter:
         self.route_watcher: Any = None
         # Populated after each ainvoke() with token counts from ResultMessage.
         self.last_usage: dict = {}
+        # Populated after each ainvoke() with the CLI session id (spec 12
+        # item 3: session-resumption plumbing, capture-only for now) --
+        # ResultMessage's when the turn completed normally, else whatever
+        # the last AssistantMessage carried.
+        self.last_session_id: str | None = None
 
     def _compute_allowed_tools(self, qualified_mcp_tools) -> list[str]:
         """All allowed tool names, ALWAYS as a list (never None).
@@ -854,6 +859,11 @@ class ClaudeAdapter:
             }
         else:
             self.last_usage = {}
+
+        self.last_session_id = (
+            getattr(last_result, "session_id", None)
+            or getattr(last_assistant, "session_id", None)
+        )
 
         text = ""
         if last_assistant is not None:

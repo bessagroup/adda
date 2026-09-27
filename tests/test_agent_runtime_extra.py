@@ -877,6 +877,143 @@ def test_invoke_graph_crash_fallback_never_shadows_the_exception(tmp_path):
             run._invoke_graph(ctx)
 
 
+# ---------------------------------------------------------------------------
+# _sweep_open_reviews — spec 12 edge 2: a run can close (Done()/watchdog/
+# budget cutoff) while a delegation is still OPEN-FOR-REVIEW. Must be
+# recorded honestly (open, never approved), never as DONE and never dropped.
+# ---------------------------------------------------------------------------
+
+
+class _FakeDelegationLog:
+    def __init__(self) -> None:
+        self.records: list[dict] = []
+
+    def record(self, **kwargs) -> None:
+        self.records.append(kwargs)
+
+
+class _FakeNode:
+    """Just enough of a Node for _record_unapproved_review/_sweep_open_reviews
+    to operate on -- not the real thing, since only these few attributes and
+    methods are actually touched."""
+
+    def __init__(self, name: str, registry: dict) -> None:
+        import threading as _threading
+
+        self._name = name
+        self._registry = registry
+        self._registry_lock = _threading.Lock()
+        self._delegation_log = _FakeDelegationLog()
+        self.retrospectives: list[tuple] = []
+
+    def _role_of(self, target: str) -> str:
+        return target or "unknown"
+
+    def _record_retrospective(self, role, source_id, text) -> None:
+        self.retrospectives.append((role, source_id, text))
+
+
+def test_record_unapproved_review_writes_a_distinct_terminal_status(tmp_path):
+    """The delegation log entry for an unreviewed report must NOT read
+    DONE -- that would claim approval that never happened."""
+    from adda._src.runtime.agent_runtime import AgenticRun
+
+    node = _FakeNode("strategizer", {})
+    entry = {
+        "target": "implementer", "result": "the report text",
+        "hypothesis_ids": ["H1"], "started_at": "2026-01-01T00:00:00+00:00",
+        "evals": 3, "phase": "optimization",
+        "is_falsification_attempt": True,
+    }
+
+    AgenticRun._record_unapproved_review(node, "D001", entry)
+
+    assert len(node._delegation_log.records) == 1
+    rec = node._delegation_log.records[0]
+    assert rec["status"] == "OPEN_UNAPPROVED"
+    assert rec["status"] != "DONE"
+    assert rec["deliverable"] == "the report text"
+    assert rec["evals"] == 3
+    assert len(node.retrospectives) == 1
+    role, source_id, text = node.retrospectives[0]
+    assert source_id == "D001"
+    assert "OPEN FOR REVIEW" in text
+    assert "never approved" in text or "never-approved" in text
+
+
+def test_record_unapproved_review_is_best_effort_never_raises(tmp_path):
+    """A node too broken to log against (no delegation_log, or one that
+    itself raises) must not take the run's close down with it."""
+    from adda._src.runtime.agent_runtime import AgenticRun
+
+    node = _FakeNode("strategizer", {})
+    node._delegation_log = None  # simulate a run with no delegation log
+
+    # Must not raise.
+    AgenticRun._record_unapproved_review(node, "D001", {"target": "x"})
+    assert len(node.retrospectives) == 1  # retrospective still recorded
+
+
+def test_sweep_open_reviews_finds_and_records_every_open_one(tmp_path):
+    """The sweep reaches every live Node instance via the compiled graph
+    and records EACH OpenForReview entry, not just the first."""
+    from adda._src.runtime.agent_runtime import AgenticRun
+
+    (tmp_path / "PROBLEM_STATEMENT.md").write_text("x\n", encoding="utf-8")
+    run = AgenticRun(tmp_path)
+
+    node = _FakeNode("strategizer", {
+        "D001": {
+            "status": "OpenForReview", "target": "implementer",
+            "result": "report 1", "hypothesis_ids": [], "started_at": "",
+            "evals": 0,
+        },
+        "D002": {
+            "status": "Done", "target": "implementer", "result": "report 2",
+            "hypothesis_ids": [], "started_at": "", "evals": 0,
+        },
+        "D003": {
+            "status": "OpenForReview", "target": "implementer",
+            "result": "report 3", "hypothesis_ids": [], "started_at": "",
+            "evals": 0,
+        },
+    })
+
+    class _FakeRunnable:
+        def __init__(self, func):
+            self.func = func
+
+    class _FakePregelNode:
+        def __init__(self, func):
+            self.bound = _FakeRunnable(func)
+
+    class _FakeGraph:
+        def __init__(self, nodes):
+            self.nodes = {
+                name: _FakePregelNode(n) for name, n in nodes.items()}
+
+    run._live_graph = _FakeGraph({"strategizer": node})
+
+    run._sweep_open_reviews(tmp_path / "runs" / "T")
+
+    recorded_ids = {r["id"] for r in node._delegation_log.records}
+    assert recorded_ids == {"D001", "D003"}  # D002 (Done) is untouched
+    assert all(
+        r["status"] == "OPEN_UNAPPROVED" for r in node._delegation_log.records
+    )
+
+
+def test_sweep_open_reviews_is_a_noop_with_no_live_graph(tmp_path):
+    """Before _invoke_graph ever ran (or a caller-supplied pre-built
+    graph bypassed the stash), the sweep degrades to a silent no-op --
+    never an exception at run close."""
+    from adda._src.runtime.agent_runtime import AgenticRun
+
+    (tmp_path / "PROBLEM_STATEMENT.md").write_text("x\n", encoding="utf-8")
+    run = AgenticRun(tmp_path)
+    run._sweep_open_reviews(tmp_path / "runs" / "T")  # must not raise
+
+
 def test_fallback_retrospective_accepts_a_custom_reason(tmp_path):
     """The crash path passes its own reason naming the exception type, so
     the synthesized text says the run died rather than implying the
