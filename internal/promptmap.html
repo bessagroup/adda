@@ -739,10 +739,10 @@ function piecesBlock(sec, key){
   </div>`;
 }
 
-function sectionRow(sec, key){
+function sectionRow(sec, key, open=false){
   SECTIONS.set(key, sec);
   const preview = sec.text.trim().split("\n")[0].slice(0,90);
-  return `<div class="row" data-open="false">
+  return `<div class="row" data-open="${open}">
     <button class="rowbtn" type="button" data-toggle="${key}">
       <svg class="chev" width="9" height="9" viewBox="0 0 9 9" aria-hidden="true"><path d="M2 1l4 3.5L2 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
       <span class="rowtag">${sec.tag ? `&lt;${esc(sec.tag)}&gt;`
@@ -753,7 +753,7 @@ function sectionRow(sec, key){
       <span class="rowsrc">${esc(srcOf(sec.source))}</span>
       <span class="rowchars">${num(sec.chars)}</span>
     </button>
-    <div class="rowbody" hidden>
+    <div class="rowbody"${open ? "" : " hidden"}>
       <div class="rowmeta">
         ${sourceLink(sec.source)}
         ${sec.injects ? `<span class="chip k-accent">injected verbatim · ${esc(sec.injects.name)} @ ${esc(sec.injects.file)}:${sec.injects.line}</span>` : ""}
@@ -1029,19 +1029,19 @@ function renderRole(r){
 /* What a gate hands back to the agent -- a nudge, a refusal -- lands in the
    agent's context, so it is prompt, and it renders with the same row a role's
    prompt sections use: source first, then the text, one "propose an edit".
-   The gate's docstring is not shown: no agent reads it. */
+   Messages are short, so they render open: a collapsed row would only
+   preview the text it hides. The gate's docstring is not shown: no agent
+   reads it. */
 function gateRows(g){
   const rows = [];
   const n = (g.messages||[]).length;
   (g.messages||[]).forEach((m, i) => {
-    const first = m.text.trim().split("\n")[0];
     rows.push(sectionRow({
-      label: `told to the agent${n > 1 ? ` · ${i+1}/${n}` : ""} — “${
-        first.length > 38 ? first.slice(0,38) + "…" : first}”`,
+      label: `told to the agent${n > 1 ? ` · ${i+1} of ${n}` : ""}`,
       text: m.text, chars: m.text.length, edit: m.edit,
       source: {file: m.file, line: m.line, line_end: m.line_end,
                match: "message", span: true},
-    }, "gatemsg-" + g.id + "-" + i));
+    }, "gatemsg-" + g.id + "-" + i, true));
   });
   const none = n ? "" : `<p class="nomsg">Tells the agent nothing of its own — what
     the agent experiences comes from the caller, or the gate only changes what
