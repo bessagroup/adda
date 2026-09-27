@@ -961,6 +961,47 @@ class LiteratureCorpus:
     # PDF extraction
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _pdf_has_text_layer(pdf_path: Path, sample_pages: int = 3) -> bool:
+        """True if *pdf_path* already has a real embedded text layer (a
+        normal, non-scanned PDF -- the vast majority of real arXiv
+        papers), sampled cheaply via fitz/PyMuPDF -- already a dependency,
+        no new one.
+
+        Decides the do_ocr choice below: OCR is for recovering text from
+        a page that has none (a genuinely scanned document), and is
+        expensive (CPU-bound model inference, ~20-40s/page measured in
+        CI). Running it against a PDF that already has embedded text
+        finds nothing (confirmed in CI: RapidOCR logged "The text
+        detection result is empty" on every page of a fitz-generated
+        text PDF) and simply wastes that time -- for a real 20-page
+        arXiv paper, ~10 minutes for nothing, on every run, including on
+        Oscar. Sampling a few pages rather than every one keeps this
+        check itself cheap; a real paper is essentially never a mix of
+        scanned and native pages, so a per-document decision from a
+        sample is the right granularity (docling's own do_ocr is a
+        per-document pipeline option, not a per-page one, so a per-page
+        decision isn't available to hand it anyway).
+
+        Returns True (has text, skip OCR) when the check itself fails for
+        any reason -- fitz missing, a corrupt file -- so failure degrades
+        to OCR running (slower, never WRONG) rather than silently
+        skipping OCR a genuinely scanned PDF needed.
+        """
+        if fitz is None:
+            return False
+        try:
+            doc = fitz.open(str(pdf_path))
+            try:
+                pages = list(doc)[:sample_pages] or list(doc)
+                return any(
+                    len((pg.get_text() or "").strip()) > 50 for pg in pages
+                )
+            finally:
+                doc.close()
+        except Exception:  # noqa: BLE001
+            return False
+
     def _extract_pdf_to_md(self, pdf_path: Path) -> str:
         """Extract page-annotated Markdown from *pdf_path*.
 
@@ -973,6 +1014,13 @@ class LiteratureCorpus:
         ANY Docling result > 100 chars, so a *failed* ~236-char Docling parse
         would beat the PyMuPDF fallback. Require a real body (> the full-text
         threshold) before trusting Docling; otherwise fall through.
+
+        OCR runs ONLY when the PDF actually needs it (:meth:`_pdf_has_text_layer`
+        decides): most real papers already have an embedded text layer, and
+        running OCR against one anyway is pure CPU-bound waste that finds
+        nothing (CI evidence: run for f0e5e91, macos-latest 3.10 -- RapidOCR
+        logged "The text detection result is empty" roughly every 20-40s,
+        once per page, against a text PDF).
         """
         docling_md = ""
         # 1. Docling — layout-aware, the accuracy path. Absent on Intel macOS.
@@ -980,9 +1028,21 @@ class LiteratureCorpus:
             from docling.datamodel.base_models import (
                 InputFormat,  # type: ignore
             )
+            from docling.datamodel.pipeline_options import (  # type: ignore
+                PdfPipelineOptions,
+            )
             from docling.document_converter import (  # type: ignore
                 DocumentConverter,
                 PdfFormatOption,
+            )
+            _has_text_layer = self._pdf_has_text_layer(pdf_path)
+            _pipeline_options = PdfPipelineOptions(do_ocr=not _has_text_layer)
+            log.info(
+                "docling extraction of %s: OCR %s (%s)",
+                pdf_path,
+                "skipped" if _has_text_layer else "enabled",
+                "text layer found" if _has_text_layer
+                else "no text layer / fitz unavailable",
             )
             # Force the pre-2.123.0 single-threaded backend explicitly.
             # docling 2.123.0 changed PdfFormatOption's own default from
@@ -1001,12 +1061,16 @@ class LiteratureCorpus:
                 )
                 _format_options = {
                     InputFormat.PDF: PdfFormatOption(
-                        backend=DoclingParseDocumentBackend),
+                        backend=DoclingParseDocumentBackend,
+                        pipeline_options=_pipeline_options),
                 }
             except ImportError:
                 # Older docling without the threaded-default split — its own
                 # default is already the single-threaded backend.
-                _format_options = None
+                _format_options = {
+                    InputFormat.PDF: PdfFormatOption(
+                        pipeline_options=_pipeline_options),
+                }
             converter = DocumentConverter(format_options=_format_options)
             result = converter.convert(str(pdf_path))
             docling_md = result.document.export_to_markdown() or ""

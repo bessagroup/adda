@@ -412,6 +412,143 @@ def test_extraction_returns_real_body_from_text_pdf(tmp_path):
     assert "unavailable" not in md.lower()
 
 
+# ---------------------------------------------------------------------------
+# OCR-on-demand (spec: OCR only when the PDF actually needs it) -- a real
+# arXiv paper almost always has an embedded text layer, and running OCR
+# against one anyway finds nothing while costing ~20-40s/page (CI evidence,
+# run for f0e5e91: RapidOCR logged "The text detection result is empty" on
+# every page of a fitz-generated text PDF). These tests fake the docling
+# module entirely (it isn't installed on Intel macOS, this dev machine
+# included -- pyproject.toml's own marker excludes it there) so the do_ocr
+# DECISION is exercised and inspected directly, never timed.
+# ---------------------------------------------------------------------------
+
+
+def _install_fake_docling(monkeypatch, captured: dict, md_body: str = None):
+    """Install a minimal fake docling package tree in sys.modules, deep
+    enough for literature_corpus.py's own import statements to resolve.
+    Records the do_ocr value and the PdfFormatOption actually built, and
+    returns export_to_markdown() from `md_body` (or a generic default) so
+    the extraction's own body/annotations can be checked unchanged."""
+    import sys
+    import types
+
+    body = md_body if md_body is not None else (
+        "<!-- page 1 -->\nfake docling body " * 20)
+
+    class _InputFormat:
+        PDF = "pdf"
+
+    class _PdfPipelineOptions:
+        def __init__(self, do_ocr=True):
+            self.do_ocr = do_ocr
+            captured["do_ocr"] = do_ocr
+
+    class _PdfFormatOption:
+        def __init__(self, backend=None, pipeline_options=None):
+            self.backend = backend
+            self.pipeline_options = pipeline_options
+            captured["pipeline_options"] = pipeline_options
+
+    class _FakeDocument:
+        def export_to_markdown(self):
+            return body
+
+    class _FakeResult:
+        document = _FakeDocument()
+
+    class _DocumentConverter:
+        def __init__(self, format_options=None):
+            captured["format_options"] = format_options
+
+        def convert(self, path):
+            captured["converted_path"] = path
+            return _FakeResult()
+
+    class _DoclingParseDocumentBackend:
+        pass
+
+    mod_docling = types.ModuleType("docling")
+    mod_datamodel = types.ModuleType("docling.datamodel")
+    mod_base_models = types.ModuleType("docling.datamodel.base_models")
+    mod_base_models.InputFormat = _InputFormat
+    mod_pipeline_options = types.ModuleType("docling.datamodel.pipeline_options")
+    mod_pipeline_options.PdfPipelineOptions = _PdfPipelineOptions
+    mod_document_converter = types.ModuleType("docling.document_converter")
+    mod_document_converter.DocumentConverter = _DocumentConverter
+    mod_document_converter.PdfFormatOption = _PdfFormatOption
+    mod_backend = types.ModuleType("docling.backend")
+    mod_backend_dp = types.ModuleType("docling.backend.docling_parse_backend")
+    mod_backend_dp.DoclingParseDocumentBackend = _DoclingParseDocumentBackend
+
+    for name, mod in [
+        ("docling", mod_docling),
+        ("docling.datamodel", mod_datamodel),
+        ("docling.datamodel.base_models", mod_base_models),
+        ("docling.datamodel.pipeline_options", mod_pipeline_options),
+        ("docling.document_converter", mod_document_converter),
+        ("docling.backend", mod_backend),
+        ("docling.backend.docling_parse_backend", mod_backend_dp),
+    ]:
+        monkeypatch.setitem(sys.modules, name, mod)
+
+
+def test_ocr_skipped_when_pdf_already_has_a_text_layer(tmp_path, monkeypatch):
+    """A PDF with a real embedded text layer (the vast majority of real
+    papers) must NOT pay for OCR -- do_ocr=False reaches docling's own
+    pipeline options."""
+    import fitz
+
+    captured: dict = {}
+    # Long enough to clear _FULL_TEXT_MD_THRESHOLD (5000 chars) so this
+    # docling result is the one actually returned, not the pymupdf
+    # fallback -- the point being verified is that OCR's on/off state
+    # doesn't change what the extraction returns.
+    long_body = "<!-- page 1 -->\nfake docling body " * 400
+    _install_fake_docling(monkeypatch, captured, md_body=long_body)
+    corpus = _make_corpus(tmp_path)
+    doc = fitz.open()
+    pg = doc.new_page()
+    pg.insert_textbox(fitz.Rect(40, 40, 560, 760), "word " * 150)
+    pdf_path = tmp_path / "text.pdf"
+    doc.save(str(pdf_path))
+    doc.close()
+
+    result = corpus._extract_pdf_to_md(pdf_path)
+
+    assert captured["do_ocr"] is False
+    assert "fake docling body" in result  # extraction output unaffected
+
+
+def test_ocr_enabled_for_an_image_only_pdf(tmp_path, monkeypatch):
+    """A PDF with no embedded text layer at all (a genuinely scanned
+    document) must still get OCR -- do_ocr=True."""
+    import fitz
+
+    captured: dict = {}
+    _install_fake_docling(monkeypatch, captured)
+    corpus = _make_corpus(tmp_path)
+    doc = fitz.open()
+    doc.new_page()  # blank page: no text layer whatsoever
+    pdf_path = tmp_path / "scanned.pdf"
+    doc.save(str(pdf_path))
+    doc.close()
+
+    corpus._extract_pdf_to_md(pdf_path)
+
+    assert captured["do_ocr"] is True
+
+
+def test_pdf_has_text_layer_defaults_to_ocr_on_a_corrupt_file(tmp_path):
+    """The text-layer check itself failing (corrupt file, fitz absent)
+    must default to "needs OCR" -- slower, never silently wrong for a
+    genuinely scanned document this check couldn't read."""
+    bad_pdf = tmp_path / "corrupt.pdf"
+    bad_pdf.write_bytes(b"not a pdf at all")
+    corpus = _make_corpus(tmp_path)
+    assert corpus._pdf_has_text_layer(bad_pdf) is False
+
+
 def test_pdf_real_extraction_is_stored_as_fulltext(tmp_path, monkeypatch):
     """The fix must not over-reject: a PDF with a real body is full-text."""
     corpus = _make_corpus(tmp_path)
