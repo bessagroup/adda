@@ -32,6 +32,13 @@ jobs:
               || fromJSON('["3.10", "3.11", "3.12", "3.13"]') }}
       fail-fast: false
     runs-on: ${{ matrix.os }}
+    # Second line of defence behind pytest-timeout's own per-test bound
+    # (pyproject.toml, `[tool.pytest.ini_options]`): if a hang somehow
+    # outlives that (e.g. pytest-timeout itself misbehaving, or something
+    # stuck outside any single test's boundary), the JOB still gets killed
+    # well short of GitHub's 6-hour ceiling instead of quietly burning
+    # Actions minutes with nothing to show for it.
+    timeout-minutes: 45
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

@@ -89,6 +89,7 @@ tests = [
   "playwright>=1.47",
   "pytest>=8.4.1",
   "pytest-cov>=6.2.1",
+  "pytest-timeout>=2.3.1",
   "pytest-xdist>=3.6.1",
   "tomli>=2.0; python_version < '3.11'"
 ]
@@ -133,6 +134,16 @@ source = ["src"]
 
 [tool.pytest.ini_options]
 addopts = "--cov-report term --cov-report html --cov-config=.coveragerc --cov=adda --cov-fail-under=85.00"
+# Global bound so a regression that reintroduces a missed wake (a blocked
+# SendMessage/Wait predicate, a hung thread join) fails the ONE test that
+# hit it within seconds, instead of riding out to GitHub's 6-hour job
+# ceiling with nothing else telling you which test is stuck. The `thread`
+# method dumps every thread's stack on timeout -- for a hang inside a
+# blocking primitive that IS the diagnostic (which lock, which predicate).
+# Raise per-test with @pytest.mark.timeout(n) only where a test is
+# legitimately slower than this, not to paper over a real hang.
+timeout = 120
+timeout_method = "thread"
 markers = [
   "smoke",
   "requires_dependency(name): mark the test as it requires a certain dependency",
