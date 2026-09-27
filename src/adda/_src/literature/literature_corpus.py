@@ -1018,9 +1018,7 @@ class LiteratureCorpus:
         OCR runs ONLY when the PDF actually needs it (:meth:`_pdf_has_text_layer`
         decides): most real papers already have an embedded text layer, and
         running OCR against one anyway is pure CPU-bound waste that finds
-        nothing (CI evidence: run for f0e5e91, macos-latest 3.10 -- RapidOCR
-        logged "The text detection result is empty" roughly every 20-40s,
-        once per page, against a text PDF).
+        nothing, roughly every 20-40s per page.
         """
         docling_md = ""
         # 1. Docling — layout-aware, the accuracy path. Absent on Intel macOS.

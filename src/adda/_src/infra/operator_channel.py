@@ -289,8 +289,7 @@ def queue_note(run_dir: Path | str, text: str, to_node: str = "") -> bool:
     its write into the file the drainer already renamed aside and is
     about to read-then-delete — after the read, before the delete —
     losing the note even though the POST that queued it reported
-    ``ok=True``. Confirmed in CI, not theoretical: run 36353193779,
-    ubuntu 3.13, `test_a_note_queued_while_draining_is_not_lost`.
+    ``ok=True``.
 
     ``_locked`` degrading to an unsynchronized append (its own Timeout/
     no-filelock/OSError paths, all of which still run this function's

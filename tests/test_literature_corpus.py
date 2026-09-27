@@ -294,21 +294,14 @@ def test_get_paper_returns_content(tmp_path):
 def test_extract_pdf_to_md_page_annotations(tmp_path):
     """If fitz is available, output contains <!-- page N --> annotations.
 
-    Raised past the global 120s bound TWICE now (first to 300s, still not
-    enough): this test runs docling's REAL table-structure ML model
-    (TableFormer, torch-based CPU inference) against a genuine 8-page
-    PDF, not a mock -- confirmed from a CI traceback (0fae21d) showing
-    the timeout firing inside actual model inference
-    (docling_ibm_models/tableformer/.../tablemodel04_rs.py), not a hang.
-    That inference is CPU-heavy, and every docling-using test running
-    that pipeline's own internal multi-threaded stages AT THE SAME TIME
-    as several OTHER xdist workers, on a loaded macOS CI runner, is real
-    contention for the same physical cores -- the same class of problem
-    the Jupyter-kernel `xdist_group` fix addressed. `xdist_group` here
-    serializes every docling-heavy test onto one worker so they no
-    longer fight each other for CPU; 600s is backstop headroom for even
-    the single-at-a-time case on a slow runner, not a number raised
-    until the symptom disappeared -- the grouping is the actual fix.
+    Shrunk from 8 pages to 2: the assertions below only need >=1 page
+    marker / some body text -- they never depended on page COUNT, so 8
+    was arbitrary test data that just multiplied docling's real per-page
+    cost (table-structure model inference; OCR itself is skipped for a
+    text PDF like this one, see literature_corpus.py's own do_ocr logic)
+    for no assertion benefit. `xdist_group`/600s stay as backstop
+    headroom for the table-structure inference this test still exercises
+    for real when docling is installed.
     """
     try:
         import fitz  # noqa: F401
@@ -319,10 +312,11 @@ def test_extract_pdf_to_md_page_annotations(tmp_path):
     corpus = _make_corpus(tmp_path)
 
     if fitz_available:
-        # A realistic text PDF (real papers are large) so extraction is treated
-        # as a full parse, not a thin/scanned stub.
+        # A realistic text PDF so extraction is treated as a full parse,
+        # not a thin/scanned stub -- 2 pages is enough for the page-N
+        # annotation assertions below, which never needed more.
         doc = fitz.open()
-        for _ in range(8):
+        for _ in range(2):
             pg = doc.new_page()
             pg.insert_textbox(fitz.Rect(40, 40, 560, 760), ("word " * 150))
         pdf_path = tmp_path / "test.pdf"
@@ -415,12 +409,10 @@ def test_extraction_returns_real_body_from_text_pdf(tmp_path):
 # ---------------------------------------------------------------------------
 # OCR-on-demand (spec: OCR only when the PDF actually needs it) -- a real
 # arXiv paper almost always has an embedded text layer, and running OCR
-# against one anyway finds nothing while costing ~20-40s/page (CI evidence,
-# run for f0e5e91: RapidOCR logged "The text detection result is empty" on
-# every page of a fitz-generated text PDF). These tests fake the docling
-# module entirely (it isn't installed on Intel macOS, this dev machine
-# included -- pyproject.toml's own marker excludes it there) so the do_ocr
-# DECISION is exercised and inspected directly, never timed.
+# against one anyway finds nothing while costing ~20-40s/page. These tests
+# fake the docling module entirely (it isn't installed on Intel macOS, this
+# dev machine included -- pyproject.toml's own marker excludes it there) so
+# the do_ocr DECISION is exercised and inspected directly, never timed.
 # ---------------------------------------------------------------------------
 
 

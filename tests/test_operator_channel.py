@@ -207,9 +207,8 @@ def test_a_note_queued_while_draining_is_not_lost(tmp_path):
 
 def test_a_note_queued_mid_open_is_not_lost_deterministic(tmp_path, monkeypatch):
     """Deterministic reproduction of the exact interleaving that lost a
-    note in CI (run 36353193779, ubuntu 3.13,
-    test_a_note_queued_while_draining_is_not_lost) -- not relying on
-    thread scheduling to hit the window.
+    note in test_a_note_queued_while_draining_is_not_lost above -- not
+    relying on thread scheduling to hit the window.
 
     The mechanism: queue_note's ``open(path, "a")`` returns a file handle
     bound to the CURRENT inode; rename-claiming that same path (what
