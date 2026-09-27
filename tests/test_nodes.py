@@ -3974,3 +3974,70 @@ def test_single_node_graph_takes_a_turn_without_crashing():
     result = node(make_state())  # must not raise
 
     assert isinstance(result, Command)
+
+
+def test_report_retry_is_recorded_as_a_diagnostic(tmp_path):
+    """Report 7 (run 20260830T004106, Oscar): a worker's malformed first
+    reply triggers a SILENT retry with the ORIGINAL task_msg still the bulk
+    of a fresh worker.invoke() call — nothing logged anywhere. If that
+    malformed reply came from a stream that ended mid-tool with no
+    ResultMessage (backends/claude.py's STREAM_ENDED_WITHOUT_RESULT), this
+    retry is indistinguishable, after the fact, from a from-scratch restart
+    of the delegation, discarding whatever the interrupted attempt launched.
+    Now every report-retry records a REPORT_RETRY diagnostic."""
+    import json as _json
+
+    calls = []
+
+    class FlakyThenGoodWorker(StubAdapter):
+        def invoke(self, messages):
+            calls.append(messages)
+            if len(calls) == 1:
+                return ""  # malformed: empty, exactly what a
+                # STREAM_ENDED_WITHOUT_RESULT turn returns
+            return (
+                "## Report\n\n### Actions taken\n- retried\n\n"
+                "### Files touched\n- none\n\n### Conclusions\ndone\n\n"
+                "### Numbers\nevals: 0"
+            )
+
+    class DelegateAdapter(StubAdapter):
+        def invoke(self, messages):
+            self.closure_tools["HypothesisPropose"](
+                statement="Report-retry diagnostic test",
+                falsification_criterion="any counter",
+                prediction="none found",
+                prior=0.5,
+            )
+            self.closure_tools["Delegate"](
+                target="implementer", intent="test retry", expected_report="",
+                hypothesis_ids=["H1"],
+            )
+            _time.sleep(0.3)
+            self.closure_tools["Done"](summary="done")
+            return "Done."
+
+    from adda._src.nodes import Node
+    study_tmp = tmp_path / "study"
+    study_tmp.mkdir()
+    notes = tmp_path / "debug" / "strategizer_notes"
+    notes.mkdir(parents=True)
+    adapter = DelegateAdapter()
+    spec = _ledger_spec()
+    worker = FlakyThenGoodWorker()
+    node = Node(
+        adapter, name="strategizer", outgoing=["implementer"], spec=spec,
+        worker_adapters={"implementer": worker},
+        notes_dir=notes,
+        study_dir=study_tmp,
+    )
+    node(make_state(study_dir=str(study_tmp)))
+
+    assert len(calls) == 2  # the silent retry really happened
+    diag_path = tmp_path / "debug" / "diagnostics.jsonl"
+    assert diag_path.exists()
+    records = [_json.loads(ln) for ln in diag_path.read_text().splitlines() if ln]
+    report_retries = [r for r in records if r.get("error_type") == "REPORT_RETRY"]
+    assert len(report_retries) == 1
+    assert report_retries[0]["fault"] == "nudge"
+    assert "malformed" in report_retries[0]["message"].lower()

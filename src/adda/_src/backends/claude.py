@@ -213,6 +213,44 @@ async def _stream_with_idle_timeout(
         yield msg
 
 
+def _record_stream_diagnostic(event_type: str, message: str, **extra: Any) -> None:
+    """Best-effort append to this delegation's ``debug/diagnostics.jsonl``.
+
+    ``ClaudeAdapter`` is backend-level and has no ``node`` reference (that
+    lives in ``nodes/``, a layer up), so it cannot call ``_record_tool_error``/
+    ``_record_intervention`` directly. Reuses the SAME thread-local
+    ``run_config_path`` ``_build_session_env`` already reads (bound per
+    delegation thread in ``delegation.py``) to derive ``debug_dir`` and
+    append in the identical shape those methods use — one diagnostics.jsonl,
+    written from wherever the fact is first known.
+
+    No-op, never raises, if the path isn't bound on this thread (e.g. an
+    entry node's own turn, which has no delegation_id/run_config of its own)
+    — silence here is a missed diagnostic, never a broken turn.
+    """
+    try:
+        from .base import get_delegation_id, get_run_config_path
+        rc = get_run_config_path()
+        if not rc:
+            return
+        import json as _json
+        from datetime import datetime, timezone
+        debug_dir = Path(rc).parent
+        record: dict = {
+            "ts": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
+            "node": get_delegation_id() or "",
+            "tool": event_type,
+            "error_type": event_type,
+            "fault": "system",
+            "message": message,
+        }
+        record.update(extra)
+        with (debug_dir / "diagnostics.jsonl").open("a", encoding="utf-8") as f:
+            f.write(_json.dumps(record) + "\n")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _build_session_env() -> dict:
     """Per-session env vars injected into the worker subprocess (thread-local).
 
@@ -557,6 +595,7 @@ class ClaudeAdapter:
         last_assistant = None
         last_result: Any = None
         _buffer_overflowed = False
+        _deliberate_break = False
         gen = query(prompt=prompt_str, options=options)
         # Idle-stream timeout — turns a silent stream into a retryable
         # TimeoutError. Resets on EVERY stream message. Scoped to model
@@ -696,6 +735,7 @@ class ClaudeAdapter:
                 if isinstance(msg, AssistantMessage):
                     last_assistant = msg
                     if self.route_watcher and self.route_watcher():
+                        _deliberate_break = True
                         break
                 elif isinstance(msg, ResultMessage):
                     last_result = msg
@@ -720,6 +760,34 @@ class ClaudeAdapter:
                     await aclose()
                 except Exception:
                     pass
+
+        # A stream that ends with neither a ResultMessage NOR a deliberate
+        # route_watcher break, and wasn't already explained by a buffer
+        # overflow, is abnormal: the CLI session ended (or the SDK's async
+        # generator was exhausted) without ever completing its turn — report
+        # 7 (run 20260830T004106, Oscar): the last AssistantMessage carried
+        # only a tool call (e.g. Bash/TaskOutput), no result ever arrived,
+        # and the near-empty `text` this then returns reads as a malformed
+        # report to _invoke_with_report_retry, which silently re-invokes
+        # with the ORIGINAL task — restarting the delegation from scratch,
+        # orphaning whatever the first attempt launched, with nothing
+        # logged anywhere. This does not change that return behaviour (a
+        # future decision, pending Elvis) — it only makes the fact visible.
+        if last_result is None and not _deliberate_break and not _buffer_overflowed:
+            _last_tool = None
+            if last_assistant is not None:
+                for _b in last_assistant.content:
+                    if isinstance(_b, ToolUseBlock):
+                        _last_tool = _b.name
+            _record_stream_diagnostic(
+                "STREAM_ENDED_WITHOUT_RESULT",
+                "CLI stream ended without a ResultMessage or a deliberate "
+                "route break — the turn may not have completed; its "
+                "returned text can look like a malformed report and "
+                "trigger a silent report-retry.",
+                last_tool_in_flight=_last_tool,
+                cli_session_id=getattr(last_assistant, "session_id", None),
+            )
 
         # Capture token usage from ResultMessage for run-level accounting.
         if last_result is not None:

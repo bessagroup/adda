@@ -449,3 +449,117 @@ def test_last_usage_recovered_from_assistant_message_when_route_watcher_breaks_e
     assert adapter.last_usage["input_tokens"] == 1200
     assert adapter.last_usage["output_tokens"] == 340
     assert adapter.last_usage["total_cost_usd"] is None
+
+
+# ---------------------------------------------------------------------------
+# STREAM_ENDED_WITHOUT_RESULT (report 7, run 20260830T004106, Oscar): a
+# stream that ends mid-tool with no ResultMessage used to return silently,
+# with nothing recorded anywhere.
+# ---------------------------------------------------------------------------
+
+class _ToolUseBlockWithName:
+    def __init__(self, name, input_):
+        self.name = name
+        self.input = input_
+
+
+def _bind_delegation_diagnostics(tmp_path):
+    """Bind the thread-locals _record_stream_diagnostic reads, so it writes
+    to tmp_path/debug/diagnostics.jsonl; returns that path (unlinking any
+    prior teardown state on exit is the caller's job via try/finally)."""
+    import json as _json
+
+    from adda._src.backends.base import set_delegation_id, set_run_config_path
+    debug = tmp_path / "debug"
+    debug.mkdir(parents=True, exist_ok=True)
+    rc = debug / "run_config.json"
+    rc.write_text(_json.dumps({"store_dir": str(tmp_path), "study_dir": "x"}))
+    set_delegation_id("D007")
+    set_run_config_path(str(rc))
+    return debug / "diagnostics.jsonl"
+
+
+def _unbind_delegation_diagnostics():
+    from adda._src.backends.base import set_delegation_id, set_run_config_path
+    set_delegation_id(None)
+    set_run_config_path(None)
+
+
+def _read_diagnostics(path):
+    import json as _json
+    if not path.exists():
+        return []
+    return [_json.loads(ln) for ln in path.read_text().splitlines() if ln]
+
+
+def test_stream_ended_without_result_is_recorded(tmp_path):
+    """A stream that ends right after an AssistantMessage carrying only a
+    tool call (no TextBlock, no ResultMessage) is exactly what a mid-tool
+    CLI death looks like from ainvoke()'s side — confirmed to make
+    _invoke_with_report_retry silently re-invoke with the original task
+    (its near-empty text reads as malformed). Must now be recorded."""
+    async def _gen_dies_mid_tool(prompt, options):
+        yield _AssistantMessage([_ToolUseBlockWithName("Bash", {"command": "sleep 20"})])
+        return
+
+    _install_fake_sdk(query=_gen_dies_mid_tool, ToolUseBlock=_ToolUseBlockWithName)
+    ClaudeAdapter = _get_adapter()
+    adapter = ClaudeAdapter("claude-3", "sys", None, [])
+
+    diag_path = _bind_delegation_diagnostics(tmp_path)
+    try:
+        result = adapter.invoke([{"role": "user", "content": "original task"}])
+    finally:
+        _unbind_delegation_diagnostics()
+
+    assert result == ""  # near-empty text, exactly what looks malformed
+    records = _read_diagnostics(diag_path)
+    hits = [r for r in records if r.get("error_type") == "STREAM_ENDED_WITHOUT_RESULT"]
+    assert len(hits) == 1
+    assert hits[0]["last_tool_in_flight"] == "Bash"
+    assert hits[0]["node"] == "D007"
+
+
+def test_normal_completion_does_not_record_stream_diagnostic(tmp_path):
+    _install_fake_sdk(query=make_async_gen_with_messages("all good"))
+    ClaudeAdapter = _get_adapter()
+    adapter = ClaudeAdapter("claude-3", "sys", None, [])
+
+    diag_path = _bind_delegation_diagnostics(tmp_path)
+    try:
+        adapter.invoke([{"role": "user", "content": "hi"}])
+    finally:
+        _unbind_delegation_diagnostics()
+
+    hits = [r for r in _read_diagnostics(diag_path)
+            if r.get("error_type") == "STREAM_ENDED_WITHOUT_RESULT"]
+    assert hits == []
+
+
+def test_route_watcher_break_does_not_record_stream_diagnostic(tmp_path):
+    """A deliberate route_watcher break (e.g. Done() closing the run) is the
+    NORMAL "no ResultMessage" case — must not be confused with an abnormal
+    stream end."""
+    class _AssistantMessageWithUsage(_AssistantMessage):
+        def __init__(self, blocks, usage):
+            super().__init__(blocks)
+            self.usage = usage
+
+    async def _gen_route_watcher_breaks(prompt, options):
+        yield _AssistantMessageWithUsage(
+            [_TextBlock("Run complete.")], {"input_tokens": 1, "output_tokens": 1})
+
+    _install_fake_sdk(query=_gen_route_watcher_breaks)
+    ClaudeAdapter = _get_adapter()
+    adapter = ClaudeAdapter("claude-3", "sys", None, [])
+    adapter.route_watcher = lambda: True
+
+    diag_path = _bind_delegation_diagnostics(tmp_path)
+    try:
+        adapter.invoke([{"role": "user", "content": "hi"}])
+    finally:
+        _unbind_delegation_diagnostics()
+
+    hits = [r for r in _read_diagnostics(diag_path)
+            if r.get("error_type") == "STREAM_ENDED_WITHOUT_RESULT"]
+    assert hits == []

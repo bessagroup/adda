@@ -360,6 +360,38 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   (`build_corpus_read_closures` tagging); `nodes/orchestration.py`
   (`_wrap_closure`). **Status:** core.
 
+### A stream ending mid-turn, and the retry it silently triggers, are now diagnostics events
+- **What:** `ainvoke()` (backends/claude.py) can reach the end of the CLI's
+  stream with neither a `ResultMessage` nor a deliberate `route_watcher`
+  break — the CLI session ended (or the SDK's async generator was
+  exhausted) before the turn actually finished, e.g. mid a Bash/TaskOutput
+  call. That used to return silently: whatever near-empty `text` the last
+  `AssistantMessage` carried (often nothing, since a tool-call message
+  rarely has a `TextBlock`) came back as if the turn had completed
+  normally. Reaching `WorkerSession._invoke_with_report_retry`
+  (`nodes/tools/routing/delegation.py`), that near-empty text reads as a
+  MALFORMED report (`_classify_response`), which silently triggers ONE
+  corrective retry — a fresh `worker.invoke()` call, a new CLI session,
+  with the delegation's ORIGINAL `task_msg` still the bulk of the prompt.
+  Nothing was logged on either side: an investigation (`root-cause work,
+  Oscar run 20260830T004106`) could see a delegation's first CLI session
+  end abruptly and a new one start seconds later with essentially the same
+  task, with no trace anywhere of what happened or why — indistinguishable,
+  after the fact, from a silent restart-from-scratch. Two new diagnostics
+  events close that gap (report only; neither changes the retry/return
+  behaviour itself — that's a separate, still-open decision, see the repo's
+  private notes on report 7): `STREAM_ENDED_WITHOUT_RESULT` (`ainvoke`,
+  fault="system" — the last tool in flight and the CLI's own session id,
+  when available) and `REPORT_RETRY` (`_invoke_with_report_retry`,
+  fault="nudge" — the classification reason, fired every time a report-retry
+  actually happens).
+- **Where:** `backends/claude.py` (`_record_stream_diagnostic`, the
+  `_deliberate_break`/`last_result is None` check in `ainvoke`);
+  `nodes/tools/routing/delegation.py`
+  (`WorkerSession._invoke_with_report_retry`). **Status:** core — observability
+  only; the underlying retry-on-a-possibly-in-flight-turn behaviour is a
+  deliberate open question, not addressed here.
+
 ### Delegation-bounded version control of the run workspace
 - **What:** one git repository per run, rooted at the run's own
   `debug/delegations/` workspace, with one commit per delegation (DONE and

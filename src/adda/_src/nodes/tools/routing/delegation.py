@@ -570,6 +570,17 @@ class WorkerSession:
         Finding 4 — report_sections is the single source of truth, not a
         hardcoded list), so e.g. a missing ### Retrospective earns one
         corrective retry.
+
+        This retry is a FRESH worker.invoke() call — a new CLI session, the
+        ORIGINAL task_msg still its bulk — so it is indistinguishable from a
+        from-scratch restart of the delegation to anyone reading the run
+        after the fact, UNLESS this fires the diagnostic below. Report 7
+        (run 20260830T004106, Oscar): a stream that ends mid-tool with no
+        ResultMessage (backends/claude.py's STREAM_ENDED_WITHOUT_RESULT)
+        returns near-empty text that reads as malformed here, and this path
+        used to retry with zero logging anywhere — silently discarding
+        whatever the interrupted first attempt was doing (e.g. a background
+        process it launched) with no trace in the run record.
         """
         from ....prompts.agent_prompts import build_report_retry_prompt
 
@@ -581,6 +592,13 @@ class WorkerSession:
         ) or None
         diagnosis = _classify_response(text, _req_sections)
         if diagnosis is not None:
+            self.node._record_intervention(
+                "REPORT_RETRY", self.target,
+                f"{self.delegation_id}: worker's first reply was classified "
+                f"malformed and is being retried once with a corrective "
+                f"prompt (same original task). Diagnosis: {diagnosis}",
+                snippet=text[:300],
+            )
             retry_messages = messages + [
                 {"role": "ai", "content": text},
                 {
