@@ -301,9 +301,35 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   `runtime/graph_builder.py` (`node_registry` out-param),
   `infra/watchdog_cleanup.py` (`write_watchdog_retrospective`'s
   open-review callout), `runtime/features.py` (`peer_interaction`).
+- **Session-resumption itself, built.** A non-approve `SendMessage` to an
+  open review (`_handle_review_message`) resumes the worker's session on
+  its OWN background thread (`WorkerSession.resume_and_revise`) — the
+  `SendMessage` call returns immediately, and the delegation moves to a
+  new `Revising` status meanwhile (blocks a new `Delegate` the same as
+  `OpenForReview`; `Wait`/`_status` report it distinctly, never as
+  `Errored`). `ClaudeAdapter.ainvoke`/`invoke` gained a `resume`
+  parameter → `ClaudeAgentOptions(resume=session_id, fork_session=
+  False)`. Resume failure (or no `session_id` at all, e.g.
+  `openai_compatible`) falls back to a THIN 2-message reconstruction
+  (original task + original report, never the intermediate transcript —
+  that exists only when debug is on, and fidelity silently depending on
+  a debug flag would be worse than an honest thin reconstruction),
+  telling the worker its context was rebuilt and pointing it at its own
+  `D###/` delegation directory to re-read rather than assume it
+  remembers intermediate steps. Every fallback records a
+  `REVIEW_RESUME_FALLBACK` diagnostic (delegation id, session id,
+  reason) — never silently. The revised report re-opens for review
+  through the SAME `_open_for_review` path the first report used.
+  **Where:** `nodes/tools/routing/delegation.py`
+  (`WorkerSession.resume_and_revise`/`_try_resume`/
+  `_fallback_reconstructed_invoke`/`_record_resume_fallback`,
+  `_handle_review_message`, the `Revising` status in
+  `_check_open_reviews`/`_wait_for_any`/`_status`), `backends/claude.py`
+  (`ainvoke`/`invoke`'s `resume` parameter).
   **Status:** in progress — see `internal/specs/12-peer-interaction.md`
-  for what remains (the actual session-RESUME invocation for a
-  non-approve message, the "read" enforcement, the migration sweep that
+  for what remains (the "read" enforcement; the corrective retry-on-
+  malformed cycle for a REVISED report, unlike the first one; a second
+  message to an already-`Revising` entry; the migration sweep that
   retires `Confer`/`FollowUp`/`Reply`).
 
 ### Per-cell notebook debugger (#13)

@@ -432,12 +432,19 @@ class ClaudeAdapter:
 
     async def ainvoke(
         self, messages: list[dict], *, idle_timeout: float | None = None,
+        resume: str | None = None,
     ) -> str:
         """Run one agent turn asynchronously; return assembled text.
 
         ``idle_timeout`` overrides the run-wide ``llm_stream_idle_timeout`` for
         THIS call only — used by short advisory side-calls (e.g. the verdict
         validator) that must not inherit a real agent turn's generous window.
+
+        ``resume`` (spec 12 item 3): a CLI session id to resume rather than
+        starting fresh -- ``messages`` then carries only the NEW turn (the
+        prior conversation is loaded from the resumed session itself, not
+        replayed here). ``fork_session=False`` always, so this continues the
+        SAME session rather than branching a copy of it.
         """
         _require_sdk()
         from claude_agent_sdk import (
@@ -609,6 +616,10 @@ class ClaudeAdapter:
             # slow-but-working generation.
             include_partial_messages=True,
             **({"hooks": _hooks} if _hooks else {}),
+            **(
+                {"resume": resume, "fork_session": False}
+                if resume is not None else {}
+            ),
         )
 
         prompt_str = _format_messages_as_prompt(messages)
@@ -884,6 +895,7 @@ class ClaudeAdapter:
     def invoke(
         self, messages: list[dict], *,
         idle_timeout: float | None = None, retry_max: int | None = None,
+        resume: str | None = None,
     ) -> str:
         """Synchronous wrapper around :meth:`ainvoke`.
 
@@ -896,11 +908,14 @@ class ClaudeAdapter:
         validator) passes a tight idle + ``retry_max=1`` so a hung CLI stream
         aborts in ~that window instead of inheriting a real turn's
         5×600s budget (which once froze a whole run for ~89 min).
+
+        ``resume``: see :meth:`ainvoke`.
         """
         from .base import retry_on_transient
         with self._lock:
             return retry_on_transient(
                 lambda: _run_async_safe(
-                    self.ainvoke(messages, idle_timeout=idle_timeout)),
+                    self.ainvoke(
+                        messages, idle_timeout=idle_timeout, resume=resume)),
                 max_attempts=retry_max,
             )

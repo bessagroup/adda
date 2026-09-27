@@ -175,6 +175,33 @@ def test_infer_schema_skips_underscore_closure_params():
     assert set(schema.get("required", [])) == {"path", "body"}
 
 
+def test_resume_option_sets_fork_session_false(monkeypatch):
+    """Spec 12 item 3: resuming a worker's session for report review must
+    continue the SAME session, not branch a copy of it -- passing
+    resume= to ainvoke/invoke must set fork_session=False on the actual
+    ClaudeAgentOptions built, and carry the session id through
+    unchanged."""
+    cap: dict = {}
+    _install_fake_sdk(query=_capture_options_gen(cap))
+    ClaudeAdapter = _get_adapter()
+    ClaudeAdapter("claude-3", "sys", None, []).invoke(
+        [{"role": "user", "content": "clarify this"}], resume="sess-1")
+    assert cap["options"]["resume"] == "sess-1"
+    assert cap["options"]["fork_session"] is False
+
+
+def test_no_resume_option_when_resume_not_passed():
+    """The ordinary (non-review) path must not carry a resume/fork_session
+    key at all -- a normal fresh invocation is unaffected."""
+    cap: dict = {}
+    _install_fake_sdk(query=_capture_options_gen(cap))
+    ClaudeAdapter = _get_adapter()
+    ClaudeAdapter("claude-3", "sys", None, []).invoke(
+        [{"role": "user", "content": "hi"}])
+    assert "resume" not in cap["options"]
+    assert "fork_session" not in cap["options"]
+
+
 def test_max_buffer_size_is_set_and_tunable(monkeypatch):
     """The 1MB default crashed the lit reviewer on a >1MB PDF result; we set
     30MB (env-tunable) so realistic large tool results don't overflow."""

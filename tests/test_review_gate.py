@@ -29,20 +29,30 @@ class _FakeWorker:
     """Just enough of an adapter for a real Delegate()/WorkerSession round
     trip: closure_tools for install_worker_tools, .copy() (ClaudeAdapter's
     "share one instance" contract), .invoke() returning canned report
-    text, and the two attributes _open_for_review reads."""
+    text, and the two attributes _open_for_review reads. Records every
+    call (messages, resume kwarg) so a resume/fallback test can inspect
+    exactly what was sent and how."""
 
     def __init__(self, text="A fine report.\n\n" * 5, session_id="sess-1",
-                 raises=False):
+                 raises=False, resume_raises=False, revised_text=None):
         self.closure_tools: dict = {}
         self._text = text
+        self._revised_text = revised_text or ("A revised report.\n\n" * 5)
         self._raises = raises
+        self._resume_raises = resume_raises
         self.last_usage: dict = {}
         self.last_session_id = session_id
+        self.calls: list = []
 
     def copy(self):
         return self
 
-    def invoke(self, messages):
+    def invoke(self, messages, resume=None):
+        self.calls.append((messages, resume))
+        if resume is not None:
+            if self._resume_raises:
+                raise RuntimeError("resume failed")
+            return self._revised_text
         if self._raises:
             raise RuntimeError("worker exploded")
         return self._text
@@ -242,11 +252,12 @@ def test_approve_finalizes_the_open_review():
     assert not out2.startswith("ERROR:")
 
 
-def test_a_non_approve_message_is_recorded_but_not_yet_delivered():
-    """Anything other than approve=True on an open review does not
-    finalize it -- and is honest that session-resumption itself (the
-    part that would actually deliver this to the worker) isn't built
-    yet, rather than silently pretending to deliver it."""
+def test_a_non_approve_message_resumes_instead_of_finalizing():
+    """Anything other than approve=True on an open review does NOT
+    finalize it -- it resumes the worker's session instead (session
+    resumption itself is exercised in detail further below); the
+    delegation moves to Revising while that happens, still held (not
+    finalized) either way."""
     node = _make_node()
     dt = DelegationTools(node)
     set_delegation_id(None)
@@ -256,9 +267,13 @@ def test_a_non_approve_message_is_recorded_but_not_yet_delivered():
 
     out = dt.SendMessage(did, "what does this number mean?")
 
-    assert node._registry[did]["status"] == "OpenForReview"  # unchanged
-    assert "not built yet" in out
+    assert "resuming its session" in out
+    # (The interim "Revising" status is real but not reliably observable
+    # here -- the fake worker's invoke() resolves near-instantly, so the
+    # background thread routinely finishes before this line runs.)
     assert did in node._worker_sessions  # still held for a later approval
+    _join_resume_thread(node, did)
+    assert node._registry[did]["status"] == "OpenForReview"  # revised
 
 
 def test_bare_wait_names_an_open_review_instead_of_nothing_to_wait_for():
@@ -451,3 +466,100 @@ def test_pending_notice_does_not_leak_a_siblings_or_childs_obligations():
     out = tools["Wait"]("nonexistent", block=False)
 
     assert "pending items" not in out
+
+
+# ---------------------------------------------------------------------------
+# Session-resumption (spec 12 item 3's own actual mechanism): a non-approve
+# SendMessage to an open review resumes the worker's session on a background
+# thread; resume failure falls back to a reconstructed context and is always
+# recorded as a diagnostic.
+# ---------------------------------------------------------------------------
+
+
+def _join_resume_thread(node, delegation_id, timeout=5):
+    t = node._threads.get(delegation_id)
+    assert t is not None, "resume_and_revise never started a thread"
+    t.join(timeout=timeout)
+    assert not t.is_alive(), "resume_and_revise thread did not finish"
+
+
+def test_resume_uses_the_recorded_session_id_and_revises_the_report(
+    tmp_path,
+):
+    """The normal path: resume is called with the delegation's own
+    recorded session_id, not a fresh/forked one, and the revised text
+    re-opens the delegation for review."""
+    worker = _FakeWorker(session_id="sess-1")
+    node = _make_node(worker=worker)
+    dt = DelegationTools(node)
+    set_delegation_id(None)
+
+    dt.Delegate("implementer", "do the thing", "a report", wait=True)
+    did = next(iter(node._registry))
+
+    out = dt.SendMessage(did, "what does this bound mean?")
+    assert "resuming its session" in out
+    _join_resume_thread(node, did)
+
+    resume_calls = [c for c in worker.calls if c[1] is not None]
+    assert len(resume_calls) == 1
+    messages, session_id = resume_calls[0]
+    assert session_id == "sess-1"
+    assert "what does this bound mean?" in messages[0]["content"]
+    assert "strategizer" in messages[0]["content"]  # the sender, named
+
+    assert node._registry[did]["status"] == "OpenForReview"
+    assert "A revised report." in node._registry[did]["result"]
+
+
+def test_resume_failure_falls_back_and_records_a_diagnostic(tmp_path):
+    """Forced resume failure: falls back to a reconstructed context (task
+    + report only) whose message names the D###/ directory and the
+    rebuild, and records REVIEW_RESUME_FALLBACK every time -- never
+    silently."""
+    (tmp_path / "debug").mkdir(parents=True)
+    worker = _FakeWorker(session_id="sess-1", resume_raises=True)
+    node = _make_node(worker=worker)
+    node._current_notes_dir = tmp_path / "debug" / "strategizer_notes"
+    dt = DelegationTools(node)
+    set_delegation_id(None)
+
+    dt.Delegate("implementer", "do the thing", "a report", wait=True)
+    did = next(iter(node._registry))
+
+    dt.SendMessage(did, "what does this bound mean?")
+    _join_resume_thread(node, did)
+
+    # One call attempted resume (and raised); the LAST non-resume call is
+    # the fallback, reconstructing from task + prior report -- filtered
+    # rather than assumed by position, since the initial dispatch itself
+    # may have its own corrective retry (unrelated to this mechanism) in
+    # `worker.calls` too.
+    resume_calls = [c for c in worker.calls if c[1] is not None]
+    non_resume_calls = [c for c in worker.calls if c[1] is None]
+    assert len(resume_calls) == 1
+    _, resume_session = resume_calls[0]
+    assert resume_session == "sess-1"
+    fallback_messages, fallback_resume = non_resume_calls[-1]
+    assert fallback_resume is None
+    assert "do the thing" in fallback_messages[0]["content"]
+    assert "A fine report." in fallback_messages[1]["content"]
+    fallback_note = fallback_messages[2]["content"]
+    assert "could not be resumed" in fallback_note
+    assert f"{did}/" in fallback_note
+    assert "what does this bound mean?" in fallback_note
+
+    assert node._registry[did]["status"] == "OpenForReview"
+
+    import json as _json
+    diag_path = tmp_path / "debug" / "diagnostics.jsonl"
+    recs = [
+        _json.loads(ln) for ln in diag_path.read_text().splitlines()
+        if ln.strip()
+    ]
+    assert any(r["tool"] == "REVIEW_RESUME_FALLBACK" for r in recs)
+    fallback_rec = next(
+        r for r in recs if r["tool"] == "REVIEW_RESUME_FALLBACK")
+    assert fallback_rec["session_id"] == "sess-1"
+    assert "resume failed" in fallback_rec["reason"]
+

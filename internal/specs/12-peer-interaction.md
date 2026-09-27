@@ -216,6 +216,34 @@ superseded — Elvis's decision, with the reason below).
   review turns; "waking it" means resuming its session, not just calling
   back into an already-suspended one.
 
+**Built** (2026-09-27): `WorkerSession.resume_and_revise`
+(`nodes/tools/routing/delegation.py`), triggered by a non-approve
+`SendMessage` to an open review (`_handle_review_message`), runs on its
+own background thread (the triggering `SendMessage` call returns
+immediately, exactly like an async `Delegate`) and moves the delegation
+to a new `Revising` status while it works. `ClaudeAdapter.ainvoke`/
+`invoke` gained a `resume` parameter, threaded straight to
+`ClaudeAgentOptions(resume=session_id, fork_session=False)`. The
+fallback reconstruction is the THIN 2-message form (original task +
+original report), not the transcript — a transcript exists only when
+debug is on, and fidelity silently depending on a debug flag would be
+worse than being honest about a thin reconstruction; the rebuilt
+message tells the worker its context was rebuilt and points it at its
+own delegation directory (`D###/`) to re-read rather than assume it
+remembers intermediate steps. Every fallback (resume unavailable OR
+raised) records a `REVIEW_RESUME_FALLBACK` diagnostic naming the
+delegation, the session id, and the reason. A revised report re-opens
+for review through the SAME `_open_for_review` path the first one used
+(a new delegation-log `OPEN_FOR_REVIEW` row, last-wins over the
+previous one), not a special second mechanism. NOT built: the
+corrective retry-on-malformed cycle `_invoke_with_report_retry` gives
+the FIRST report (a revised report is accepted as-is, unvalidated by
+`_classify_response`); a second SendMessage to an already-`Revising`
+entry is not specially handled (it queues in `to_worker` like an
+ordinary downward message, unread by anything, since `resume_and_revise`
+takes its message as a direct argument, not from that queue) — a narrow,
+real gap, not yet hit by any test.
+
 **Trigger, ratified explicitly (Elvis, via adda-boss-whopper, 2026-09-27,
 after the core mechanism above was reviewed in code):** review is
 EVERY delegation, automatically, whenever `peer_interaction` is ON — no

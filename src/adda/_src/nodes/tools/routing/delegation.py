@@ -898,6 +898,94 @@ class WorkerSession:
             text = self.node._registry[self.delegation_id].get("result", "")
         self._finish_ok(text, evals, usage, off_ledger, stamped)
 
+    def resume_and_revise(self, message: str, sender_label: str) -> None:
+        """Resume this delegation's worker session with a new message
+        from its delegator (spec 12 item 3) and re-open for review with
+        whatever it produces. Runs on its OWN thread -- the SendMessage
+        call that triggered this already returned.
+
+        Tries a REAL session resume first (``ClaudeAgentOptions(resume=
+        session_id, fork_session=False)`` — the worker's own prior
+        context, loaded fresh); falls back to a RECONSTRUCTED context
+        (its original task + its own report only, never the intermediate
+        transcript, which exists only when debug is on and would make
+        fidelity silently depend on that flag) when resume is
+        unavailable or fails, recording that fallback as a diagnostic
+        every time — never silently.
+        """
+        node, delegation_id = self.node, self.delegation_id
+        try:
+            with node._registry_lock:
+                entry = node._registry.get(delegation_id) or {}
+                session_id = entry.get("session_id")
+                prior_report = entry.get("result", "")
+            note_body = (
+                f"You got this message from {sender_label} -- the "
+                "delegation needs clarification; take your time if "
+                "needed.\n\n" + message
+            )
+            text = self._try_resume(wrap_notice(note_body), session_id)
+            if text is None:
+                rebuild_note = (
+                    "Your original session could not be resumed, so your "
+                    "context has been REBUILT from your original task "
+                    "and your own report -- not from anything in "
+                    "between. Everything you produced is still on disk "
+                    f"in your delegation directory {delegation_id}/ -- "
+                    "re-read those files rather than assume you "
+                    "remember intermediate steps.\n\n" + note_body
+                )
+                text = self._fallback_reconstructed_invoke(
+                    wrap_notice(rebuild_note), prior_report)
+            self._record_oracle_nudges()
+            usage = getattr(self.worker, "last_usage", {}) or {}
+            node._record_worker_usage(self.worker, self.target, delegation_id)
+            self._flag_mcp_errors(text)
+            evals, off_ledger, stamped = self._reconcile_evals()
+            text = self._append_budget_report(text)
+            self._open_for_review(text, evals, usage, off_ledger, stamped)
+        except Exception:  # noqa: BLE001
+            self._finish_error(traceback.format_exc())
+
+    def _try_resume(
+        self, wrapped_message: str, session_id: str | None,
+    ) -> str | None:
+        """A real session resume, or None (fallback needed) -- always
+        recording WHY when it can't."""
+        if not session_id:
+            self._record_resume_fallback(
+                "no session_id was recorded for this delegation", None)
+            return None
+        try:
+            return self.worker.invoke(
+                [{"role": "user", "content": wrapped_message}],
+                resume=session_id)
+        except Exception as exc:  # noqa: BLE001
+            self._record_resume_fallback(str(exc), session_id)
+            return None
+
+    def _record_resume_fallback(self, reason: str, session_id) -> None:
+        self.node._record_intervention(
+            "REVIEW_RESUME_FALLBACK", self.target,
+            f"{self.delegation_id}: session resume unavailable/failed "
+            f"(session_id={session_id!r}) -- falling back to a "
+            "reconstructed context (task + report only, not the "
+            f"intermediate transcript). Reason: {reason}",
+            delegation_id=self.delegation_id,
+            session_id=session_id,
+            reason=reason,
+        )
+
+    def _fallback_reconstructed_invoke(
+        self, wrapped_message: str, prior_report: str,
+    ) -> str:
+        messages = [
+            {"role": "user", "content": self.task_msg},
+            {"role": "ai", "content": prior_report},
+            {"role": "user", "content": wrapped_message},
+        ]
+        return self.worker.invoke(messages)
+
     def _finish_ok(
         self,
         text: str,
@@ -1558,12 +1646,14 @@ class DelegationTools:
         explanatory error naming every open review, not just the first.
 
         ERRORED delegations do NOT count (edge 1) -- they have no report
-        to review and are already terminal; only OPEN-FOR-REVIEW does.
+        to review and are already terminal; only OPEN-FOR-REVIEW (and
+        ``Revising`` -- a review the delegator ALREADY sent a question
+        on, mid-resume, still unresolved) does.
         """
         with self.node._registry_lock:
             open_ids = sorted(
                 did for did, e in self.node._registry.items()
-                if e.get("status") == "OpenForReview"
+                if e.get("status") in ("OpenForReview", "Revising")
             )
         if not open_ids:
             return None
@@ -1934,6 +2024,11 @@ class DelegationTools:
             return (
                 f"[{delegation_id}] report ready but OPEN FOR REVIEW -- "
                 f"{entry['result']}"
+            ) + _tail
+        if status == "Revising":
+            return (
+                f"[{delegation_id}] resuming its session to revise its "
+                "report -- not ready yet; check back shortly."
             ) + _tail
         if status not in ("Working", "FollowUp"):
             return f"Errored:\n{entry['result']}" + _tail
@@ -2331,7 +2426,7 @@ class DelegationTools:
                 open_ids = sorted(
                     i for i, e in node._registry.items()
                     if e.get("status") in
-                    ("Working", "FollowUp", "OpenForReview")
+                    ("Working", "FollowUp", "OpenForReview", "Revising")
                 )
                 # Classify what is actually still capable of finishing.
                 # A blocking tool call ends no turn, so the run's time
@@ -2578,12 +2673,12 @@ class DelegationTools:
         """SendMessage to an OPEN-FOR-REVIEW delegation (spec 12 item 3).
 
         ``approve=True`` finalizes it now -- ``_finish_ok`` runs, the
-        workspace commits, the record becomes terminal. Anything else is
-        recorded (queued exactly like a normal downward message) but NOT
-        yet delivered: actually RESUMING the worker's CLI session with
-        this message as its next turn is spec 12's own separately-scoped
-        follow-up, not built yet -- said honestly in the return, not
-        silently swallowed.
+        workspace commits, the record becomes terminal. Anything else
+        RESUMES the worker's own CLI session with this message as its
+        next turn, on its OWN thread (this call returns immediately,
+        exactly like an async ``Delegate`` -- the delegator collects the
+        REVISED report the same way it collected the first one, via
+        ``Wait`` or another ``SendMessage``).
         """
         if approve:
             session = node._worker_sessions.pop(delegation_id, None)
@@ -2600,15 +2695,26 @@ class DelegationTools:
                 stamped = e.get("_review_stamped", 0)
             session.finalize_after_review(evals, usage, off_ledger, stamped)
             return f"Approved. {delegation_id} finalized."
-        with entry["worker_cond"]:
-            entry["to_worker"].append((self._sender_label(), msg))
-            entry["worker_cond"].notify_all()
+
+        session = node._worker_sessions.get(delegation_id)
+        if session is None:
+            return (
+                f"ERROR: {delegation_id!r} has no live session to resume "
+                "-- already finalized, or the run restarted."
+            )
+        sender_label = self._sender_label()
+        with node._registry_lock:
+            node._registry[delegation_id]["status"] = "Revising"
+        t = threading.Thread(
+            target=session.resume_and_revise, args=(msg, sender_label),
+            daemon=True, name=f"{delegation_id}-resume")
+        with node._registry_lock:
+            node._threads[delegation_id] = t
+        t.start()
         return (
-            f"Delivered -- but note: {delegation_id} is OPEN FOR REVIEW "
-            "and session-resumption (spec 12 item 3) is not built yet, "
-            "so this message will not reach the worker until that "
-            "mechanism lands. Use approve=True to finalize the report "
-            "as it stands."
+            f"Delivered -- {delegation_id} is resuming its session to "
+            "revise its report. Collect the revision the same way you "
+            "collected the first one (Wait(id), or SendMessage again)."
         )
 
     def _send_downward(self, node, my_id, delegation_id, entry, msg,
