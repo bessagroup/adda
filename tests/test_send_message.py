@@ -87,8 +87,10 @@ def test_two_worker_fan_out_questions_are_correctly_attributed():
         results[did] = dt.SendMessage(
             "strategizer", question, wait_for_reply=True)
 
-    t1 = threading.Thread(target=_worker, args=("D001", "Q from D001"))
-    t2 = threading.Thread(target=_worker, args=("D002", "Q from D002"))
+    t1 = threading.Thread(
+        target=_worker, args=("D001", "Q from D001"), daemon=True)
+    t2 = threading.Thread(
+        target=_worker, args=("D002", "Q from D002"), daemon=True)
     t1.start(); t2.start()
 
     set_delegation_id(None)  # this thread is "entry"
@@ -130,8 +132,8 @@ def test_deadlock_guard_both_sides_return_with_the_others_message():
         worker_result["out"] = dt.SendMessage(
             "strategizer", "question from worker", wait_for_reply=True)
 
-    t1 = threading.Thread(target=_delegator)
-    t2 = threading.Thread(target=_worker)
+    t1 = threading.Thread(target=_delegator, daemon=True)
+    t2 = threading.Thread(target=_worker, daemon=True)
     t1.start()
     time.sleep(0.05)  # let t1 enqueue+start waiting first, not required for
                       # correctness (the guard must work either order) but
@@ -162,7 +164,7 @@ def test_delegator_blocked_in_wait_wakes_on_a_worker_question_mid_fan_out():
         wait_result["at"] = time.monotonic()
 
     start = time.monotonic()
-    t = threading.Thread(target=_wait)
+    t = threading.Thread(target=_wait, daemon=True)
     t.start()
     time.sleep(0.2)  # Wait() is now blocked (well past its first tick)
 
@@ -170,7 +172,7 @@ def test_delegator_blocked_in_wait_wakes_on_a_worker_question_mid_fan_out():
         set_delegation_id("D002")
         dt.SendMessage("strategizer", "D002 needs input", wait_for_reply=False)
 
-    threading.Thread(target=_ask).start()
+    threading.Thread(target=_ask, daemon=True).start()
     t.join(timeout=5)
 
     assert not t.is_alive()
@@ -202,7 +204,7 @@ def test_nested_worker_delegator_only_sees_its_own_childrens_messages():
     # D001's own Wait() runs in the background the whole time — nothing
     # of D001's is ready yet, so it must still be blocked after D020's
     # message (which belongs to D002, not D001).
-    t_wait = threading.Thread(target=_d001_waits)
+    t_wait = threading.Thread(target=_d001_waits, daemon=True)
     t_wait.start()
     time.sleep(0.2)  # let D001's Wait() actually start blocking
 
@@ -210,7 +212,7 @@ def test_nested_worker_delegator_only_sees_its_own_childrens_messages():
         set_delegation_id("D020")
         dt.SendMessage("implementer", "from D020", wait_for_reply=False)
 
-    threading.Thread(target=_d020_asks).start()
+    threading.Thread(target=_d020_asks, daemon=True).start()
     time.sleep(0.3)  # give it a full tick+ to (wrongly) wake D001 if it would
     assert t_wait.is_alive(), (
         "D001's Wait() woke on D020's message, which belongs to D002")
@@ -221,11 +223,110 @@ def test_nested_worker_delegator_only_sees_its_own_childrens_messages():
         set_delegation_id("D010")
         dt.SendMessage("implementer", "from D010", wait_for_reply=False)
 
-    threading.Thread(target=_d010_asks).start()
+    threading.Thread(target=_d010_asks, daemon=True).start()
     t_wait.join(timeout=5)
     assert not t_wait.is_alive()
     assert "from D010" in d001_wait_result["out"]
     assert "from D020" not in d001_wait_result["out"]
+
+
+class _InterleavingCondition:
+    """Wraps a real per-identity Condition so the FIRST time a ``with``
+    block exits after a successful ``wait_for`` is paused mid-release:
+    this is exactly the moment a "pop after the lock" bug would leave a
+    message still sitting in the queue, undisturbed, for a second
+    consumer to steal first. Forces that exact interleaving deterministically
+    instead of hoping the GIL scheduler happens to find it (a probabilistic
+    stress loop, kept below, can pass on buggy code by luck; this one
+    cannot).
+
+    On the CURRENT (fixed) code the pop already happened INSIDE the lock,
+    before this pause ever fires, so a competing consumer here correctly
+    finds nothing left to steal and nobody crashes or double-consumes. If
+    the pop-outside-the-lock pattern were ever reintroduced, the message
+    would still be sitting there when this fires, the competing consumer
+    would take it, and the original call's own (now unlocked, in the old
+    shape) pop would raise IndexError on the empty queue.
+    """
+
+    def __init__(self, real: threading.Condition) -> None:
+        self._real = real
+        self._fired = False
+        self.released = threading.Event()
+        self.resume = threading.Event()
+
+    def __enter__(self):
+        return self._real.__enter__()
+
+    def __exit__(self, *exc):
+        result = self._real.__exit__(*exc)
+        if not self._fired:
+            self._fired = True
+            self.released.set()
+            self.resume.wait(timeout=5)
+        return result
+
+    def wait_for(self, predicate, timeout=None):
+        return self._real.wait_for(predicate, timeout=timeout)
+
+    def notify_all(self):
+        return self._real.notify_all()
+
+
+def test_forced_interleaving_never_loses_or_duplicates_a_message():
+    """Deterministic version of the race regression below (adda-boss-
+    whopper's follow-up: a test that merely PASSES on buggy code doesn't
+    guard the bug -- force the exact interleaving instead of hoping the
+    scheduler finds it). See ``_InterleavingCondition`` for the mechanism.
+    """
+    node = _make_node()
+    _register(node, "D001", "implementer")
+    dt = DelegationTools(node)
+
+    # Queue exactly one message upward BEFORE wrapping the cond -- this
+    # append's own enter/exit must not be the one intercepted.
+    set_delegation_id("D001")
+    dt.SendMessage("strategizer", "the only message", wait_for_reply=False)
+    set_delegation_id(None)
+
+    real_cond = node._get_delegator_cond("entry")
+    wrapped = _InterleavingCondition(real_cond)
+    node._delegator_conds["entry"] = wrapped
+
+    victim: dict = {}
+
+    def _victim():
+        set_delegation_id(None)
+        try:
+            victim["out"] = dt.SendMessage(
+                "D001", "q", wait_for_reply=True)
+        except Exception as exc:  # noqa: BLE001
+            victim["exc"] = exc
+
+    t = threading.Thread(target=_victim, daemon=True)
+    t.start()
+
+    assert wrapped.released.wait(timeout=5), "victim never reached release"
+    # The competing consumer: exactly what a second real consumer does --
+    # check, then pop, under the SAME lock the fix requires.
+    entry = node._registry["D001"]
+    stolen = None
+    with real_cond:
+        if entry.get("to_delegator"):
+            stolen = entry["to_delegator"].popleft()
+    wrapped.resume.set()
+    t.join(timeout=5)
+
+    assert not t.is_alive()
+    assert "exc" not in victim, (
+        f"victim raised: {victim.get('exc')!r} -- the pop-outside-the-lock "
+        "race is back")
+    assert stolen is None, (
+        "competing consumer stole the message the victim should already "
+        "have consumed inside its own lock -- pop is happening outside "
+        "the lock again")
+    assert "message from" in victim["out"]
+    assert "the only message" in victim["out"]
 
 
 def test_two_consumers_racing_on_one_queue_never_lose_or_duplicate_a_message():
@@ -274,8 +375,8 @@ def test_two_consumers_racing_on_one_queue_never_lose_or_duplicate_a_message():
             with seen_lock:
                 seen.append(out.rsplit(": ", 1)[-1])
 
-    t1 = threading.Thread(target=_consumer_wait)
-    t2 = threading.Thread(target=_consumer_send_message)
+    t1 = threading.Thread(target=_consumer_wait, daemon=True)
+    t2 = threading.Thread(target=_consumer_send_message, daemon=True)
     t1.start(); t2.start()
     t1.join(timeout=15)
     t2.join(timeout=15)
@@ -304,7 +405,7 @@ def test_delegator_wakes_promptly_when_the_target_ends_without_replying():
         result["at"] = time.monotonic()
 
     start = time.monotonic()
-    t = threading.Thread(target=_delegator)
+    t = threading.Thread(target=_delegator, daemon=True)
     t.start()
     time.sleep(0.2)  # SendMessage is now blocked waiting for a reply
 
