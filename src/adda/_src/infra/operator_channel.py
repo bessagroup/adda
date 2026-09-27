@@ -278,15 +278,35 @@ def close_question(run_dir: Path | str, qid: str, status: str) -> None:
 # --------------------------------------------------------------------------
 
 def queue_note(run_dir: Path | str, text: str, to_node: str = "") -> bool:
-    """Queue an operator note for delivery at the node's next tool call."""
+    """Queue an operator note for delivery at the node's next tool call.
+
+    Shares ``_locked`` with :func:`drain_note_rows` — see that function's
+    docstring for the race this closes: rename-claiming alone only
+    protects a writer that opens its own ``append`` AFTER the rename, not
+    one already mid-open when the rename lands (a writer's fd from
+    ``open(path, "a")`` still points at the SAME inode after `path` is
+    renamed out from under it, so an unsynchronized append could land
+    its write into the file the drainer already renamed aside and is
+    about to read-then-delete — after the read, before the delete —
+    losing the note even though the POST that queued it reported
+    ``ok=True``. Confirmed in CI, not theoretical: run 36353193779,
+    ubuntu 3.13, `test_a_note_queued_while_draining_is_not_lost`.
+
+    ``_locked`` degrading to an unsynchronized append (its own Timeout/
+    no-filelock/OSError paths, all of which still run this function's
+    body) is unchanged: this never silently drops a note either way —
+    the append always happens, synchronized or not; the LOCK is what's
+    new, not a new way to skip writing.
+    """
     if not text.strip():
         return False
     debug = _dir(run_dir)
     if not debug.is_dir():
         return False
     row = {"ts": time.time(), "to_node": to_node, "text": text}
-    with (debug / _NOTES).open("a", encoding="utf-8") as f:
-        f.write(json.dumps(row) + "\n")
+    with _locked(run_dir):
+        with (debug / _NOTES).open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row) + "\n")
     return True
 
 
@@ -300,6 +320,15 @@ def drain_note_rows(run_dir: Path | str) -> list[dict[str, str]]:
     atomic step, so a note either makes it into this batch or stays in a
     fresh file for the next one.
 
+    Rename-claiming alone only protects a WRITER THAT OPENS AFTER THE
+    RENAME — it does nothing for one already mid-``open()`` when the
+    rename lands, whose write can still land in the just-claimed file
+    after this function has already read it (see :func:`queue_note`'s
+    docstring for the exact interleaving). The rename+read+unlink below
+    therefore share ``queue_note``'s SAME `_locked` — the file-claim
+    rename was never sufficient on its own; it needed to be atomic WITH
+    respect to the writer, not just atomic in isolation.
+
     A note is never handed over twice, because the file it came from no
     longer exists by the time it is returned — being told the same thing on
     every tool call is worse than not being told at all.
@@ -308,21 +337,22 @@ def drain_note_rows(run_dir: Path | str) -> list[dict[str, str]]:
     if not path.is_file():
         return []
     claimed = path.with_suffix(f".{os.getpid()}.{uuid.uuid4().hex[:8]}.claim")
-    try:
-        path.replace(claimed)
-    except OSError:
-        return []
-    try:
-        # errors="replace": a note appended concurrently can split a
-        # multibyte character, and this must not raise into a tool call.
-        raw = claimed.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        raw = ""
-    finally:
+    with _locked(run_dir):
         try:
-            claimed.unlink()
+            path.replace(claimed)
         except OSError:
-            pass
+            return []
+        try:
+            # errors="replace": a note appended concurrently can split a
+            # multibyte character, and this must not raise into a tool call.
+            raw = claimed.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            raw = ""
+        finally:
+            try:
+                claimed.unlink()
+            except OSError:
+                pass
     if not raw.strip():
         return []
     out = []

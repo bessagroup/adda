@@ -205,6 +205,70 @@ def test_a_note_queued_while_draining_is_not_lost(tmp_path):
     assert sorted(drained + oc.drain_notes(run)) == ["first", "second"]
 
 
+def test_a_note_queued_mid_open_is_not_lost_deterministic(tmp_path, monkeypatch):
+    """Deterministic reproduction of the exact interleaving that lost a
+    note in CI (run 36353193779, ubuntu 3.13,
+    test_a_note_queued_while_draining_is_not_lost) -- not relying on
+    thread scheduling to hit the window.
+
+    The mechanism: queue_note's ``open(path, "a")`` returns a file handle
+    bound to the CURRENT inode; rename-claiming that same path (what
+    drain_note_rows does) does not invalidate an already-open handle --
+    it still writes into the (now claimed, about-to-be-read-then-deleted)
+    file. If the claim+read+unlink completes between the open() and the
+    write(), the note lands in a file the drainer already read and is
+    about to delete: gone, even though queueing it reported success.
+
+    Uses a REAL second thread for the drain (not a same-thread nested
+    call -- nesting drain_note_rows' own `_locked` inside queue_note's
+    would just self-contend on the SAME lock from the SAME thread and
+    degrade to unsynchronized after its 5s Timeout either way, proving
+    nothing about cross-thread exclusion). Patches Path.open so the
+    FIRST time it opens the notes file, it signals the drain thread and
+    then sleeps briefly -- a ONE-WAY delay (nothing here waits ON the
+    drain thread, so this cannot deadlock against it) that deterministically
+    gives the drain thread real time to attempt its own acquire before
+    this thread's write releases whatever it's holding, rather than
+    hoping OS scheduling happens to interleave them unaided."""
+    from pathlib import Path
+
+    run = _run(tmp_path)
+    oc.queue_note(run, "first")
+
+    real_open = Path.open
+    opened = threading.Event()
+    fired = {"once": False}
+
+    def _open_then_signal(self, *args, **kwargs):
+        handle = real_open(self, *args, **kwargs)
+        if not fired["once"] and self.name == "operator_notes.jsonl":
+            fired["once"] = True
+            opened.set()
+            time.sleep(0.3)
+        return handle
+
+    monkeypatch.setattr(Path, "open", _open_then_signal)
+
+    drained_mid_open: list[dict] = []
+
+    def _drain_once_opened():
+        assert opened.wait(timeout=5), "open() was never hooked"
+        drained_mid_open.extend(oc.drain_note_rows(run))
+
+    t = threading.Thread(target=_drain_once_opened)
+    t.start()
+    oc.queue_note(run, "second")
+    t.join(timeout=5)
+    monkeypatch.setattr(Path, "open", real_open)
+
+    assert fired["once"], "the hook never fired -- test setup is broken"
+    assert not t.is_alive(), "drain thread never finished"
+    later = [row["text"] for row in oc.drain_note_rows(run)]
+    assert sorted(
+        [row["text"] for row in drained_mid_open] + later
+    ) == ["first", "second"]
+
+
 def test_answering_and_timing_out_together_cannot_both_win(tmp_path):
     """The window that mattered: the operator hits Send as the run gives up.
 
