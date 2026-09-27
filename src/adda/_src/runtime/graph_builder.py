@@ -26,6 +26,7 @@ def build_graph(
     notes_dir: Any = None,
     workspace_dir: Any = None,
     delegation_log: DelegationLog | None = None,
+    node_registry: dict[str, Any] | None = None,
 ) -> Any:
     """Build and compile a LangGraph StateGraph from a Graph spec.
 
@@ -40,6 +41,14 @@ def build_graph(
         LangGraph checkpointer.  Defaults to an in-memory :class:`MemorySaver`.
     delegation_log : DelegationLog, optional
         Graph-wide delegation log for episodic memory (RecallHistory tool).
+    node_registry : dict, optional
+        If given, populated in place with ``{name: Node instance}`` as each
+        node is constructed — an explicit, caller-owned way to reach the
+        live Node objects afterward (e.g. spec 12's close-time open-review
+        sweep) instead of reaching through the COMPILED graph's own
+        internals (``compiled.nodes[name].bound.func``), which is a
+        LangGraph implementation detail that could silently break on an
+        upgrade.
 
     Returns
     -------
@@ -86,6 +95,8 @@ def build_graph(
             report_sections=getattr(agent, "report_sections", None),
             agent_tools=getattr(agent, "tools", None),
         )
+        if node_registry is not None:
+            node_registry[name] = node
 
         builder.add_node(name, node)
 

@@ -773,6 +773,11 @@ class AgenticRun:
             _serve_jobid = self._maybe_start_slurm_llm(
                 ctx.study_cfg, ctx.debug_dir, log)
             with SqliteSaver.from_conn_string(str(ckpt_path)) as saver:
+                # Populated in place by build_graph as each Node is
+                # constructed -- an explicit, caller-owned way to reach
+                # them afterward (spec 12 edge 2's open-review sweep),
+                # never through the COMPILED graph's own internals.
+                self._live_nodes: dict[str, Any] = {}
                 graph = getattr(self, "_graph", None) or build_graph(
                     self._graph_spec, self._make_adapter,
                     study_dir=self.study_dir,
@@ -781,11 +786,8 @@ class AgenticRun:
                     workspace_dir=ctx.workspace_dir,
                     delegation_log=ctx.delegation_log,
                     checkpointer=saver,
+                    node_registry=self._live_nodes,
                 )
-                # Stashed so _finalize_run can reach every live Node
-                # instance afterward (spec 12 edge 2's open-review sweep)
-                # -- `graph` itself is otherwise scoped to this block.
-                self._live_graph = graph
                 graph_input = (
                     None if ctx.resuming else ctx.initial_state
                 )
@@ -825,6 +827,16 @@ class AgenticRun:
                                 "interview was never reached."
                             ),
                         )
+                    except Exception:  # noqa: BLE001
+                        pass
+                    # spec 12 edge 2: a crash reaches neither Done() nor
+                    # _finalize_run's own sweep call below, so it needs
+                    # this SAME status-update append here too -- the
+                    # OPEN_FOR_REVIEW row itself was already written at
+                    # review-open time regardless (durable before this
+                    # crash, not written by this call).
+                    try:
+                        self._sweep_open_reviews(ctx.run_dir)
                     except Exception:  # noqa: BLE001
                         pass
                     raise
@@ -1095,40 +1107,66 @@ class AgenticRun:
             pass
 
     def _sweep_open_reviews(self, run_dir: Path) -> None:
-        """Honestly record any delegation still OPEN-FOR-REVIEW when the
-        run closes (spec 12, peer_interaction, edge 2). ``Done()``, the
-        watchdog, or a budget/backstop cutoff can all close a run while a
-        worker's report is still awaiting an explicit
-        ``SendMessage(..., approve=True)`` -- that report must never be
-        recorded as approved (nothing approved it), and never silently
-        dropped either: it is written to the delegation log under a
-        status distinct from ``DONE``, and named in the delegating node's
-        retrospective.
+        """A small close-time status update for any delegation still
+        OPEN-FOR-REVIEW (spec 12, peer_interaction, edge 2).
 
-        Best-effort (never raises), matching ``_fallback_retrospective``'s
-        own posture right above this call site -- reaching into every
-        live Node instance through the compiled graph is exactly the kind
-        of bookkeeping that must never be allowed to break a run's close.
+        The HONEST, durable record is actually written much earlier, at
+        the review's own OPEN, not here: ``WorkerSession._open_for_review``
+        appends an ``OPEN_FOR_REVIEW`` delegation-log row the instant the
+        report exists, so a crash or a watchdog kill with no code running
+        on the way out still leaves that row as the delegation's LAST one
+        on disk -- exactly what a post-mortem reader needs (see
+        ``write_watchdog_retrospective``). This method exists only for
+        the compliant-close case: it appends ONE MORE row (``last-wins``
+        collapse, same convention as RUNNING -> DONE) recording that the
+        run ended before anyone approved it, and notes it in the
+        delegating node's retrospective too. ``Done()``, the watchdog
+        (were an in-process one to exist), or a budget/backstop cutoff
+        can all reach this on the NORMAL close path; the crash path calls
+        it too (see the ``except BaseException`` in ``_invoke_graph``).
+
+        Iterates ``self._live_nodes`` -- populated by ``build_graph`` as
+        it constructs each Node, an explicit reference this class owns,
+        not LangGraph's own compiled-graph internals (a prior version of
+        this method read ``compiled.nodes[name].bound.func``, silently
+        able to break on any LangGraph upgrade). A node this genuinely
+        cannot reach is recorded as a diagnostic, not silently skipped.
         """
-        graph = getattr(self, "_live_graph", None)
-        if graph is None:
-            return
-        try:
-            node_names = list((self._graph_spec.nodes or {}).keys())
-        except Exception:  # noqa: BLE001
-            return
-        for name in node_names:
+        nodes = getattr(self, "_live_nodes", None) or {}
+        for name, node in nodes.items():
             try:
-                node = graph.nodes[name].bound.func
                 with node._registry_lock:
                     open_reviews = [
                         (did, dict(e)) for did, e in node._registry.items()
                         if e.get("status") == "OpenForReview"
                     ]
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                self._record_sweep_failure(run_dir, name, exc)
                 continue
             for delegation_id, entry in open_reviews:
                 self._record_unapproved_review(node, delegation_id, entry)
+
+    @staticmethod
+    def _record_sweep_failure(run_dir: Path, node_name: str, exc: Exception) -> None:
+        """The open-review sweep could not read one node's registry --
+        recorded as a diagnostic (never silently skipped), so a reader
+        knows the sweep may be incomplete rather than assuming it covered
+        every node."""
+        try:
+            debug = Path(run_dir) / "debug"
+            debug.mkdir(parents=True, exist_ok=True)
+            rec = {
+                "ts": datetime.now(tz=timezone.utc).isoformat(
+                    timespec="seconds"),
+                "node": node_name,
+                "error_type": "OPEN_REVIEW_SWEEP_FAILED",
+                "message": f"{type(exc).__name__}: {exc}"[:300],
+            }
+            with (debug / "diagnostics.jsonl").open(
+                    "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec) + "\n")
+        except Exception:  # noqa: BLE001
+            pass
 
     @staticmethod
     def _record_unapproved_review(

@@ -825,6 +825,19 @@ class WorkerSession:
         registry entry now, since this WorkerSession instance itself is
         also kept live in ``node._worker_sessions`` for exactly that
         later call.
+
+        Durability, not just the in-memory registry: this ALSO writes an
+        ``OPEN_FOR_REVIEW`` delegation-log row immediately (persist AT
+        TRANSITION, not swept in at close) -- adda-boss-whopper's review
+        of an earlier version of this mechanism found that sweeping only
+        at ``_finalize_run`` missed the crash path entirely and could
+        never see a watchdog kill at all (no in-process code runs on that
+        exit), silently losing every open review on either path. The
+        delegation log's own last-wins collapse means this row IS the
+        honest final record if the process dies before approval — no
+        close-time code required to make that true; ``finalize_after_review``
+        below (via the unchanged ``_finish_ok``) simply appends the DONE
+        row that supersedes it if and when approval actually happens.
         """
         node, delegation_id = self.node, self.delegation_id
         session_id = getattr(self.worker, "last_session_id", None)
@@ -838,6 +851,34 @@ class WorkerSession:
                 "_review_stamped": stamped,
                 "session_id": session_id,
             })
+        if node._delegation_log is not None:
+            from ....runtime.constraint_snapshot import snapshot_for_node
+            node._delegation_log.record(
+                id=delegation_id,
+                from_node=node._name,
+                to_node=self.target,
+                task=self.intent,
+                deliverable=text,
+                hypothesis_ids=self.hypothesis_ids,
+                started_at=self.started_at,
+                completed_at=datetime.now(
+                    tz=timezone.utc
+                ).isoformat(timespec="seconds"),
+                # Distinct from DONE/FAILED/RUNNING on purpose -- this is
+                # a real report, but nobody has approved it yet.
+                status="OPEN_FOR_REVIEW",
+                tokens_in=(usage.get("input_tokens", 0) or 0),
+                tokens_out=(usage.get("output_tokens", 0) or 0),
+                cost_usd=usage.get("total_cost_usd"),
+                is_falsification_attempt=bool(self.is_falsification_attempt),
+                evals=evals,
+                phase=self.phase,
+                constraints=snapshot_for_node(node).as_dict(),
+                # Not committed yet -- spec 12 item 8 moves the workspace
+                # commit to AFTER approval; _finish_ok's own
+                # _commit_workspace call (unchanged) provides it then.
+                workspace_sha=None,
+            )
         with node._notifications_lock:
             node._notifications.append(
                 f"[Delegation {delegation_id} report ready for review -- "

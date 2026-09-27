@@ -320,13 +320,28 @@ def write_watchdog_retrospective(run_dir, watchdog_seconds: int) -> None:
     try:
         debug = Path(run_dir) / "debug"
         delg, diag = _delegation_diagnostics_summary(debug)
+        # spec 12 (peer_interaction): a delegation whose LAST delegation-log
+        # row is OPEN_FOR_REVIEW was never approved -- WorkerSession.
+        # _open_for_review writes that row durably the instant the report
+        # exists, precisely so a hard kill with no in-process code running
+        # on the way out (unlike a normal close or a caught crash) still
+        # leaves this as the honest last word on that delegation. Called
+        # out explicitly, not left for a reader to notice buried in `delg`.
+        open_reviews = sorted(
+            did for did, state in delg.items()
+            if state.endswith(":OPEN_FOR_REVIEW")
+        )
         text = (
             "## WATCHDOG POST-MORTEM\n"
             f"Run force-killed at {watchdog_seconds}s — no clean close, so the "
             "strategizer wrote no first-person retrospective. Reconstruct its "
             "reasoning from debug/transcripts/strategizer/ (CLAUDE.md §1 Step 4).\n"
             f"Last delegation state: {delg or '(none)'}\n"
-            f"Diagnostics: {diag or '(none)'}"
+            + (
+                f"Open for review, never approved: {', '.join(open_reviews)}\n"
+                if open_reviews else ""
+            )
+            + f"Diagnostics: {diag or '(none)'}"
         )
         rec = {
             "ts": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),

@@ -955,8 +955,13 @@ def test_record_unapproved_review_is_best_effort_never_raises(tmp_path):
 
 
 def test_sweep_open_reviews_finds_and_records_every_open_one(tmp_path):
-    """The sweep reaches every live Node instance via the compiled graph
-    and records EACH OpenForReview entry, not just the first."""
+    """The sweep reaches every live Node instance via AgenticRun's OWN
+    ``_live_nodes`` reference (populated by build_graph as each Node is
+    constructed) and records EACH OpenForReview entry, not just the
+    first -- adda-boss-whopper's review of f39eb4c flagged the earlier
+    version's reliance on LangGraph's own compiled-graph internals
+    (``compiled.nodes[name].bound.func``) as fragile against an upgrade;
+    this is the caller-owned replacement."""
     from adda._src.runtime.agent_runtime import AgenticRun
 
     (tmp_path / "PROBLEM_STATEMENT.md").write_text("x\n", encoding="utf-8")
@@ -979,20 +984,7 @@ def test_sweep_open_reviews_finds_and_records_every_open_one(tmp_path):
         },
     })
 
-    class _FakeRunnable:
-        def __init__(self, func):
-            self.func = func
-
-    class _FakePregelNode:
-        def __init__(self, func):
-            self.bound = _FakeRunnable(func)
-
-    class _FakeGraph:
-        def __init__(self, nodes):
-            self.nodes = {
-                name: _FakePregelNode(n) for name, n in nodes.items()}
-
-    run._live_graph = _FakeGraph({"strategizer": node})
+    run._live_nodes = {"strategizer": node}
 
     run._sweep_open_reviews(tmp_path / "runs" / "T")
 
@@ -1003,7 +995,41 @@ def test_sweep_open_reviews_finds_and_records_every_open_one(tmp_path):
     )
 
 
-def test_sweep_open_reviews_is_a_noop_with_no_live_graph(tmp_path):
+def test_sweep_open_reviews_records_a_diagnostic_when_a_node_is_unreachable(
+    tmp_path,
+):
+    """A node the sweep genuinely cannot read must be recorded as a
+    diagnostic, not silently skipped -- so a reader of the run knows the
+    sweep may be incomplete rather than wrongly assuming it covered
+    every node."""
+    import json as _json
+
+    from adda._src.runtime.agent_runtime import AgenticRun
+
+    class _BrokenNode:
+        _registry_lock = property(
+            lambda self: (_ for _ in ()).throw(RuntimeError("no registry")))
+
+    (tmp_path / "PROBLEM_STATEMENT.md").write_text("x\n", encoding="utf-8")
+    run = AgenticRun(tmp_path)
+    run._live_nodes = {"broken": _BrokenNode()}
+    run_dir = tmp_path / "runs" / "T"
+
+    run._sweep_open_reviews(run_dir)  # must not raise
+
+    lines = [
+        _json.loads(ln) for ln in
+        (run_dir / "debug" / "diagnostics.jsonl").read_text().splitlines()
+        if ln.strip()
+    ]
+    assert any(
+        rec["error_type"] == "OPEN_REVIEW_SWEEP_FAILED"
+        and rec["node"] == "broken"
+        for rec in lines
+    )
+
+
+def test_sweep_open_reviews_is_a_noop_with_no_live_nodes(tmp_path):
     """Before _invoke_graph ever ran (or a caller-supplied pre-built
     graph bypassed the stash), the sweep degrades to a silent no-op --
     never an exception at run close."""

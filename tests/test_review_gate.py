@@ -69,11 +69,12 @@ class _StubAdapter:
         self.closure_tools: dict = {}
 
 
-def _make_node(worker=None) -> Node:
+def _make_node(worker=None, delegation_log=None) -> Node:
     return Node(
         _StubAdapter(), name="strategizer", outgoing=["implementer"],
         spec=_spec(),
         worker_adapters={"implementer": worker or _FakeWorker()},
+        delegation_log=delegation_log,
     )
 
 
@@ -112,24 +113,109 @@ def test_delegate_refused_while_a_review_is_open():
     assert len(node._registry) == 1  # the refused call never dispatched
 
 
-def test_errored_delegation_does_not_block_a_new_delegate():
-    """Edge 1: a worker that raises has no report to review -- it is
-    terminal immediately and must NOT count toward the open-review
-    block, even with peer_interaction on."""
-    node = _make_node(worker=_FakeWorker(raises=True))
+def test_open_for_review_writes_a_durable_log_row_immediately(tmp_path):
+    """Regression for adda-boss-whopper's review of f39eb4c: the earlier
+    version of this mechanism only recorded an open review at CLOSE time
+    (a sweep), which a crash or a watchdog kill never reaches -- the
+    review would vanish, silently, with the delegation log's last row
+    still falsely reading RUNNING. The fix is to persist at TRANSITION
+    time: this row must exist on disk the instant _open_for_review runs,
+    with no simulated crash or close needed to produce it -- a real
+    process death after this point already leaves an honest trace."""
+    import json as _json
+
+    from adda._src.infra.delegation_log import DelegationLog
+
+    log = DelegationLog(tmp_path / "delegation_log.jsonl")
+    node = _make_node(delegation_log=log)
+    dt = DelegationTools(node)
+    set_delegation_id(None)
+
+    dt.Delegate("implementer", "do the thing", "a report", wait=True)
+
+    lines = [
+        _json.loads(ln) for ln in
+        (tmp_path / "delegation_log.jsonl").read_text().splitlines()
+        if ln.strip()
+    ]
+    statuses = [rec["status"] for rec in lines]
+    assert "OPEN_FOR_REVIEW" in statuses
+    open_row = next(r for r in lines if r["status"] == "OPEN_FOR_REVIEW")
+    assert "A fine report." in open_row["deliverable"]
+    # No DONE row exists yet -- nobody approved it.
+    assert "DONE" not in statuses
+
+
+def test_open_for_review_row_is_the_honest_last_word_if_the_process_dies(
+    tmp_path,
+):
+    """The crash/watchdog-kill case, made concrete: if nothing EVER
+    approves this delegation (the process simply stops existing right
+    after _open_for_review), the delegation log's own last-wins collapse
+    means OPEN_FOR_REVIEW is what a reader sees -- never RUNNING (a lie:
+    it did finish) and never DONE (a lie: nobody approved it)."""
+    import json as _json
+
+    from adda._src.infra.delegation_log import DelegationLog
+
+    log = DelegationLog(tmp_path / "delegation_log.jsonl")
+    node = _make_node(delegation_log=log)
+    dt = DelegationTools(node)
+    set_delegation_id(None)
+
+    dt.Delegate("implementer", "do the thing", "a report", wait=True)
+    # Simulate the process ending here -- nothing else ever writes to
+    # this log again (no sweep, no approval, no crash handler).
+
+    last_by_id: dict[str, dict] = {}
+    for ln in (tmp_path / "delegation_log.jsonl").read_text().splitlines():
+        if ln.strip():
+            rec = _json.loads(ln)
+            last_by_id[rec["id"]] = rec  # last-wins, same as _load_all
+    assert len(last_by_id) == 1
+    (only_record,) = last_by_id.values()
+    assert only_record["status"] == "OPEN_FOR_REVIEW"
+
+
+def test_delegate_blocked_by_review_not_by_an_unrelated_errored_sibling():
+    """Edge 1, made discriminating (adda-boss-whopper's review of
+    f39eb4c: the original version of this test was trivially true even
+    on code with NO blocking logic at all, so it guarded nothing). The
+    registry holds ONE Errored entry and ONE OpenForReview entry at the
+    same time: Delegate is refused because of the review, never the
+    error; approving the review unblocks Delegate even though the
+    Errored entry is still sitting right there, untouched, in the
+    registry. A buggy implementation that counted ERRORED as "open"
+    would still refuse Delegate after approval -- the final assertion
+    catches that."""
+    worker = _FakeWorker(raises=True)
+    node = _make_node(worker=worker)
     dt = DelegationTools(node)
     set_delegation_id(None)
 
     out1 = dt.Delegate("implementer", "boom", "a report", wait=True)
     assert out1.startswith("Errored:")
-    did = next(iter(node._registry))
-    assert node._registry[did]["status"] == "Errored"
+    errored_id = next(iter(node._registry))
+    assert node._registry[errored_id]["status"] == "Errored"
 
-    # A second Delegate must be refused for cutoff/target reasons only,
-    # never for "you have an open review" -- there is none.
-    out2 = dt.Delegate("implementer", "try again", "a report", wait=True)
-    assert "open for review" not in out2
-    assert len(node._registry) == 2
+    worker._raises = False
+    out2 = dt.Delegate("implementer", "do the thing", "a report", wait=True)
+    assert "OPEN FOR REVIEW" in out2
+    open_id = next(d for d in node._registry if d != errored_id)
+    assert node._registry[open_id]["status"] == "OpenForReview"
+
+    # Refused now -- naming the OPEN review, not the unrelated error.
+    out3 = dt.Delegate("implementer", "third task", "a report")
+    assert out3.startswith("ERROR:")
+    assert open_id in out3
+    assert errored_id not in out3
+
+    # Approving the open one unblocks Delegate -- even though the
+    # Errored entry is untouched and still in the registry.
+    dt.SendMessage(open_id, "looks good", approve=True)
+    assert node._registry[errored_id]["status"] == "Errored"
+    out4 = dt.Delegate("implementer", "fourth task", "a report", wait=True)
+    assert not out4.startswith("ERROR:")
 
 
 def test_approve_finalizes_the_open_review():

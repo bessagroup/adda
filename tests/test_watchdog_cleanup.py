@@ -219,6 +219,38 @@ def test_write_watchdog_retrospective_from_disk_state(tmp_path):
     assert "strategizer" in rec["text"]  # points to the transcript
 
 
+def test_write_watchdog_retrospective_flags_an_open_never_approved_review(
+    tmp_path,
+):
+    """spec 12 (peer_interaction): a delegation whose LAST delegation-log
+    row is OPEN_FOR_REVIEW (written durably by WorkerSession.
+    _open_for_review the instant the report existed, not swept in at a
+    close this hard kill never reaches) must be called out explicitly as
+    open/never-approved -- not left for a reader to notice buried in the
+    raw last-delegation-state dict."""
+    debug = tmp_path / "debug"
+    debug.mkdir()
+    (debug / "delegation_log.jsonl").write_text(
+        json.dumps(
+            {"id": "D001", "to_node": "implementer", "status": "RUNNING"}
+        ) + "\n"
+        + json.dumps(
+            {"id": "D001", "to_node": "implementer",
+             "status": "OPEN_FOR_REVIEW"}
+        ) + "\n"
+        + json.dumps(
+            {"id": "D002", "to_node": "datagenerator", "status": "DONE"}
+        ) + "\n"
+    )
+    write_watchdog_retrospective(tmp_path, 3600)
+    rec = json.loads(
+        (debug / "retrospectives.jsonl").read_text().splitlines()[0])
+    assert "Open for review, never approved" in rec["text"]
+    assert "D001" in rec["text"].split("Open for review")[1].split("\n")[0]
+    assert "D002" not in rec["text"].split("Open for review")[1].split(
+        "\n")[0]
+
+
 def test_write_watchdog_retrospective_appends_not_overwrites(tmp_path):
     debug = tmp_path / "debug"
     debug.mkdir()
