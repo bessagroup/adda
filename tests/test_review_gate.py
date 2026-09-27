@@ -294,3 +294,106 @@ def test_wait_by_id_still_returns_the_open_reports_text():
 
     assert "OpenForReview" in out
     assert "A fine report." in out
+
+
+def test_wait_block_false_reports_an_open_review_not_errored():
+    """Regression, same bug class as Delegate(wait=True)'s earlier
+    misreport: Wait(id, block=False) must not report a successful,
+    unapproved report as "Errored:" -- OpenForReview is neither Working
+    nor an error."""
+    node = _make_node()
+    dt = DelegationTools(node)
+    set_delegation_id(None)
+
+    dt.Delegate("implementer", "do the thing", "a report", wait=True)
+    did = next(iter(node._registry))
+
+    out = dt.Wait(did, block=False)
+
+    assert not out.startswith("Errored:")
+    assert "OPEN FOR REVIEW" in out
+    assert "A fine report." in out
+
+
+# ---------------------------------------------------------------------------
+# The pending-for-you notice (spec 12 design item 10(a)) -- lives in
+# Node._wrap_closure, so these tests go through the REAL wrapped closures
+# (build_routing_tools), not DelegationTools directly.
+# ---------------------------------------------------------------------------
+
+
+def test_pending_notice_names_an_open_review_on_any_tool_result():
+    """An open review is named on the VERY NEXT tool result, whatever
+    tool that happens to be -- not only Wait()'s own bucket message."""
+    from adda._src.nodes.tools.routing import build_routing_tools
+
+    node = _make_node()
+    tools = build_routing_tools(node)
+    set_delegation_id(None)
+
+    tools["Delegate"]("implementer", "do the thing", "a report", wait=True)
+    did = next(iter(node._registry))
+
+    # A DIFFERENT tool call -- block=False status poll, not the
+    # review-collection path itself.
+    out = tools["Wait"](did, block=False)
+
+    assert "pending items" in out
+    assert "open for review" in out
+    assert did in out
+
+
+def test_no_pending_notice_when_nothing_is_owed():
+    """The converse of the above: nothing pending stays silent -- no
+    manufactured noise on the common case."""
+    from adda._src.nodes.tools.routing import build_routing_tools
+
+    node = _make_node()
+    tools = build_routing_tools(node)
+    set_delegation_id(None)
+
+    out = tools["Wait"]("nonexistent", block=False)
+
+    assert "pending items" not in out
+
+
+def test_pending_notice_clears_once_the_review_is_approved():
+    """Once the last open review is approved, the notice must stop
+    appearing -- it is computed fresh every call, not a one-shot drain
+    that could go stale."""
+    from adda._src.nodes.tools.routing import build_routing_tools
+
+    node = _make_node()
+    tools = build_routing_tools(node)
+    set_delegation_id(None)
+
+    tools["Delegate"]("implementer", "do the thing", "a report", wait=True)
+    did = next(iter(node._registry))
+    tools["SendMessage"](did, "looks good", approve=True)
+    tools["Wait"](did)  # actually collect it (block=False only peeks)
+
+    out = tools["Wait"]("nonexistent", block=False)
+
+    assert "pending items" not in out
+
+
+def test_pending_notice_does_not_leak_a_siblings_or_childs_obligations():
+    """Scoped strictly to the CALLING identity's own delegations -- a
+    sibling delegation's open review (parent == a different identity)
+    must never appear in this identity's notice."""
+    from adda._src.nodes.tools.routing import build_routing_tools
+    from adda._src.nodes.tools.routing.delegation import DelegationTools
+
+    node = _make_node()
+    tools = build_routing_tools(node)
+    dt = DelegationTools(node)
+
+    # A review opened directly under a DIFFERENT delegator identity
+    # ("D999"), simulating a sibling's own sub-delegation.
+    set_delegation_id("D999")
+    dt.Delegate("implementer", "someone else's task", "a report", wait=True)
+    set_delegation_id(None)
+
+    out = tools["Wait"]("nonexistent", block=False)
+
+    assert "pending items" not in out

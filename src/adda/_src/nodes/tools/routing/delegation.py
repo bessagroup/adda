@@ -1926,6 +1926,15 @@ class DelegationTools:
             if cp:
                 body += "\n\n" + cp
             return body + _tail
+        if status == "OpenForReview":
+            # Same bug class as Delegate(wait=True)'s earlier misreport:
+            # a successful-but-unapproved report is neither Working nor
+            # an error -- reporting it as "Errored:" would be a false
+            # negative on a real, readable report.
+            return (
+                f"[{delegation_id}] report ready but OPEN FOR REVIEW -- "
+                f"{entry['result']}"
+            ) + _tail
         if status not in ("Working", "FollowUp"):
             return f"Errored:\n{entry['result']}" + _tail
         return self._working_report(delegation_id, poll) + _tail

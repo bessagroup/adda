@@ -493,6 +493,57 @@ class OrchestrationMixin:
                 self._delegator_conds[identity] = cond
             return cond
 
+    def _pending_for_you(self, identity: str) -> str:
+        """What ``identity`` (a delegator: ``"entry"`` or a delegation id
+        of a node that is ITSELF delegating further) currently owes,
+        computed FRESH on every call -- never a drained queue, since
+        "nothing pending" must read as silence indefinitely, not just
+        until the first drain (spec 12 design item 10(a): "at minimum,
+        every agent must always KNOW what it currently owes ... or
+        nothing (in which case: silence, not a notice for its own
+        sake)").
+
+        Three kinds, all scoped to entries THIS identity itself
+        delegated (``entry.get("parent") == identity`` -- never a
+        sibling's or a nested child's): a report open for review
+        (`OpenForReview`), a worker's `FollowUp` question awaiting an
+        answer, and a finished delegation (`Done`/`Errored`) not yet
+        collected via `Wait`. Returns "" when none apply -- the common
+        case, deliberately silent.
+        """
+        with self._registry_lock:
+            mine = [
+                (did, dict(e)) for did, e in self._registry.items()
+                if e.get("parent") == identity
+            ]
+        reviews = sorted(
+            did for did, e in mine if e.get("status") == "OpenForReview")
+        followups = sorted(
+            did for did, e in mine if e.get("status") == "FollowUp")
+        uncollected = sorted(
+            did for did, e in mine
+            if e.get("status") in ("Done", "Errored") and not e.get("waited")
+        )
+        if not (reviews or followups or uncollected):
+            return ""
+        bits = []
+        if reviews:
+            bits.append(
+                f"open for review: {', '.join(reviews)} -- SendMessage(id, "
+                "..., approve=True) to finalize, or ask a question first"
+            )
+        if followups:
+            bits.append(
+                f"awaiting your answer: {', '.join(followups)} -- "
+                "Reply(id, answer)"
+            )
+        if uncollected:
+            bits.append(
+                f"finished, not yet collected: {', '.join(uncollected)} "
+                "-- Wait(id)"
+            )
+        return "You have pending items -- " + "; ".join(bits) + "."
+
     def _build_routing_closures(self) -> dict:
         from .tools.routing import build_routing_tools
         return build_routing_tools(self)
@@ -603,6 +654,25 @@ class OrchestrationMixin:
                     notices = node._drain_notifications()
                     if notices.strip():
                         result = result.rstrip("\n") + "\n\n" + notices.rstrip("\n")
+                    # Spec 12 design item 10(a): a pending-for-you notice
+                    # on every tool result, scoped to THIS CALL's own
+                    # delegator identity (never a sibling's or a nested
+                    # child's). Gated behind peer_interaction, same as
+                    # every other spec 12 surface -- OpenForReview cannot
+                    # exist with the feature off, and the un-collected/
+                    # FollowUp buckets staying silent too keeps today's
+                    # shipped behavior (Confer/FollowUp/Reply) undisturbed
+                    # until the migration-sweep commit flips the default.
+                    from ..runtime import features as _features
+                    if _features.enabled("peer_interaction"):
+                        from ..backends.base import get_delegation_id
+                        identity = get_delegation_id() or "entry"
+                        pending = node._pending_for_you(identity)
+                        if pending:
+                            result = (
+                                result.rstrip("\n") + "\n\n"
+                                + wrap_notice(pending)
+                            )
                 return result
             except Exception as exc:
                 node._record_tool_error(

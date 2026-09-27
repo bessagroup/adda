@@ -251,26 +251,51 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   (`Done()`, watchdog, budget cutoff) with reviews still open, each is
   swept and recorded honestly as `OPEN_UNAPPROVED` in the delegation log
   and the delegating node's retrospective — never as `DONE`, never
-  silently dropped (`AgenticRun._sweep_open_reviews`/
-  `_record_unapproved_review`, `runtime/agent_runtime.py`).
+  silently dropped. Persisted at the TRANSITION itself, not swept in at
+  close: `WorkerSession._open_for_review` writes an `OPEN_FOR_REVIEW`
+  delegation-log row the instant the report exists, so the log's own
+  last-wins collapse makes that row the honest final record even if the
+  process dies (a crash, a watchdog kill) before anyone approves it —
+  `AgenticRun._sweep_open_reviews` (called from `_finalize_run` AND the
+  crash path) only appends a small close-time `OPEN_UNAPPROVED` status
+  update on top, and reaches every live Node via `AgenticRun._live_nodes`
+  (populated by `graph_builder.build_graph`'s own `node_registry`
+  out-param — an explicit reference, never LangGraph's compiled-graph
+  internals). `write_watchdog_retrospective` calls out any delegation
+  whose LAST log row is `OPEN_FOR_REVIEW` explicitly, for the hard-kill
+  case where no in-process sweep ever runs.
+- **The pending-for-you notice (design item 10(a)).** Every tool result
+  from a node's OWN closures carries a compact notice naming what that
+  CALL's own delegator identity currently owes — an open review, a
+  worker's unanswered `FollowUp`, a finished delegation not yet collected
+  — computed FRESH every call (`Node._pending_for_you`), never a drained
+  queue, so "nothing owed" stays silent indefinitely rather than firing
+  once. Reuses the exact insertion point `_drain_notifications` already
+  uses in `_wrap_closure`; scoped strictly to `entry.get("parent") ==
+  identity`, so a sibling's or a nested child's own obligations never
+  leak into it.
 - **Where:** `nodes/tools/routing/delegation.py` (`DelegationTools.
   SendMessage`, `_resolve_send_target`, `_check_open_reviews`,
   `_handle_review_message`, `WorkerSession._open_for_review`/
-  `finalize_after_review`, the `parent`/`to_worker`/`to_delegator`/
-  `worker_cond` fields `_register_dispatch` now stamps on every registry
-  entry), `nodes/orchestration.py` (`_get_delegator_cond`, the
+  `finalize_after_review`, `_status`'s `OpenForReview` branch, the
+  `parent`/`to_worker`/`to_delegator`/`worker_cond` fields
+  `_register_dispatch` now stamps on every registry entry),
+  `nodes/orchestration.py` (`_get_delegator_cond`, the
   per-delegator-identity `Condition` registry this all synchronizes
-  through, `_worker_sessions`), `nodes/tools/routing/__init__.py`
+  through, `_worker_sessions`, `_pending_for_you`, its hook in
+  `_wrap_closure`), `nodes/tools/routing/__init__.py`
   (`build_routing_tools`'s feature gate), `backends/claude.py`/
   `backends/openai_compatible.py` (`last_session_id` capture — always
   `None` on the latter, which has no server-side session; parity with
   `ClaudeAdapter` enforced by `tests/test_backend_parity.py`),
-  `runtime/agent_runtime.py` (the close-time sweep), `runtime/features.py`
-  (`peer_interaction`). **Status:** in progress — see `internal/specs/
-  12-peer-interaction.md` for what remains (the actual session-RESUME
-  invocation for a non-approve message, the pending-for-you notice
-  mechanism, the migration sweep that retires `Confer`/`FollowUp`/
-  `Reply`).
+  `runtime/agent_runtime.py` (`_live_nodes`, the close-time sweep),
+  `runtime/graph_builder.py` (`node_registry` out-param),
+  `infra/watchdog_cleanup.py` (`write_watchdog_retrospective`'s
+  open-review callout), `runtime/features.py` (`peer_interaction`).
+  **Status:** in progress — see `internal/specs/12-peer-interaction.md`
+  for what remains (the actual session-RESUME invocation for a
+  non-approve message, the "read" enforcement, the migration sweep that
+  retires `Confer`/`FollowUp`/`Reply`).
 
 ### Per-cell notebook debugger (#13)
 - **What:** run pipeline.ipynb against a *copy* of the ledger and get a per-cell
