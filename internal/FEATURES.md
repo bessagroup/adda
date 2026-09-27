@@ -266,14 +266,23 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   case where no in-process sweep ever runs.
 - **The pending-for-you notice (design item 10(a)).** Every tool result
   from a node's OWN closures carries a compact notice naming what that
-  CALL's own delegator identity currently owes — an open review, a
-  worker's unanswered `FollowUp`, a finished delegation not yet collected
-  — computed FRESH every call (`Node._pending_for_you`), never a drained
-  queue, so "nothing owed" stays silent indefinitely rather than firing
-  once. Reuses the exact insertion point `_drain_notifications` already
-  uses in `_wrap_closure`; scoped strictly to `entry.get("parent") ==
-  identity`, so a sibling's or a nested child's own obligations never
-  leak into it.
+  CALL's own delegator identity currently owes — computed FRESH every
+  call (`Node._pending_for_you`), never a drained queue, so "nothing
+  owed" stays silent indefinitely rather than firing once. Reuses the
+  exact insertion point `_drain_notifications` already uses in
+  `_wrap_closure`. As a DELEGATOR (`entry.get("parent") == identity` —
+  never a sibling's or a nested child's): an open review, a worker's
+  unanswered `FollowUp`, a finished delegation not yet collected, and —
+  Elvis's own first-named case, "respond [to a] delegation" — an unread
+  `SendMessage` question sitting in a child's `to_delegator` queue
+  (`"D003 (implementer) asked you: ..."`, truncated to ~100 chars —
+  FollowUp's bucket alone doesn't cover this, since FollowUp is being
+  retired). As a WORKER (`identity` is itself a registry entry): an
+  unread `SendMessage` from its OWN delegator sitting in that entry's
+  `to_worker` queue (`"your delegator sent you a message: ..."`). Every
+  queue check is a PEEK under the queue's own lock (never a pop — that
+  stays `Wait`'s/`SendMessage`'s job), sharing one lock acquisition with
+  the check, the same race rule as the queues' real consumers.
 - **Where:** `nodes/tools/routing/delegation.py` (`DelegationTools.
   SendMessage`, `_resolve_send_target`, `_check_open_reviews`,
   `_handle_review_message`, `WorkerSession._open_for_review`/

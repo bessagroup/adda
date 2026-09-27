@@ -493,6 +493,11 @@ class OrchestrationMixin:
                 self._delegator_conds[identity] = cond
             return cond
 
+    @staticmethod
+    def _truncate_for_notice(text: str, n: int = 100) -> str:
+        text = text.strip()
+        return text if len(text) <= n else text[:n] + "..."
+
     def _pending_for_you(self, identity: str) -> str:
         """What ``identity`` (a delegator: ``"entry"`` or a delegation id
         of a node that is ITSELF delegating further) currently owes,
@@ -503,12 +508,21 @@ class OrchestrationMixin:
         nothing (in which case: silence, not a notice for its own
         sake)").
 
-        Three kinds, all scoped to entries THIS identity itself
-        delegated (``entry.get("parent") == identity`` -- never a
-        sibling's or a nested child's): a report open for review
-        (`OpenForReview`), a worker's `FollowUp` question awaiting an
-        answer, and a finished delegation (`Done`/`Errored`) not yet
-        collected via `Wait`. Returns "" when none apply -- the common
+        Five kinds. As a DELEGATOR (``entry.get("parent") == identity``
+        -- never a sibling's or a nested child's): a report open for
+        review (`OpenForReview`), a worker's `FollowUp` question awaiting
+        an answer, a finished delegation (`Done`/`Errored`) not yet
+        collected via `Wait`, and — the case Elvis named first, "respond
+        [to a] delegation" — an unread `SendMessage` question sitting in
+        a child's own `to_delegator` queue (FollowUp is being retired;
+        this is its replacement). As a WORKER (``identity`` is itself a
+        registry entry, i.e. this node is mid-delegation): an unread
+        `SendMessage` from ITS OWN delegator sitting in that entry's
+        `to_worker` queue. Every queue peek (never a pop -- that stays
+        Wait's/SendMessage's job) shares ONE lock acquisition with its
+        own check, under the SAME Condition/lock the queue's real
+        consumer uses (the check-then-pop race rule applies just as much
+        to a check-then-PEEK). Returns "" when none apply -- the common
         case, deliberately silent.
         """
         with self._registry_lock:
@@ -516,6 +530,7 @@ class OrchestrationMixin:
                 (did, dict(e)) for did, e in self._registry.items()
                 if e.get("parent") == identity
             ]
+            my_own_entry = self._registry.get(identity)
         reviews = sorted(
             did for did, e in mine if e.get("status") == "OpenForReview")
         followups = sorted(
@@ -524,7 +539,24 @@ class OrchestrationMixin:
             did for did, e in mine
             if e.get("status") in ("Done", "Errored") and not e.get("waited")
         )
-        if not (reviews or followups or uncollected):
+
+        cond = self._get_delegator_cond(identity)
+        with cond:
+            questions = [
+                (did, e.get("target", did), e["to_delegator"][0][1])
+                for did, e in mine if e.get("to_delegator")
+            ]
+
+        worker_message = None
+        if my_own_entry is not None:
+            with my_own_entry["worker_cond"]:
+                if my_own_entry.get("to_worker"):
+                    worker_message = my_own_entry["to_worker"][0][1]
+
+        if not (
+            reviews or followups or uncollected or questions
+            or worker_message
+        ):
             return ""
         bits = []
         if reviews:
@@ -541,6 +573,17 @@ class OrchestrationMixin:
             bits.append(
                 f"finished, not yet collected: {', '.join(uncollected)} "
                 "-- Wait(id)"
+            )
+        if questions:
+            bits.append("; ".join(
+                f"{did} ({target}) asked you: "
+                f"{self._truncate_for_notice(msg)}"
+                for did, target, msg in questions
+            ))
+        if worker_message:
+            bits.append(
+                "your delegator sent you a message: "
+                f"{self._truncate_for_notice(worker_message)}"
             )
         return "You have pending items -- " + "; ".join(bits) + "."
 

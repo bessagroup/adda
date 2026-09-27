@@ -377,6 +377,60 @@ def test_pending_notice_clears_once_the_review_is_approved():
     assert "pending items" not in out
 
 
+def test_pending_notice_shows_a_childs_unread_question_to_the_delegator():
+    """adda-boss-whopper's review of e03f745: the case Elvis named
+    first, "respond [to a] delegation" -- a worker's SendMessage
+    question, unread by the delegator, must appear on the delegator's
+    NEXT tool result, not only get waited out via Wait(). FollowUp's own
+    bucket alone can't cover this: FollowUp is being retired."""
+    from adda._src.nodes.tools.routing import build_routing_tools
+    from adda._src.nodes.tools.routing.delegation import DelegationTools
+
+    node = _make_node()
+    dt = DelegationTools(node)
+    tools = build_routing_tools(node)
+
+    set_delegation_id(None)
+    dt._register_dispatch(
+        "D001", "implementer", [], False, None, None,
+        "2026-01-01T00:00:00+00:00")
+
+    set_delegation_id("D001")
+    dt.SendMessage("strategizer", "what does this bound mean?")
+    set_delegation_id(None)
+
+    out = tools["Wait"]("nonexistent", block=False)
+
+    assert "pending items" in out
+    assert "D001 (implementer) asked you" in out
+    assert "what does this bound mean?" in out
+
+
+def test_pending_notice_shows_a_delegators_unread_message_to_the_worker():
+    """The mirror case: a delegator's SendMessage to a worker, unread by
+    that worker, must appear on the WORKER's own next tool result."""
+    from adda._src.nodes.tools.routing import build_routing_tools
+    from adda._src.nodes.tools.routing.delegation import DelegationTools
+
+    node = _make_node()
+    dt = DelegationTools(node)
+    tools = build_routing_tools(node)
+
+    set_delegation_id(None)
+    dt._register_dispatch(
+        "D001", "implementer", [], False, None, None,
+        "2026-01-01T00:00:00+00:00")
+    dt.SendMessage("D001", "clarify the constraint before you proceed")
+
+    set_delegation_id("D001")
+    out = tools["Wait"]("nonexistent", block=False)
+    set_delegation_id(None)
+
+    assert "pending items" in out
+    assert "your delegator sent you a message" in out
+    assert "clarify the constraint" in out
+
+
 def test_pending_notice_does_not_leak_a_siblings_or_childs_obligations():
     """Scoped strictly to the CALLING identity's own delegations -- a
     sibling delegation's open review (parent == a different identity)
