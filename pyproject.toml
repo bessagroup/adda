@@ -133,17 +133,17 @@ omit = ["tests/", "**/__init__.py"]
 source = ["src"]
 
 [tool.pytest.ini_options]
-addopts = "--cov-report term --cov-report html --cov-config=.coveragerc --cov=adda --cov-fail-under=85.00"
-# Global bound so a regression that reintroduces a missed wake (a blocked
-# SendMessage/Wait predicate, a hung thread join) fails the ONE test that
-# hit it within seconds, instead of riding out to GitHub's 6-hour job
-# ceiling with nothing else telling you which test is stuck. The `thread`
-# method dumps every thread's stack on timeout -- for a hang inside a
-# blocking primitive that IS the diagnostic (which lock, which predicate).
-# Raise per-test with @pytest.mark.timeout(n) only where a test is
-# legitimately slower than this, not to paper over a real hang.
-timeout = 120
-timeout_method = "thread"
+# --dist=loadgroup (only takes effect alongside -n, e.g. `-n auto`): tests
+# marked @pytest.mark.xdist_group(name="jupyter_kernel") are scheduled onto
+# the SAME worker, one at a time, instead of load-balanced freely across
+# every worker. Every test that starts a REAL Jupyter kernel (nbclient/
+# jupyter_client -- reproduction-gate execution, RunNotebook/
+# diagnose_notebook) carries that marker: several kernels racing to start
+# at once under -n auto contention caused a genuine CI failure (ubuntu
+# 3.11, 0e04f3c) -- "Kernel didn't respond to heartbeats in 60 seconds".
+# Grouping them removes the contention at its source, rather than just
+# raising the heartbeat timeout and hoping it's enough headroom next time.
+addopts = "--cov-report term --cov-report html --cov-config=.coveragerc --cov=adda --cov-fail-under=85.00 --dist=loadgroup"
 markers = [
   "smoke",
   "requires_dependency(name): mark the test as it requires a certain dependency",
@@ -155,6 +155,30 @@ markers = [
 minversion = "6.0"
 pythonpath = [".", "src"]
 testpaths = ["tests"]
+# Global bound so a regression that reintroduces a missed wake (a blocked
+# SendMessage/Wait predicate, a hung thread join) fails the ONE test that
+# hit it within seconds, instead of riding out to GitHub's 6-hour job
+# ceiling with nothing else telling you which test is stuck.
+#
+# "signal" (POSIX only -- adda is POSIX/HPC-oriented, Windows unsupported,
+# CLAUDE.md), NOT "thread": thread-method timeout kills the whole WORKER
+# PROCESS with os._exit() when a timeout fires, which pytest-xdist then
+# reports as "worker crashed" -- indistinguishable from a real crash, and
+# it takes every OTHER in-flight test on that worker down with it. Learned
+# from CI, not guessed: the "thread" method's first real trip (macOS,
+# ec02f9f) killed gw1/gw3/gw4 mid-test on slow docling/PDF-extraction
+# tests running under -n auto contention (~127s, just past the 120s
+# bound) with three misleading "worker crashed" failures instead of one
+# attributable timeout. "signal" raises INSIDE the timed-out test instead
+# -- that test fails on its own, cleanly, and every other test on the
+# same worker is unaffected.
+# Raise per-test with @pytest.mark.timeout(n) for a test that is
+# legitimately slower than this, not to paper over a real hang -- see
+# tests/test_literature_corpus.py / tests/test_literature_guardrails.py's
+# PDF-extraction tests for the ones this bound itself caught being too
+# tight for a loaded macOS runner.
+timeout = 120
+timeout_method = "signal"
 
 [tool.ruff]
 line-length = 79

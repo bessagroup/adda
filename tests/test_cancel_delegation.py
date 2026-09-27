@@ -3,6 +3,8 @@ CancelDelegation tool lets the strategizer detach a still-running delegation so
 it stops blocking Done() (instead of bouncing on "wait for all delegations")."""
 from __future__ import annotations
 
+import pytest
+
 from adda._src.backends.base import Agent, Edge, Graph
 from adda._src.nodes import Node
 
@@ -251,6 +253,7 @@ def _write_nb(study_dir, source):
     nbformat.write(nb, str(study_dir / "pipeline.ipynb"))
 
 
+@pytest.mark.xdist_group(name="jupyter_kernel")
 def test_check_deliverable_reports_pass_and_failure(tmp_path):
     """RunNotebook(gate=True) runs pipeline.ipynb through the gate WITHOUT closing: PASS
     for a grounded headline, full error for a broken notebook. Gives the agent
@@ -301,6 +304,7 @@ def test_readnote_lists_a_directory_so_delegation_code_is_discoverable(tmp_path)
     assert "found the optimum" in body
 
 
+@pytest.mark.xdist_group(name="jupyter_kernel")
 def test_check_deliverable_shows_countdown_and_bounds_iteration(tmp_path):
     """The gate check has a visible 10-call budget: each call reports how many
     remain (so the agent never hits an unseen wall), and the 11th refuses —
@@ -366,6 +370,7 @@ def test_cancel_single_shot_when_no_ledgered_evals(tmp_path):
     assert "HOLD" not in out
 
 
+@pytest.mark.xdist_group(name="jupyter_kernel")
 def test_ghost_delegation_flushed_interrupted_at_run_close(tmp_path):
     """Working delegation at run-close gets an INTERRUPTED record in the log.
 

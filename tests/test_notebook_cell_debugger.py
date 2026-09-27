@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import nbformat
 import nbclient  # noqa: F401 - importing here fails collection if the hard dep is missing
+import pytest
 
 from adda._src.evaluation.notebook_exec import diagnose_notebook
 
@@ -22,6 +23,7 @@ def _nb(tmp_path, cells):
     return p
 
 
+@pytest.mark.xdist_group(name="jupyter_kernel")
 def test_pinpoints_the_broken_cell_by_name_and_traceback(tmp_path):
     p = _nb(tmp_path, [
         ("print('doe ok')", "doe"),
@@ -40,6 +42,7 @@ def test_pinpoints_the_broken_cell_by_name_and_traceback(tmp_path):
     assert by["analysis"]["errored"] is False
 
 
+@pytest.mark.xdist_group(name="jupyter_kernel")
 def test_clean_notebook_has_no_first_error(tmp_path):
     p = _nb(tmp_path, [("print('a')", "doe"), ("x = 1 + 1", "ml")])
     t = diagnose_notebook(p, cwd=tmp_path, env=None, timeout=60)
@@ -47,6 +50,7 @@ def test_clean_notebook_has_no_first_error(tmp_path):
     assert all(not c["errored"] for c in t["cells"])
 
 
+@pytest.mark.xdist_group(name="jupyter_kernel")
 def test_upto_name_truncates_and_does_not_reach_later_failure(tmp_path):
     p = _nb(tmp_path, [
         ("print('doe')", "doe"),
@@ -60,6 +64,7 @@ def test_upto_name_truncates_and_does_not_reach_later_failure(tmp_path):
     assert {c["name"] for c in t["cells"]} == {"doe", "ml"}
 
 
+@pytest.mark.xdist_group(name="jupyter_kernel")
 def test_unknown_cell_name_is_flagged_not_executed(tmp_path):
     p = _nb(tmp_path, [("print('doe')", "doe")])
     t = diagnose_notebook(p, cwd=tmp_path, env=None, timeout=60, upto_name="nope")
@@ -71,6 +76,7 @@ def test_runnotebook_is_wired_into_the_strategizer():
     assert "RunNotebook" in StrategizerAgent.tools
 
 
+@pytest.mark.xdist_group(name="jupyter_kernel")
 def test_runpipelinecell_upto_name_accepts_a_custom_phase_cell(tmp_path):
     """Regression: RunPipelineCell's own docstring/error message previously
     implied ONLY the 5 standard pillars were valid for `name=`, even though

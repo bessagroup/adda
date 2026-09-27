@@ -204,6 +204,7 @@ def test_authored_notebook_passes_the_gate(tmp_path):
     assert n._reproduction_gate({"study_dir": str(tmp_path)}) is None
 
 
+@pytest.mark.xdist_group(name="jupyter_kernel")
 def test_check_deliverable_sees_evals_in_a_design_namespace_only(tmp_path):
     """CheckDeliverable's row-count fail-fast keyed off run_dir/experiment_data/
     experiment_data/output.csv only, so a run whose evals all landed in a

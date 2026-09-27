@@ -11,6 +11,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
 from adda._src.backends.base import Agent, Edge, Graph
 from adda._src.evaluation.instrumented import InstrumentedDataGenerator
 from adda._src.nodes import Node
@@ -439,6 +441,7 @@ def test_required_deliverable_is_always_notebook():
         settings.configure({})
 
 
+@pytest.mark.xdist_group(name="jupyter_kernel")
 def test_repro_gate_executes_notebook_lazily(tmp_path):
     """A notebook that loads the ledger and self-asserts the headline → PASS,
     zero new rows (mirror of test_gate_passes_for_clean_lazy_pipeline)."""
@@ -450,6 +453,7 @@ def test_repro_gate_executes_notebook_lazily(tmp_path):
     assert node._reproduction_gate({"study_dir": str(study_dir)}) is None
 
 
+@pytest.mark.xdist_group(name="jupyter_kernel")
 def test_repro_gate_fails_when_notebook_adds_evals(tmp_path):
     """A NON-lazy notebook that stamps a new eval → caught as not-lazy."""
     node, study_dir = _setup(tmp_path)
@@ -470,6 +474,7 @@ def test_repro_gate_fails_when_notebook_adds_evals(tmp_path):
     assert problem is not None and "lazy" in problem.lower()
 
 
+@pytest.mark.xdist_group(name="jupyter_kernel")
 def test_repro_gate_env_vars_reach_kernel(tmp_path):
     """The notebook kernel must see F3DASM_CANONICAL_STORE (env propagation is a
     known footgun); a cell asserting it errors → gate FAIL if it didn't reach."""
@@ -482,6 +487,7 @@ def test_repro_gate_env_vars_reach_kernel(tmp_path):
     assert node._reproduction_gate({"study_dir": str(study_dir)}) is None
 
 
+@pytest.mark.xdist_group(name="jupyter_kernel")
 def test_shared_assert_helper_is_executor_agnostic(tmp_path):
     """run_deliverable gives a CompletedProcess with the same shape + headline
     for an equivalent .py and .ipynb (DRY guard on the executor split)."""
