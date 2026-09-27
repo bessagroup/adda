@@ -289,14 +289,26 @@ def test_get_paper_returns_content(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(300)
+@pytest.mark.timeout(600)
+@pytest.mark.xdist_group(name="docling_pdf")
 def test_extract_pdf_to_md_page_annotations(tmp_path):
     """If fitz is available, output contains <!-- page N --> annotations.
 
-    Raised past the global 120s bound: a cold docling/pdfium first-use
-    on a loaded macOS CI runner (under -n auto contention) measured
-    ~127s in CI (ec02f9f's own "worker crashed" incident) -- 300s gives
-    real headroom without hiding a genuine future hang.
+    Raised past the global 120s bound TWICE now (first to 300s, still not
+    enough): this test runs docling's REAL table-structure ML model
+    (TableFormer, torch-based CPU inference) against a genuine 8-page
+    PDF, not a mock -- confirmed from a CI traceback (0fae21d) showing
+    the timeout firing inside actual model inference
+    (docling_ibm_models/tableformer/.../tablemodel04_rs.py), not a hang.
+    That inference is CPU-heavy, and every docling-using test running
+    that pipeline's own internal multi-threaded stages AT THE SAME TIME
+    as several OTHER xdist workers, on a loaded macOS CI runner, is real
+    contention for the same physical cores -- the same class of problem
+    the Jupyter-kernel `xdist_group` fix addressed. `xdist_group` here
+    serializes every docling-heavy test onto one worker so they no
+    longer fight each other for CPU; 600s is backstop headroom for even
+    the single-at-a-time case on a slow runner, not a number raised
+    until the symptom disappeared -- the grouping is the actual fix.
     """
     try:
         import fitz  # noqa: F401
@@ -373,7 +385,8 @@ def test_pdf_failed_extraction_is_rejected_not_stored_as_fulltext(
     assert corpus._load_csv() == []      # nothing phantom entered the corpus
 
 
-@pytest.mark.timeout(300)
+@pytest.mark.timeout(600)
+@pytest.mark.xdist_group(name="docling_pdf")
 def test_extraction_returns_real_body_from_text_pdf(tmp_path):
     """Regression: a text PDF must extract its full body. The old code tried
     Docling first and returned ANY result >100 chars, so a botched 236-char
