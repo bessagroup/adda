@@ -20,22 +20,22 @@ async-both-directions protocol, replied to by calling `Confer` again. Two
 coexisting question/answer protocols today is itself evidence for the
 consolidation below.
 
-## Open questions (for Elvis — flag before building, don't guess)
+## Open questions — RATIFIED by Elvis, 2026-09-27 (via adda-boss-whopper)
 
-Each has a recommended answer from this design round; still open in the
-sense that "recommended" is not "ratified" — confirm before building.
+All four confirmed as recommended below. Kept as a numbered list for
+reference from the design/tests sections; no longer open.
 
-1. **Multiple delegations open for review at once.** *Recommended:*
-   allowed — a delegator that fanned out several workers may have several
-   reports open for review simultaneously, addressed in any order it
-   chooses. No NEW `Delegate` call is permitted while ANY of them is still
-   open (not just the first).
+1. **Multiple delegations open for review at once.** Allowed — a
+   delegator that fanned out several workers may have several reports
+   open for review simultaneously, addressed in any order it chooses. No
+   NEW `Delegate` call is permitted while ANY of them is still open (not
+   just the first).
 2. **A delegator that is itself a worker (nested delegation).**
    `implementer` delegates to `math_expert` in the 6-node
    lcp_matlab_regression graph (confirmed via task B's regenerated
-   roster) — not hypothetical. *Recommended:* such a node reviews its own
+   roster) — not hypothetical. Such a node reviews its own
    sub-delegation's report via `SendMessage` while it continues its own
-   work (review is async from the delegator's side, item 5 below) — but
+   work (review is async from the delegator's side, item 6 below) — but
    it may NOT submit its OWN report upward to ITS delegator while a
    review IT OWES (as a delegator, downward) is still open. This forces
    nested reviews to resolve bottom-up: a middle node cannot pass a
@@ -43,17 +43,28 @@ sense that "recommended" is not "ratified" — confirm before building.
    open review of the work underneath it.
 3. **The "read" definition.** Design item 4 requires "the report was
    delivered through `Wait` or a delegation result" before feedback can be
-   given. *Recommended:* the mechanical definition — satisfied the instant
-   `Wait()` (or an inline delegation result) RETURNS the report text,
-   checkable in code, not "the delegator demonstrably engaged with it"
-   (unverifiable — an LLM can be handed text and never engage). Anything
-   stronger is unenforceable.
-4. **Interaction with `Wait`'s fan-out while a review is open.**
-   *Recommended:* `Wait` keeps collecting normally — a review being open
-   does not change what `Wait` returns for OTHER, still-running
-   delegations — but each such return is accompanied by a nudge listing
-   the delegator's currently-open reviews, so it is never told about a new
-   result while silently forgetting it owes feedback on an old one.
+   given. The mechanical definition — satisfied the instant `Wait()` (or
+   an inline delegation result) RETURNS the report text, checkable in
+   code, not "the delegator demonstrably engaged with it" (unverifiable —
+   an LLM can be handed text and never engage).
+4. **Interaction with `Wait`'s fan-out while a review is open.** `Wait`
+   keeps collecting normally — a review being open does not change what
+   `Wait` returns for OTHER, still-running delegations — but each such
+   return is accompanied by a nudge listing the delegator's currently-open
+   reviews (subsumed by, and now stated generally as, design item 11's
+   "nothing pending goes unknown" rule below).
+
+## Design rule — no agent is ever left waiting unaware (Elvis, ratified 2026-09-27)
+
+**Stated as a principle, not a workaround for one case:** at minimum,
+every agent must always KNOW what it currently owes — an open review
+awaiting its response, a question awaiting its answer, a finished
+delegation not yet collected, or nothing (in which case: silence, not a
+notice for its own sake). Nudges are fine; an agent silently unaware that
+something needs doing is not. See design item 11 for the concrete
+mechanism this becomes (a pending-for-you notice on every tool result,
+plus early-wake rules on every blocking call) — that item exists because
+of this principle, not the other way around.
 
 ## Problem, in the current implementation's own terms
 
@@ -257,7 +268,36 @@ window, `_commit_workspace` at `_finish_ok`/`_finish_error` as today) — a
 real behavioral fallback, not a withheld tool that leaves a dangling
 prompt reference (BACKLOG #27/#28/#30's failure class).
 
-### 10. Migration — every Confer/FollowUp/Reply/ReportProgress reference, one sweep
+### 10. No agent is ever left waiting unaware — the mechanism
+
+The concrete form of the design rule ratified above:
+
+- **(a) A "pending for you" notice on every tool result.** Every tool
+  result a node receives carries a compact, adda-voiced notice (the
+  existing `<adda-note>` provenance convention, `nodes/notices.py`)
+  listing what it currently owes: open reviews awaiting its response,
+  questions awaiting its answer, finished delegations not yet collected.
+  Nothing pending → no notice, so there is no noise on the common case.
+  This reuses the SAME insertion point the existing pending-notification
+  drain already uses (`_wrap_closure`/`_drain_notifications`,
+  `nodes/orchestration.py` — budget/backstop warnings ride this path
+  today), not a second mechanism bolted on beside it.
+- **(b) Every blocking call wakes early when something ELSE needs that
+  agent, and returns it, not just its originally-awaited thing:**
+  - A delegator blocked in `Wait` also wakes on a QUESTION from any of
+    its workers (via `SendMessage`), not only on a finished report — so
+    no worker's question waits behind an unrelated fan-out the delegator
+    happens to be collecting.
+  - A node blocked in `SendMessage(..., wait_for_reply=True)` wakes on
+    ANY message from that peer (the deadlock guard, item 1), AND its
+    return carries a pending-for-you notice if something else arrived in
+    the meantime.
+  - A worker blocked in its report-for-approval call (item 3) wakes on
+    the delegator's question OR its approval — already true by
+    construction (those are the only two things that call resolves on),
+    stated here for completeness.
+
+### 11. Migration — every Confer/FollowUp/Reply/ReportProgress reference, one sweep
 
 Grepped, not guessed — every file that will need touching in the same
 commit(s) that build this:
@@ -310,6 +350,18 @@ commit(s) that build this:
 
 ## Tests, named first (TDD) — for whoever builds this
 
+- `test_a_workers_question_reaches_a_delegator_blocked_in_wait_on_a_fan_out`
+  — item 10(b): a delegator is blocked in `Wait()` (no id) collecting a
+  fan-out of several dispatched workers; a DIFFERENT worker's question
+  (via `SendMessage`) reaches and unblocks it immediately — it does not
+  wait for any of the fanned-out delegations to actually finish.
+- `test_a_pending_item_appears_in_the_next_tool_result` — item 10(a): a
+  node with an open review/question/uncollected delegation owed to it
+  sees a `<adda-note>` naming it on its very next tool result, whatever
+  tool that call happened to be.
+- `test_no_pending_notice_when_nothing_is_owed` — item 10(a)'s converse:
+  a node with nothing pending gets no notice at all — the mechanism must
+  not manufacture noise on the common case.
 - `test_send_message_wait_for_reply_returns_in_one_call` — a
   `wait_for_reply=True` call blocks and its return value IS the peer's
   reply, no second tool call needed.
