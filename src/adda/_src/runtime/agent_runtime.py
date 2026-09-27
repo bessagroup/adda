@@ -1489,6 +1489,22 @@ class AgenticRun:
         ):
             system_prompt = system_prompt + notebook_deliverable_spec(_role)
 
+        # The reproduction gate's exact preconditions — generated from
+        # nodes/reproduction_gate.py::gate_contract(), itself extracted from
+        # the gate's own docstring, so this can never drift into a paraphrase
+        # of what the code enforces. Same role set and off-switch pattern as
+        # pipeline_deliverable above; independent knob (reproduction_gate) —
+        # a study can require a notebook without requiring it to reproduce,
+        # or vice versa.
+        if _role in ("strategizer", "implementer", "critic") and settings.get_bool(
+            "reproduction_gate", True
+        ):
+            from ..nodes.reproduction_gate import gate_contract
+            system_prompt = system_prompt + (
+                "\n<reproduction_gate_contract>\n" + gate_contract()
+                + "\n</reproduction_gate_contract>\n"
+            )
+
         model, backend = resolve_node_identity(
             agent, self._model, self._backend)
 

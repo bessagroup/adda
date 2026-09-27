@@ -27,15 +27,15 @@ class _Stub:
 
 def test_seed_defaults_without_pipeline(tmp_path):
     led = MilestoneLedger(tmp_path)
-    led.seed_defaults(include_pipeline=False)
+    led.seed_defaults(include_pipeline=False, include_reproduction_gate=False)
     keys = {m["key"] for m in led.list_all()}
-    assert keys == {"assess_literature_need", "oracle_gold_state"}
+    assert keys == {"assess_literature_need"}
     assert all(m["status"] == "PENDING" for m in led.list_all())
 
 
 def test_seed_defaults_with_pipeline_puts_it_first(tmp_path):
     led = MilestoneLedger(tmp_path)
-    led.seed_defaults(include_pipeline=True)
+    led.seed_defaults(include_pipeline=True, include_reproduction_gate=True)
     items = led.list_all()
     assert items[0]["key"] == "craft_pipeline"  # M001, read first
     assert {m["key"] for m in items} == {
@@ -44,14 +44,25 @@ def test_seed_defaults_with_pipeline_puts_it_first(tmp_path):
 
 def test_seed_is_idempotent(tmp_path):
     led = MilestoneLedger(tmp_path)
-    led.seed_defaults(include_pipeline=True)
-    led.seed_defaults(include_pipeline=True)
+    led.seed_defaults(include_pipeline=True, include_reproduction_gate=True)
+    led.seed_defaults(include_pipeline=True, include_reproduction_gate=True)
     assert len(led.list_all()) == 3
+
+
+def test_oracle_gold_state_seeds_only_with_reproduction_gate(tmp_path):
+    """Its whole reason to exist is the reproduction gate's store-row
+    precondition — decoupled from pipeline_deliverable, which decides only
+    whether a notebook is required at all, not whether it must reproduce."""
+    led = MilestoneLedger(tmp_path)
+    led.seed_defaults(include_pipeline=True, include_reproduction_gate=False)
+    keys = {m["key"] for m in led.list_all()}
+    assert "oracle_gold_state" not in keys
+    assert keys == {"craft_pipeline", "assess_literature_need"}
 
 
 def test_assess_literature_is_manual_no_predicate(tmp_path):
     led = MilestoneLedger(tmp_path)
-    led.seed_defaults(include_pipeline=True)
+    led.seed_defaults(include_pipeline=True, include_reproduction_gate=True)
     assess = [m for m in led.list_all() if m["key"] == "assess_literature_need"][0]
     assert assess["manual"] is True
     craft = [m for m in led.list_all() if m["key"] == "craft_pipeline"][0]

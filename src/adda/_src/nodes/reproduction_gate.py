@@ -90,25 +90,45 @@ class ReproductionGateMixin:
         return missing
 
     def _reproduction_gate(self, state: AgenticState | None = None) -> str | None:
-        """Execute pipeline.ipynb under a CONTROLLED reproduction gate.
+        """Before Done() can close a run — and on every RunNotebook(gate=True)
+        dry run — pipeline.ipynb must satisfy every one of these, checked in
+        order. This is a MECHANICAL check this exact function executes every
+        time, not a judgement call, and nothing narrative or intent-based can
+        satisfy it in a check's place.
 
-        The binding reproducibility check. The pipeline must:
-          (a) finish cleanly within a time ceiling (no heavy from-scratch run);
-          (b) add ZERO new oracle rows (lazy: skip FINISHED evals);
-          (c) NOT modify/delete existing ledger rows (integrity — no faking the
-              zero-delta by delete+re-add or value rewrite);
-          (d) print ``REPRODUCED: <value>`` — an informational headline marker
-              for the critic/human; the runtime does NOT gate on it. Headline
-              grounding (the value traces to a real ledger row) is the critic's
-              HEADLINE PROVENANCE check, not an independent runtime extremum
-              match (which wrongly rejected constrained optima).
-        Returns None on PASS (and stashes ``self._repro_ok_detail``), else a
-        problem string. Skips silently when there is no run context. Callable
-        without ``state`` — study dir comes from ``self._study_dir``.
+          0. The canonical store must already hold at least one oracle row.
+             Zero rows means no campaign has been evaluated yet, so there is
+             nothing for the notebook to reproduce FROM — the gate refuses
+             outright, before even running the notebook.
+          1. The notebook must finish cleanly within a time ceiling (no heavy
+             from-scratch computation — a reproduction is lazy, not a re-run).
+          2. It must add ZERO new oracle rows: it may only LOAD the ledger
+             (``ExperimentData.from_file``) and reach the oracle through
+             ``get_evaluator()``, which skips every already-FINISHED row.
+          3. It must NOT modify or delete any existing ledger row — no faking
+             a zero-delta by delete-then-re-add or by rewriting a value.
+          4. If it prints both a freshly-computed ``REPRODUCED: <value>`` and
+             a stated ``CLAIMED_HEADLINE: <value>``, the two must agree — an
+             internally self-contradicting write-up fails even when every
+             other check passes.
 
-        On PASS the deliverable is a faithful, lightweight, lazy reproduction —
-        not a script doing "sneaky stuff" unrelated to validating the pipeline.
+        Passing (0)-(4) means the deliverable is a faithful, lightweight,
+        lazy reproduction of a real, already-evaluated campaign — not a
+        script doing something unrelated to validating the pipeline.
         """
+        # Developer notes (not part of the agent-facing contract above, see
+        # gate_contract() below): returns None on PASS (and stashes
+        # self._repro_ok_detail), else a problem string describing which
+        # check failed. Skips silently when there is no run context; callable
+        # without `state` (study dir comes from self._study_dir). (d)'s
+        # REPRODUCED marker is informational for the critic/human — the
+        # runtime does not gate on the value itself, only on (4)'s
+        # self-consistency; an independent runtime extremum match used to
+        # wrongly reject legitimate constrained optima.
+        from ..runtime import settings
+        if not settings.get_bool("reproduction_gate", True):
+            return None
+
         import json as _json
         import re
         import shutil
@@ -285,3 +305,19 @@ class ReproductionGateMixin:
             f"reproduced cleanly ({before_n} rows, unchanged, 0 new evals, "
             f"ran in <{_timeout:.0f}s{headline})")
         return None
+
+
+def gate_contract() -> str:
+    """The reproduction gate's exact preconditions, generated from
+    ``ReproductionGateMixin._reproduction_gate``'s own docstring.
+
+    Extracted live via ``inspect.cleandoc`` (the same idiom
+    ``prompts/tool_catalog.py`` uses for every tool's agent-facing
+    description) rather than duplicated by hand into a prompt template — the
+    text an agent reads IS what the code enforces, so it cannot drift the way
+    a hand-written paraphrase sitting beside the check can. Injected into the
+    strategizer/implementer/critic system prompts by ``agent_runtime.py``,
+    gated on the ``reproduction_gate`` feature (``runtime/features.py``).
+    """
+    import inspect
+    return inspect.cleandoc(ReproductionGateMixin._reproduction_gate.__doc__)

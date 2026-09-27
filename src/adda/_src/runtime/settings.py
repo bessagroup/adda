@@ -68,6 +68,7 @@ KNOWN_KEYS: frozenset[str] = frozenset({
     "milestones_enabled",
     "pipeline_deliverable",
     "recursion_limit",
+    "reproduction_gate",
     "retrieval_mode",
     "run_backstop_multiple",
     "science_monitor",

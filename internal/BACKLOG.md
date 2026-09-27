@@ -218,6 +218,14 @@ self-consistency finding, not a structural gate defect (corrected from an
 earlier draft of this entry, which wrongly concluded the gate could never
 pass for this study; it demonstrably can and has, twice).
 
+**Flag for anyone reading `studies/run_ledger.csv` later: run
+`f48da54`/`20260926T214835`'s `GATED` status is NOT a clean pass.** It
+passed only because its strategizer delegated D004, a token oracle whose
+sole job was populating one canonical-store row to satisfy the gate's
+row-count check — not because it ran a real evaluation campaign the study
+needed. Do not cite it as evidence the gate works cleanly for this study
+class; see the perverse-incentive discussion below.
+
 `RunNotebook(gate=True)`/`Done()`'s pre-critic reproduction gate refuses
 outright with "canonical store has no evaluations yet. Run at least one
 evaluation campaign before checking the gate" (`nodes/reproduction_gate.py`)

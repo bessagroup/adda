@@ -319,3 +319,66 @@ def test_notebook_deliverable_spec_suppressed_when_pipeline_deliverable_false(tm
         assert "DELIVERABLE = pipeline.ipynb" not in system_prompt
     finally:
         settings.configure(None)  # don't leak into other tests
+
+
+# ---------------------------------------------------------------------------
+# reproduction_gate_contract injection gated on reproduction_gate — separate
+# knob from pipeline_deliverable above (Elvis, via adda-boss-whopper: the
+# gate's mechanical preconditions must reach the agent generated from the
+# gate's own code, not paraphrased, and must be independently ablatable)
+# ---------------------------------------------------------------------------
+
+
+def test_reproduction_gate_contract_injected_by_default(tmp_path):
+    """Default (reproduction_gate unset -> True): the strategizer's prompt
+    carries the gate's exact preconditions, generated from
+    reproduction_gate.py::gate_contract()."""
+    from adda._src.runtime import settings
+    settings.configure(None)
+    run = _make_run(tmp_path)
+    agent = _make_strategizer_agent()
+
+    with patch("adda._src.backends.claude.ClaudeAdapter") as MockClaude:
+        mock_instance = MagicMock()
+        mock_instance.closure_tools = {}
+        MockClaude.return_value = mock_instance
+
+        run._graph_spec = MagicMock()
+        run._graph_spec.entry = "strategizer"
+        run._graph_spec.outgoing.return_value = ["literature_reviewer"]
+
+        run._make_adapter("strategizer", agent)
+
+    system_prompt = MockClaude.call_args[1]["system_prompt"]
+    assert "<reproduction_gate_contract>" in system_prompt
+    assert "canonical store must already hold at least one oracle row" in (
+        system_prompt)
+
+
+def test_reproduction_gate_contract_suppressed_when_reproduction_gate_false(
+        tmp_path):
+    """reproduction_gate: false suppresses the injection — independent of
+    pipeline_deliverable, which can stay True (a notebook is still
+    required) while this decides whether it must additionally reproduce."""
+    from adda._src.runtime import settings
+    settings.configure({"reproduction_gate": False})
+    try:
+        run = _make_run(tmp_path)
+        agent = _make_strategizer_agent()
+
+        with patch("adda._src.backends.claude.ClaudeAdapter") as MockClaude:
+            mock_instance = MagicMock()
+            mock_instance.closure_tools = {}
+            MockClaude.return_value = mock_instance
+
+            run._graph_spec = MagicMock()
+            run._graph_spec.entry = "strategizer"
+            run._graph_spec.outgoing.return_value = ["literature_reviewer"]
+
+            run._make_adapter("strategizer", agent)
+
+        system_prompt = MockClaude.call_args[1]["system_prompt"]
+        assert "<reproduction_gate_contract>" not in system_prompt
+        assert "DELIVERABLE = pipeline.ipynb" in system_prompt  # untouched
+    finally:
+        settings.configure(None)

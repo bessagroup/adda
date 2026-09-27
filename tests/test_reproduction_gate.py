@@ -224,6 +224,29 @@ def test_empty_ledger_rejected_by_gate(tmp_path):
     assert problem is not None and "no rows" in problem.lower()
 
 
+def test_gate_is_ablatable_and_skips_entirely_when_off(tmp_path):
+    """reproduction_gate (runtime/features.py) is its own knob, independent
+    of pipeline_deliverable: off means _reproduction_gate() returns None
+    unconditionally — the SAME empty-store study that test_empty_ledger_
+    rejected_by_gate above correctly refuses must instead pass through
+    clean, not because the notebook reproduced, but because the check never
+    ran at all."""
+    from adda._src.runtime import settings
+    study_dir = tmp_path / "study"; study_dir.mkdir()
+    run_dir = tmp_path / "runs" / "T0"
+    (run_dir / "debug" / "strategizer_notes").mkdir(parents=True)
+    node = Node(
+        _StubAdapter(), name="strategizer", outgoing=["implementer"],
+        spec=_spec(), study_dir=study_dir)
+    node._current_notes_dir = run_dir / "debug" / "strategizer_notes"
+    (study_dir / "pipeline.py").write_text("print('REPRODUCED: 0.0')\n")
+    settings.configure({"reproduction_gate": False})
+    try:
+        assert node._reproduction_gate({"study_dir": str(study_dir)}) is None
+    finally:
+        settings.configure({})
+
+
 # ── headline grounding is the critic's job, not a runtime extremum match ──────
 # The runtime gate enforces clean-exit + zero-new-evals + ledger-integrity. It
 # does NOT machine-match the REPRODUCED value: that wrongly rejected legitimate

@@ -133,6 +133,7 @@ choice: a study with no notebook deliverable legitimately turns it off.)
 | `verdict_validator` | an independent judge reviews each `HypothesisUpdate` verdict against the falsification charter and appends a concern when it disagrees. Advisory — it annotates, never blocks. Off, `HypothesisUpdate` behaves as it did before the judge existed: no judge call, no note, no diagnostics | `true` |
 | `doe_playbook` | the implementer's DoE method prior: the space-filling recipe, the eval-budget arithmetic and the surrogate-guided exploit loop. Off leaves the f3dasm API and the oracle contract intact and makes the agent choose its own method | `true` |
 | `pipeline_deliverable` | require `pipeline.ipynb` as the deliverable; turn off for a study with no notebook | `true` |
+| `reproduction_gate` | enforce Done()'s reproduction gate: before a run can close GATED, the deliverable must reproduce lazily against the canonical store (zero new evals, no modified rows). Independent of `pipeline_deliverable` — that knob decides whether a notebook is required at all; this one decides whether an authored notebook must additionally prove it reproduces | `true` |
 
 ## How designs get evaluated (the evaluator)
 

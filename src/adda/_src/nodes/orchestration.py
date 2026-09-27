@@ -223,8 +223,12 @@ class OrchestrationMixin:
             self._milestones = MilestoneLedger(notes)
             # C3 switchable: the draft-pipeline gate seeds only when the
             # pipeline-deliverable knob is on (off = byte-identical to today).
+            # The oracle-gold-state milestone likewise seeds only when the
+            # reproduction gate itself is on — its whole reason to exist is
+            # that gate's store-row precondition.
             self._milestones.seed_defaults(
-                include_pipeline=get_bool("pipeline_deliverable", True))
+                include_pipeline=get_bool("pipeline_deliverable", True),
+                include_reproduction_gate=get_bool("reproduction_gate", True))
 
         # Science drift monitor — needs the delegation log and nothing else.
         # It used to be gated on the hypothesis ledger too, via a constructor

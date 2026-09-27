@@ -163,6 +163,42 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   dry run), and `WriteDeliverable` for the study's declared extra files only.
 - **Status:** core (the live deliverable).
 
+### The reproduction gate is its own ablatable feature, independent of `pipeline_deliverable`
+- **What:** the gate's mechanical enforcement, its agent-facing description,
+  and the milestone that exists only because of it are now owned by a
+  dedicated `reproduction_gate` Feature (`runtime/features.py`), separate
+  from `pipeline_deliverable` (which decides only whether a notebook is
+  REQUIRED at all). Off: `_reproduction_gate()` returns `None`
+  unconditionally (Done()'s gate never runs; `RunNotebook(gate=True)`
+  always reports a pass), the `<reproduction_gate_contract>` prompt
+  injection is withheld, and the `oracle_gold_state` process milestone
+  (`epistemics/milestones.py`) is not seeded — that milestone's whole
+  reason to exist is this gate's store-row precondition. A study can now
+  require a notebook without requiring it to reproduce, or vice versa.
+  Recorded per run in `run_config.json`'s `runtime` block like every other
+  knob, so a sweep's arms can be told apart after the fact.
+- **Grounded in code, not paraphrased:** what the gate mechanically checks
+  (the canonical store must hold ≥1 row before it will even run the
+  notebook; zero new evals on replay; no modified/deleted rows; headline
+  self-consistency) reaches the agent via `gate_contract()`, which
+  extracts `_reproduction_gate`'s own docstring live via `inspect.cleandoc`
+  — the same idiom `prompts/tool_catalog.py` already uses for every tool's
+  agent-facing description — so the prompt text IS what the code enforces
+  and cannot drift into a hand-maintained paraphrase sitting beside it.
+  Raised by run 20260927T034538 (`studies/lcp_matlab_regression`): the
+  store-row precondition existed in code but was never stated anywhere the
+  agent could read it up front — it was discoverable only after the gate
+  had already bounced Done() several times. See `internal/BACKLOG.md` #42
+  for the still-open epistemic question this does NOT resolve (a study
+  that fakes a token evaluation purely to satisfy the row check currently
+  gates cleanly; a study that honestly refuses to fake one does not).
+- **Where:** `runtime/features.py` (`reproduction_gate` Feature),
+  `nodes/reproduction_gate.py` (`gate_contract`, the feature-flag check in
+  `_reproduction_gate`), `runtime/agent_runtime.py` (the injection site,
+  mirroring `pipeline_deliverable`'s), `epistemics/milestones.py`
+  (`seed_defaults(include_reproduction_gate=...)`, `ORACLE_GOLD_STATE`).
+  **Status:** core — ablation only; does not change WHAT the gate checks.
+
 ### Per-cell notebook debugger (#13)
 - **What:** run pipeline.ipynb against a *copy* of the ledger and get a per-cell
   pass/error trace, so a failing cell can be pinpointed instead of guessing.

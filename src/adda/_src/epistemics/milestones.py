@@ -99,18 +99,26 @@ ASSESS_LITERATURE = DefaultMilestone(
 ORACLE_GOLD_STATE = DefaultMilestone(
     "oracle_gold_state",
     "Get the datagenerator/oracle into gold state — registered and "
-    "validated — before generating any data; the ledger is only as "
-    "trustworthy as the oracle behind it.",
+    "validated — before generating any data. Required because Done()'s "
+    "reproduction gate refuses outright when the canonical store holds zero "
+    "oracle rows (see <reproduction_gate_contract>, check 0) — the ledger is "
+    "only as trustworthy as the oracle behind it. If your study genuinely "
+    "runs no delegated campaign at all, close this SKIPPED with a reason; "
+    "the gate will still require at least one store row before it closes.",
     _canonical_source_ready,
 )
 
-# Always-seeded backlog (M2, M3). The pipeline milestone is added by
-# seed_defaults(include_pipeline=True), seeded FIRST so it reads as M1.
-DEFAULT_MILESTONES: list[DefaultMilestone] = [ASSESS_LITERATURE, ORACLE_GOLD_STATE]
+# Always-seeded backlog (M2). The pipeline milestone (M1) is added by
+# seed_defaults(include_pipeline=True); the oracle milestone (M3, owned by
+# the reproduction_gate feature — its whole reason to exist is that gate's
+# store-row precondition) by seed_defaults(include_reproduction_gate=True).
+# Both seeded in that order so numbering is unchanged from before either was
+# switchable.
+DEFAULT_MILESTONES: list[DefaultMilestone] = [ASSESS_LITERATURE]
 
 _PREDICATES: dict[str, Callable] = {
     d.key: d.predicate
-    for d in (CRAFT_PIPELINE, *DEFAULT_MILESTONES)
+    for d in (CRAFT_PIPELINE, ORACLE_GOLD_STATE, *DEFAULT_MILESTONES)
     if d.predicate is not None
 }
 
@@ -147,10 +155,18 @@ class MilestoneLedger:
 
     # -- seeding + authoring ----------------------------------------------
     def seed_defaults(self, disabled: frozenset[str] = frozenset(),
-                      include_pipeline: bool = False) -> None:
-        """Seed the backlog. The pipeline milestone (M1) is included only when
-        ``include_pipeline`` (runtime.pipeline_deliverable). Idempotent."""
-        ordered = ([CRAFT_PIPELINE] if include_pipeline else []) + DEFAULT_MILESTONES
+                      include_pipeline: bool = False,
+                      include_reproduction_gate: bool = False) -> None:
+        """Seed the backlog. The pipeline milestone is included only when
+        ``include_pipeline`` (runtime.pipeline_deliverable); the oracle
+        milestone only when ``include_reproduction_gate``
+        (runtime.reproduction_gate) — its only reason to exist is that
+        gate's store-row precondition. Idempotent."""
+        ordered = (
+            ([CRAFT_PIPELINE] if include_pipeline else [])
+            + DEFAULT_MILESTONES
+            + ([ORACLE_GOLD_STATE] if include_reproduction_gate else [])
+        )
         with self._lock:
             data = self._load()
             existing_keys = {m.get("key") for m in data.values()}

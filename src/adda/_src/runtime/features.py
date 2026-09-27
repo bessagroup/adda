@@ -170,6 +170,22 @@ FEATURES: tuple[Feature, ...] = (
         # already gated at the injection site rather than carried as a section
         # of the role prompt.
     ),
+    Feature(
+        key="reproduction_gate",
+        default=True,
+        # No tools of its own (RunNotebook/WriteCell etc. are pipeline_
+        # deliverable's) and no static <section> (its prompt contribution —
+        # nodes/reproduction_gate.py::gate_contract() — is an INJECTION,
+        # gated at the injection site, same as pipeline_deliverable's). Off:
+        # _reproduction_gate() returns None unconditionally (Done()'s gate
+        # never runs, RunNotebook(gate=True) always reports a pass) and the
+        # ORACLE_GOLD_STATE milestone (epistemics/milestones.py) is not
+        # seeded — its only reason to exist is this gate's store-row
+        # precondition. Distinct from pipeline_deliverable: that knob decides
+        # whether a notebook is REQUIRED at all; this one decides whether an
+        # authored notebook must additionally prove it reproduces.
+        behaviours=("reproduction_gate_check",),
+    ),
 )
 
 FEATURE_KEYS: frozenset[str] = frozenset(f.key for f in FEATURES)

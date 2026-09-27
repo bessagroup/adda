@@ -167,6 +167,8 @@ KNOB = [
      [S + "runtime/features.py", S + "evaluation/notebook_exec.py"]),
     ("k11", "where does it get its design-of-experiments recipe",
      [S + "agents/implementer.py"]),
+    ("k12", "how do I stop it requiring the notebook to reproduce",
+     [S + "runtime/features.py", S + "nodes/reproduction_gate.py"]),
 ]
 
 #: Which query is the way to ASK FOR each declared feature knob.
@@ -185,6 +187,7 @@ KNOB_COVERAGE = {
     "doe_playbook": "k11",
     "verdict_validator": "k08",
     "pipeline_deliverable": "k10",
+    "reproduction_gate": "k12",
 }
 
 TIERS = {"name": NAME, "concept": CONCEPT, "error": ERROR,
@@ -202,7 +205,7 @@ HELD_OUT_IDS = frozenset({
     "c02", "c05", "c09", "c13",                     # 4 of 14 concept
     "e03", "e05",                                   # 2 of 7 error
     "i02", "i05", "i08",                            # 3 of 8 invariant
-    "k02", "k05", "k07",                            # 3 of 8 knob
+    "k02", "k05", "k07",                            # 3 of 12 knob
 })
 
 DEVELOPMENT = [r for r in ALL if r[1] not in HELD_OUT_IDS]
