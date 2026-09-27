@@ -50,8 +50,24 @@ def test_session_env_tolerates_missing_run_config(tmp_path):
     assert env["F3DASM_DELEGATION_ID"] == "D001"
     assert "F3DASM_CANONICAL_STORE" not in env
     # PATH is always injected (run interpreter prepended); see the dedicated
-    # test below. No other keys beyond delegation id + PATH here.
-    assert set(env) <= {"F3DASM_DELEGATION_ID", "PATH"}
+    # test below. No other keys beyond delegation id + PATH + the auto-memory
+    # opt-out here.
+    assert set(env) <= {
+        "F3DASM_DELEGATION_ID", "PATH", "CLAUDE_CODE_DISABLE_AUTO_MEMORY",
+    }
+
+
+def test_session_env_disables_bundled_cli_auto_memory():
+    """Regression: the bundled CLI injects the developer's auto-memory index
+    (~/.claude/projects/.../memory/MEMORY.md) into every agent turn based on
+    cwd, gated ONLY by the CLAUDE_CODE_DISABLE_AUTO_MEMORY env var — NOT by
+    ClaudeAgentOptions.setting_sources, which was mistakenly assumed to cover
+    it. Run 20260926T124841: the strategizer's own thinking quoted lines
+    verbatim from the developer's MEMORY.md ("User wants explicit configs
+    over env flags", "Push direct to main"), leaking Elvis's personal
+    preferences into a study agent that has nothing to do with them."""
+    env = _build_session_env()
+    assert env.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY") == "1"
 
 
 def test_session_env_prepends_run_interpreter_to_path():

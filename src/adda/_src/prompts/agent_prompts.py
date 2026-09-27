@@ -241,14 +241,17 @@ canonical_store       = {experiment_data_dir}
   parametrizations), each its own store at a nested path — to load them all,
   use `from adda import load_experiments; experiments = load_experiments()`
   (returns {{name: ExperimentData}}; {{'default': ...}} for a single-experiment run).
-workspace_dir         = {debug_dir}/delegations
+delegations_dir       = {debug_dir}/delegations
 Use these absolute paths when calling Read() and WriteNote().
 Read() reads FILES, not directories — calling it on a folder fails with EISDIR.
 To see what is INSIDE a directory (e.g. the store layout), use Glob('<dir>/*')
 (or `ls <dir>` via Bash if you have it), not Read.
 WriteNote also accepts a bare filename such as 'meta_errors.md',
 which is anchored under strategizer_notes_dir automatically.
-Workers write exclusively inside workspace_dir/D###/.
+Workers write exclusively inside their own delegation directory,
+delegations_dir/D###/ — NOT study_dir's own workspace/ (a different,
+study-level directory: see WORKSPACE_PREAMBLE_TEMPLATE for when a worker
+may also write there).
 {resources}</workspace>
 {roster}{knowledge}
 """
@@ -274,15 +277,21 @@ experiment_data_dir : str or Path
 
 WORKSPACE_PREAMBLE_TEMPLATE = """\
 <workspace>
-study_dir     = {study_dir}
-workspace_dir = {workspace_dir}
+study_dir       = {study_dir}
+delegation_root = {workspace_dir}
 Your task message contains a <workspace_subfolder>D###/</workspace_subfolder>
-tag that names the subfolder assigned exclusively to THIS delegation.
-Write ALL outputs (code, data, plots, logs) inside that subfolder.
+tag that names the subfolder assigned exclusively to THIS delegation, under
+delegation_root. Write ALL your own outputs (code, data, plots, logs) inside
+that subfolder — this is DIFFERENT from study_dir's own workspace/, a
+shared, study-level directory. Write ALSO reaches study_dir/workspace/, but
+ONLY when your task explicitly names a deliverable path there (e.g. a
+problem statement asking for "workspace/model.m") — never for scratch
+files, which stay in your own D### subfolder.
 You may Read() files from other delegations' subfolders but may NOT
-write outside your own — the Write tool will reject it.
+write outside your own delegation subfolder or study_dir/workspace/ — the
+Write tool will reject it.
 To access study assets (evaluator, lookup pools, etc.) use study_dir.
-Do NOT write to /tmp or any path outside workspace_dir — files there
+Do NOT write to /tmp or any other path — files there
 will be lost and are invisible to {entry}.
 Evaluate designs ONLY through the instrumented evaluator: \
 `from adda import get_evaluator; gen = get_evaluator()` \
@@ -525,8 +534,10 @@ scripts.  Install nothing — assume the environment is fixed.
   bash(cmd="python3 D003/explore.py")
   bash(cmd="python3 -c 'import f3dasm; print(f3dasm.__version__)'")
 
-All outputs must be written inside your assigned D### subfolder under
-workspace_dir.  Do NOT write to /tmp — files there are lost and
+All outputs must be written inside your assigned D### subfolder, except a
+deliverable your task explicitly names a path for under study_dir's
+workspace/ (e.g. "workspace/model.m") — never anywhere else, and never
+just for scratch files.  Do NOT write to /tmp — files there are lost and
 invisible to the Strategizer.
 </bash_tool>
 

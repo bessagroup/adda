@@ -136,6 +136,15 @@ class LiteratureCorpus:
     #: all. Recorded, not assumed — see `_load_all_embeddings`.
     dense_coverage: float | None = None
 
+    #: Why the dense embedder is unavailable (fastembed unimportable AND the
+    #: out-of-process embed-worker probe failed), or None while a model is
+    #: available. Set by `_get_embedding_model`. Recorded so a caller can
+    #: tell "BM25-only because the embedder is down" apart from "BM25-only
+    #: because retrieval_mode='bm25' was requested" — the log.warning() this
+    #: used to be paired with never reached debug/diagnostics.jsonl, so a
+    #: degraded run looked identical to a healthy one in the run record.
+    embedder_fallback_reason: str | None = None
+
     def __init__(self, corpus_dir: Path) -> None:
         self._corpus_dir = Path(corpus_dir)
         self._papers_dir = self._corpus_dir / "papers"
@@ -155,6 +164,7 @@ class LiteratureCorpus:
         self._lock = FileLock(str(self._corpus_dir / ".lock"))
         self._embedding_model = None  # lazy-loaded on first CorpusAdd
         self._fastembed_warned = False
+        self._degradation_reported = False
 
     # ------------------------------------------------------------------
     # Public API
@@ -329,11 +339,15 @@ class LiteratureCorpus:
             self._embedding_model = TextEmbedding(
                 "BAAI/bge-small-en-v1.5", threads=_thread_count()
             )
+            self.embedder_fallback_reason = None
             return self._embedding_model
         except ImportError:
             pass  # fall through to subprocess route
-        except Exception:
+        except Exception as exc:
             self._embedding_model = None
+            self.embedder_fallback_reason = (
+                f"in-process fastembed failed to initialize ({exc})"
+            )
             return self._embedding_model
 
         # --- subprocess route (probe once per process) ---
@@ -366,11 +380,36 @@ class LiteratureCorpus:
         if _subprocess_embedder_state is not False and \
                 _subprocess_embedder_state is not None:
             self._embedding_model = _subprocess_embedder_state
+            self.embedder_fallback_reason = None
             return self._embedding_model
 
         # Both routes failed
         self._embedding_model = None
+        self.embedder_fallback_reason = (
+            "fastembed unavailable in-process and the out-of-process embed"
+            " worker probe failed (uv missing, or the worker itself errored)"
+        )
         return self._embedding_model
+
+    def pop_diagnostic_event(self) -> tuple[str, str] | None:
+        """One-shot: the first time this corpus instance's retrieval degrades
+        to BM25-only because the dense embedder is unavailable, return
+        ``("RETRIEVAL_DEGRADED", <reason>)``; every call after that (and
+        every call before degradation is ever observed) returns None. A
+        corpus instance lives for one run (see agent_runtime.py), so this
+        reports the fact exactly once per run rather than on every
+        ConsultLiterature call — see orchestration.py's `_wrap_closure`,
+        the only place that has both the per-run diagnostics path and a
+        handle back to this corpus."""
+        if self.embedder_fallback_reason and not self._degradation_reported:
+            self._degradation_reported = True
+            return (
+                "RETRIEVAL_DEGRADED",
+                "ConsultLiterature: dense retrieval is unavailable this "
+                f"run ({self.embedder_fallback_reason}) — retrieval is "
+                "BM25 (lexical) only; treat literature coverage as reduced.",
+            )
+        return None
 
     def _load_all_embeddings(self) -> tuple[list[dict], object, object]:
         """Load all chunks and whatever embeddings are actually on disk.

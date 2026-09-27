@@ -222,11 +222,9 @@ class LedgerTools:
                 "attributable to a single source; cite the authoritative one "
                 "and mention the others in `comment` or the numbers dict."
             )
-        if (
-            d_cited is None
-            or d_cited == "D000"
-            or node._delegation_log is None
-        ):
+        if d_cited == "D000":
+            return self._check_d000_pool_exists(hypothesis_id)
+        if d_cited is None or node._delegation_log is None:
             return None
         completed_ids = {
             r["id"] for r in node._delegation_log.query_all()
@@ -240,6 +238,32 @@ class LedgerTools:
                 "finished, wait for it."
             )
         return None
+
+    def _check_d000_pool_exists(self, hypothesis_id: str) -> str | None:
+        """'D000' is only a valid citation when this study actually ingested a
+        precomputed pool (run_setup._ingest_precomputed_pool stamps its rows
+        _delegation_id='D000'). Without that check, an agent in a study with
+        NO pool could cite 'D000' for its own inline results and the guard
+        would wave it through — accepting provenance for a delegation that
+        never existed (run 20260926T124841: the LCP study has no pool; the
+        agent invented 'D000' for inline numbers).
+
+        Best-effort: if run_dir can't be resolved, don't block on an infra
+        gap — accept, as the rest of this module does elsewhere.
+        """
+        node = self.node
+        run_dir = node._resolve_run_dir()
+        if run_dir is None:
+            return None
+        from ....evaluation.ledger_summary import delegation_evals
+        if delegation_evals(run_dir, "D000") > 0:
+            return None
+        return (
+            f"ERROR: {hypothesis_id} cites evidence from 'D000', but this "
+            "study has no precomputed pool — 'D000' names the ground-truth "
+            "pool ingested at run-init for lookup studies, and none was "
+            "ingested here. Cite the delegation that actually ran the test."
+        )
 
     def _resolve_triggered_by(self, evidence: dict | None) -> str | None:
         """The delegation this verdict RESTS ON.
@@ -307,7 +331,19 @@ class LedgerTools:
         harder than one declared at Delegate time (``mark_attempt`` stamps
         it), and the timing rule below keeps it from being used to retrofit an
         exploratory result: a delegation that began before the hypothesis
-        existed cannot have been a test of it."""
+        existed cannot have been a test of it.
+
+        'D000' (the precomputed-pool sentinel) is not a delegation, and is
+        handled up front rather than falling through to the registry lookup
+        below: a falsification attempt against pre-existing ground-truth data
+        is legitimate (Popper accepts a refutation from existing data), so
+        it is allowed — Elvis's decision — but only when the pool actually
+        exists (``_check_d000_pool_exists``, same contract as evidence
+        citation's 4.1 integrity check); otherwise the same 4.3 message fires
+        here too, not a link-specific one, so an agent sees one consistent
+        error regardless of which path rejected 'D000'."""
+        if delegation_id == "D000":
+            return self._check_d000_pool_exists(hypothesis_id)
         node = self.node
         h_entry = node._ledger.get(hypothesis_id)
         if h_entry is None:

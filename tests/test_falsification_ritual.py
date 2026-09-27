@@ -185,6 +185,106 @@ def test_link_needs_the_attempt_as_evidence(tmp_path):
     assert out.startswith("ERROR") and "evidence" in out
 
 
+def test_link_attempt_on_d000_names_it_as_the_pool_not_unknown(tmp_path):
+    """'D000' is never a real delegation (it's the precomputed-pool marker),
+    so falsification_attempt=True citing it is still refused — but the
+    message must say WHY (it's the pool, not that it's an unrecognized id),
+    unlike the generic 'unknown delegation ... Known: []' that used to fire
+    here and reads as if D000 were simply a typo."""
+    n = _node(tmp_path)
+    hid = _propose(n)
+    out = _verdict(n, hid, did="D000")
+    assert out.startswith("ERROR")
+    assert "precomputed pool" in out
+    assert "Known:" not in out
+
+
+# --------------------------------------------------------------------------
+# 4. _check_cited_delegation D000 integrity (run 20260926T124841: an agent in
+# a study with NO precomputed pool cited "D000" for its own inline results,
+# and the guard used to accept it unconditionally)
+# --------------------------------------------------------------------------
+
+def _write_d000_pool(run_dir):
+    from f3dasm._src.design.domain import Domain
+    from f3dasm._src.experimentdata import ExperimentData
+    from f3dasm._src.experimentsample import ExperimentSample, JobStatus
+
+    domain = Domain()
+    domain.add_float("x0", 0.0, 1.0)
+    for k in ("f", "_delegation_id", "_source", "_ts"):
+        domain.add_output(k, exist_ok=True)
+    sample = ExperimentSample(
+        _input_data={"x0": 0.5},
+        _output_data={
+            "f": 1.0, "_delegation_id": "D000",
+            "_source": "precomputed_pool",
+            "_ts": "2026-01-01T00:00:00+00:00",
+        },
+        job_status=JobStatus.FINISHED,
+    )
+    data = ExperimentData.from_data(data={0: sample}, domain=domain)
+    data.store(project_dir=run_dir)
+
+
+def test_d000_citation_rejected_when_study_has_no_pool(tmp_path):
+    n = _node(tmp_path)
+    hid = _propose(n)
+    out = n.adapter.closure_tools["HypothesisUpdate"](
+        hid, "FALSIFIED", "the inline sweep found f=1.5", 0.1,
+        evidence={"delegation": "D000", "numbers": {"best f": 1.5}})
+    assert out.startswith("ERROR")
+    assert "no precomputed pool" in out
+
+
+def test_d000_citation_accepted_when_pool_was_ingested(tmp_path):
+    n = _node(tmp_path)
+    hid = _propose(n)
+    _write_d000_pool(n._resolve_run_dir())
+    out = n.adapter.closure_tools["HypothesisUpdate"](
+        hid, "FALSIFIED", "the ground-truth pool shows f=1.0", 0.1,
+        evidence={"delegation": "D000", "numbers": {"best f": 1.0}})
+    assert not out.startswith("ERROR"), out
+
+
+# --------------------------------------------------------------------------
+# 4b. Bug 4 policy (Elvis: go) — D000 AS a falsification attempt. Popper
+# accepts a refutation from existing data, so it is allowed — same
+# pool-existence contract as 4.1's evidence-citation check, no separate
+# accommodation tag (Elvis: over-engineering for this).
+# --------------------------------------------------------------------------
+
+def test_d000_falsification_attempt_accepted_with_a_pool(tmp_path):
+    n = _node(tmp_path)
+    hid = _propose(n)
+    _write_d000_pool(n._resolve_run_dir())
+    out = n.adapter.closure_tools["HypothesisUpdate"](
+        hid, "FALSIFIED", "the ground-truth pool refutes it", 0.1,
+        evidence={"delegation": "D000", "numbers": {"best f": 1.0}},
+        falsification_attempt=True,
+    )
+    assert not out.startswith("ERROR"), out
+    entry = n._ledger.get(hid)
+    last = entry["status_log"][-1]
+    assert last["evidence"]["delegation"] == "D000"
+
+
+def test_d000_falsification_attempt_still_rejected_without_a_pool(tmp_path):
+    """No pool → still refused, with the SAME 4.3 message _check_cited_delegation
+    already uses (one consistent error regardless of which check path fired),
+    not the old link-specific 'unknown delegation' wording."""
+    n = _node(tmp_path)
+    hid = _propose(n)
+    out = n.adapter.closure_tools["HypothesisUpdate"](
+        hid, "FALSIFIED", "no pool here", 0.1,
+        evidence={"delegation": "D000", "numbers": {"best f": 1.0}},
+        falsification_attempt=True,
+    )
+    assert out.startswith("ERROR")
+    assert "no precomputed pool" in out
+    assert "Known:" not in out
+
+
 # --------------------------------------------------------------------------
 # 3. Read-time ritual on the Done report
 # --------------------------------------------------------------------------

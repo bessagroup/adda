@@ -194,10 +194,41 @@ def test_completed_delegation_allowed(tmp_path):
         f"Expected success for completed D001, got: {result!r}")
 
 
+def _write_d000_pool(run_dir):
+    """A store holding one D000 (precomputed-pool) row, as run_setup.py's
+    _ingest_precomputed_pool stamps it — the fact _check_d000_pool_exists
+    (ledger.py) checks for before letting a verdict cite 'D000'."""
+    from f3dasm._src.design.domain import Domain
+    from f3dasm._src.experimentdata import ExperimentData
+    from f3dasm._src.experimentsample import ExperimentSample, JobStatus
+
+    domain = Domain()
+    domain.add_float("x0", 0.0, 1.0)
+    for k in ("max_y", "_delegation_id", "_source", "_ts"):
+        domain.add_output(k, exist_ok=True)
+    sample = ExperimentSample(
+        _input_data={"x0": 0.5},
+        _output_data={
+            "max_y": 143.26, "_delegation_id": "D000",
+            "_source": "precomputed_pool",
+            "_ts": "2026-01-01T00:00:00+00:00",
+        },
+        job_status=JobStatus.FINISHED,
+    )
+    ExperimentData.from_data(
+        data={0: sample}, domain=domain).store(project_dir=run_dir)
+
+
 def test_d000_is_valid_evidence_anchor(tmp_path):
     """D000 (canonical ground-truth pool) must bypass the delegation-exists
-    check — it is a special sentinel, not a user-submitted delegation."""
+    check — it is a special sentinel, not a user-submitted delegation — but
+    only in a study that actually ingested one (run 20260926T124841: a study
+    with NO pool had an agent invent 'D000' for its own inline results, and
+    this check used to wave it through unconditionally — see
+    test_falsification_ritual.py::test_d000_citation_rejected_when_study_has_no_pool
+    for the negative case)."""
     n = _node(tmp_path)
+    _write_d000_pool(n._resolve_run_dir())
     for m in list(n._milestones.pending()):
         n._milestones.skip(m["id"], "test")
     h = _propose(n)

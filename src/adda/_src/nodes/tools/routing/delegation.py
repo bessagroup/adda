@@ -109,8 +109,10 @@ def build_sandboxed_write(
     *,
     strip_prefix: str | None = None,
     scope_label: str | None = None,
+    study_workspace: Path | None = None,
 ) -> Any:
-    """Build a ``Write`` closure hard-sandboxed to ``root``.
+    """Build a ``Write`` closure hard-sandboxed to ``root``, PLUS the
+    study's own ``workspace/`` when ``study_workspace`` is given.
 
     One implementation, two scopes: an orchestrating node's dispatched
     worker gets ``root`` set to that ONE delegation's ``{delegation_id}/``
@@ -119,34 +121,69 @@ def build_sandboxed_write(
     calls it "your D### subfolder" even though the sandbox is already
     rooted there); a leaf reached via real graph routing (no delegation_id
     of its own) gets ``root`` set to its whole workspace instead, with no
-    prefix to strip. Both reject, via ``Path.resolve()`` + ``relative_to``,
-    any path that escapes ``root`` — collapsing '..' and symlinks so
-    traversal is blocked at the tool level, not just the prompt.
+    prefix to strip.
+
+    ``study_workspace`` (``studies/<study>/workspace/``) is a SECOND
+    permitted target, added because study problem statements routinely name
+    deliverable paths there (e.g. "workspace/km_baseline.m") — a real,
+    documented convention, not a mistake — and a worker had no sanctioned
+    way to satisfy that instruction (run 20260926T214835: rejected by this
+    guard, then written via Bash instead, which this guard cannot see at
+    all). A bare relative path starting with ``workspace/`` (or exactly
+    ``workspace``) is resolved against the STUDY root rather than the
+    delegation root, matching how every problem statement writes it; an
+    absolute path that already resolves under the study's workspace/ is
+    accepted as-is either way.
+
+    Both permitted roots reject, via ``Path.resolve()`` + ``relative_to``,
+    any path that escapes them — collapsing '..' and symlinks so traversal
+    is blocked at the tool level, not just the prompt. Nothing else changes:
+    Bash stays trusted and unsandboxed (a deliberate, separate boundary, not
+    this guard's job).
     """
     _root = root.resolve()
     _label = scope_label or f"the workspace ({_root})"
+    _study_ws = study_workspace.resolve() if study_workspace is not None else None
+
+    def _within(candidate: Path, base: Path) -> bool:
+        try:
+            candidate.relative_to(base)
+            return True
+        except ValueError:
+            return False
 
     @tool_examples(
         "Write('fit_surrogate.py', body='import numpy as np\\n...')",
     )
     def Write(path: str, body: str) -> str:
-        """Write a file. Restricted to your own workspace — no exceptions."""
+        """Write a file. Restricted to your own delegation directory,
+        plus the study's workspace/ when the task's deliverable belongs
+        there (as stated in the task, e.g. 'workspace/model.m') — nowhere
+        else."""
         _norm = (path or "").strip()
         if strip_prefix:
             _first, _sep, _rest = _norm.partition("/")
             if _first == strip_prefix and _rest:
                 _norm = _rest
+        _base = _root
+        if (
+            _study_ws is not None
+            and not Path(_norm).is_absolute()
+            and (_norm == "workspace" or _norm.startswith("workspace/"))
+        ):
+            _base = _study_ws.parent
         try:
-            candidate = (_root / _norm).resolve()
+            candidate = (_base / _norm).resolve()
         except Exception as exc:  # noqa: BLE001
             return f"ERROR: invalid path {path!r}: {exc}"
-        try:
-            candidate.relative_to(_root)
-        except ValueError:
+        _allowed = [_root] + ([_study_ws] if _study_ws is not None else [])
+        if not any(_within(candidate, r) for r in _allowed):
+            _targets = _label if _study_ws is None else (
+                f"{_label}, or the study's workspace/ ({_study_ws})"
+            )
             return (
-                f"ERROR: write rejected — path resolves to {candidate}, "
-                f"which is outside {_label}. Only paths inside it are "
-                "permitted."
+                f"ERROR: write rejected — path resolves to {candidate}. "
+                f"You may write inside {_targets}. Nothing else."
             )
         candidate.parent.mkdir(parents=True, exist_ok=True)
         candidate.write_text(body, encoding="utf-8")
@@ -533,6 +570,17 @@ class WorkerSession:
         Finding 4 — report_sections is the single source of truth, not a
         hardcoded list), so e.g. a missing ### Retrospective earns one
         corrective retry.
+
+        This retry is a FRESH worker.invoke() call — a new CLI session, the
+        ORIGINAL task_msg still its bulk — so it is indistinguishable from a
+        from-scratch restart of the delegation to anyone reading the run
+        after the fact, UNLESS this fires the diagnostic below. Report 7
+        (run 20260830T004106, Oscar): a stream that ends mid-tool with no
+        ResultMessage (backends/claude.py's STREAM_ENDED_WITHOUT_RESULT)
+        returns near-empty text that reads as malformed here, and this path
+        used to retry with zero logging anywhere — silently discarding
+        whatever the interrupted first attempt was doing (e.g. a background
+        process it launched) with no trace in the run record.
         """
         from ....prompts.agent_prompts import build_report_retry_prompt
 
@@ -544,6 +592,13 @@ class WorkerSession:
         ) or None
         diagnosis = _classify_response(text, _req_sections)
         if diagnosis is not None:
+            self.node._record_intervention(
+                "REPORT_RETRY", self.target,
+                f"{self.delegation_id}: worker's first reply was classified "
+                f"malformed and is being retried once with a corrective "
+                f"prompt (same original task). Diagnosis: {diagnosis}",
+                snippet=text[:300],
+            )
             retry_messages = messages + [
                 {"role": "ai", "content": text},
                 {
@@ -1586,6 +1641,7 @@ class DelegationTools:
             _delegation_ws,
             strip_prefix=delegation_id,
             scope_label=f"{delegation_id}/ ({_delegation_ws})",
+            study_workspace=Path(node._study_dir) / "workspace",
         )
         worker.closure_tools["Write"] = node._wrap_closure(Write, target)
 

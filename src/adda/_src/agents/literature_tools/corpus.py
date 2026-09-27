@@ -125,4 +125,10 @@ def build_corpus_read_closures(corpus) -> dict:
         a search over a corpus with no full-text papers says so."""
         return corpus.consult(query, int(limit))
 
+    # Lets orchestration.py's _wrap_closure (the one place with both a
+    # per-run diagnostics path and a handle back here) notice, once per run,
+    # when the dense embedder is unavailable and retrieval silently
+    # downgraded to BM25-only — see LiteratureCorpus.pop_diagnostic_event.
+    ConsultLiterature._adda_diagnostic_source = corpus
+
     return {"ConsultLiterature": ConsultLiterature}

@@ -394,3 +394,158 @@ def test_agent_runtime_imports_without_notebook_server():
     importlib.import_module("adda._src.runtime.agent_runtime")
     import adda._src as ag
     assert not os.path.exists(ag.__path__[0] + "/notebook_server.py")
+
+
+# ── Canonical-store integrity backstop (report 2: RunScratch/RunNotebook ────
+# run a real OS subprocess with full filesystem access — cwd=sandbox and
+# F3DASM_CANONICAL_STORE redirect the STORE-LOADING PATH, not the filesystem
+# — so an absolute-path write still reaches the real store) ────────────────
+
+def test_run_scratch_reverts_a_direct_write_to_the_real_store(tmp_path):
+    n = _node(tmp_path)
+    run_dir = tmp_path / "runs" / "T1"
+    notes = run_dir / "debug" / "strategizer_notes"
+    notes.mkdir(parents=True)
+    n._current_notes_dir = notes
+    store = run_dir / "experiment_data"
+    store.mkdir(parents=True)
+    real_file = store / "output.csv"
+    real_file.write_text("original,content\n")
+
+    code = (
+        "import pathlib\n"
+        f"p = pathlib.Path({str(real_file)!r})\n"
+        "p.write_text('tampered\\n')\n"
+        "print('done')\n"
+    )
+    out = _tool(n, "RunScratch")(code)
+    assert out.startswith("ERROR:")
+    assert "Reverted" in out
+    assert str(real_file) in out
+    assert real_file.read_text() == "original,content\n"
+
+
+def test_run_scratch_leaves_untouched_store_alone(tmp_path):
+    n = _node(tmp_path)
+    run_dir = tmp_path / "runs" / "T1"
+    notes = run_dir / "debug" / "strategizer_notes"
+    notes.mkdir(parents=True)
+    n._current_notes_dir = notes
+    store = run_dir / "experiment_data"
+    store.mkdir(parents=True)
+    (store / "output.csv").write_text("original,content\n")
+
+    out = _tool(n, "RunScratch")("print(6 * 7)")
+    assert not out.startswith("ERROR:")
+    assert "42" in out
+    assert (store / "output.csv").read_text() == "original,content\n"
+
+
+def test_run_scratch_reverts_a_direct_delete_of_the_real_store(tmp_path):
+    n = _node(tmp_path)
+    run_dir = tmp_path / "runs" / "T1"
+    notes = run_dir / "debug" / "strategizer_notes"
+    notes.mkdir(parents=True)
+    n._current_notes_dir = notes
+    store = run_dir / "experiment_data"
+    store.mkdir(parents=True)
+    real_file = store / "output.csv"
+    real_file.write_text("original,content\n")
+
+    code = (
+        "import pathlib\n"
+        f"pathlib.Path({str(real_file)!r}).unlink()\n"
+        "print('done')\n"
+    )
+    out = _tool(n, "RunScratch")(code)
+    assert out.startswith("ERROR:")
+    assert "Reverted" in out
+    assert real_file.exists()
+    assert real_file.read_text() == "original,content\n"
+
+
+def test_run_scratch_does_not_revert_while_a_delegation_is_running(tmp_path):
+    """The race boss flagged: a delegation on its own thread can be
+    mid-campaign, writing metered evals into the SAME store via
+    get_evaluator() while the strategizer calls RunScratch. The guard's
+    before/after diff cannot tell that legitimate append apart from snippet
+    damage, so while ANY delegation is Working it must report the change but
+    leave it in place — never revert a real evaluation."""
+    n = _node(tmp_path)
+    run_dir = tmp_path / "runs" / "T1"
+    notes = run_dir / "debug" / "strategizer_notes"
+    notes.mkdir(parents=True)
+    n._current_notes_dir = notes
+    store = run_dir / "experiment_data"
+    store.mkdir(parents=True)
+    real_file = store / "output.csv"
+    real_file.write_text("original,content\n")
+
+    # A delegation is Working for the whole call, as during a live campaign.
+    n._registry["D001"] = {
+        "status": "Working", "is_falsification_attempt": False,
+        "hypothesis_ids": [],
+    }
+
+    # Stand-in for get_evaluator()'s own append (a real metered row).
+    code = (
+        "import pathlib\n"
+        f"p = pathlib.Path({str(real_file)!r})\n"
+        "p.write_text(p.read_text() + 'D001,3.14\\n')\n"
+        "print('done')\n"
+    )
+    out = _tool(n, "RunScratch")(code)
+    assert out.startswith("ERROR:")
+    assert "NOT reverted" in out
+    assert "Reverted (" not in out
+    # The concurrent write survives — it was never reverted.
+    assert real_file.read_text() == "original,content\nD001,3.14\n"
+
+
+def test_run_scratch_never_reverts_a_pure_append_even_with_no_delegation_running(tmp_path):
+    """Boss's narrowing: a background process a worker started
+    (Bash(run_in_background=True), or an async solve pool backing a long
+    Abaqus-style solve) is reaped only by the run's watchdog at exit, never
+    per delegation — so a delegation reading Done/Errored/Cancelled in the
+    registry is NOT proof nothing else can still append to the store. A pure
+    append must survive regardless of what the registry says; only a
+    destructive change (rewrite of existing bytes) is reverted, and only
+    then because no delegation is running."""
+    n = _node(tmp_path)
+    run_dir = tmp_path / "runs" / "T1"
+    notes = run_dir / "debug" / "strategizer_notes"
+    notes.mkdir(parents=True)
+    n._current_notes_dir = notes
+    store = run_dir / "experiment_data"
+    store.mkdir(parents=True)
+    append_target = store / "output.csv"
+    append_target.write_text("original,content\n")
+    rewrite_target = store / "jobs.csv"
+    rewrite_target.write_text("job,status\n1,FINISHED\n")
+    new_file_target = store / "input.csv"
+    assert not new_file_target.exists()
+    assert n._registry == {}  # no delegation running at all
+
+    code = (
+        "import pathlib\n"
+        f"a = pathlib.Path({str(append_target)!r})\n"
+        "a.write_text(a.read_text() + 'D009,2.71\\n')\n"
+        f"r = pathlib.Path({str(rewrite_target)!r})\n"
+        "r.write_text('job,status\\n1,CORRUPTED\\n')\n"
+        f"nf = pathlib.Path({str(new_file_target)!r})\n"
+        "nf.write_text('x0\\n0.5\\n')\n"
+        "print('done')\n"
+    )
+    out = _tool(n, "RunScratch")(code)
+    assert out.startswith("ERROR:")
+    # The append survives — reported, never touched.
+    assert append_target.read_text() == "original,content\nD009,2.71\n"
+    assert str(append_target) in out
+    # A brand-new file (a late writer's first evaluation, or a new
+    # namespace's first store) is ALSO an append — survives, reported.
+    assert new_file_target.read_text() == "x0\n0.5\n"
+    assert str(new_file_target) in out
+    # The rewrite is reverted — no delegation running, not a pure append.
+    assert rewrite_target.read_text() == "job,status\n1,FINISHED\n"
+    assert "Reverted" in out
+    assert str(rewrite_target) in out

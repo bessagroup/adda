@@ -217,6 +217,20 @@ class Node(
         from .tools.routing import build_declared_shared_closures
         self.adapter.closure_tools.update(
             build_declared_shared_closures(self, self._agent_tools))
+        # Closures from Agent.build_closure_tools() (ConsultLiterature,
+        # CorpusAdd, ...) are installed on the adapter BEFORE this node
+        # exists (agent_runtime.py), so they never pass through
+        # orchestration.py's _wrap_closure the way routing tools do. A
+        # closure tagged _adda_diagnostic_source (a fact about the run
+        # environment a tool discovers, not about one call's return value —
+        # see LiteratureCorpus.pop_diagnostic_event) needs that wrapper
+        # regardless, so re-wrap it here, once, by the tag rather than by
+        # name — any future tool needing the same reporting just carries the
+        # same tag.
+        for _cname, _cfn in list(self.adapter.closure_tools.items()):
+            if getattr(_cfn, "_adda_diagnostic_source", None) is not None:
+                self.adapter.closure_tools[_cname] = self._wrap_closure(
+                    _cfn, self._name)
 
     def _setup_sandboxed_write(self) -> None:
         """Replace native Write with a workspace-sandboxed closure.
@@ -247,7 +261,12 @@ class Node(
         # resolves a closure_tools["Write"] = <name> rebind to the function
         # <name> refers to — can still find this tool's docstring after the
         # move into the shared builder.
-        Write = build_sandboxed_write(self._workspace_dir)
+        _study_ws = (
+            Path(self._study_dir) / "workspace"
+            if self._study_dir is not None else None
+        )
+        Write = build_sandboxed_write(
+            self._workspace_dir, study_workspace=_study_ws)
         self.adapter.closure_tools["Write"] = Write
 
     def _build_eval_closures(self) -> dict:

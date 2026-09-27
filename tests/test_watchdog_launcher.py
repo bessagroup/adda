@@ -237,3 +237,96 @@ def test_cli_propagates_the_childs_own_exit_status_when_not_timed_out(
     rc = wl.main([str(study_dir), "--budget", "60"])
 
     assert rc == 0
+
+
+def test_cli_entrypoint_spawns_the_studys_own_script(tmp_path, monkeypatch):
+    """python -m adda <study-dir> always builds AgenticRun's built-in default
+    graph (no graph= is ever forwarded) — a study whose run.py declares its
+    OWN Graph (extra roles, different edges) silently gets a different,
+    smaller one through the CLI. --entrypoint launches that script directly
+    instead."""
+    import adda._src.infra.watchdog_launcher as wl
+
+    study_dir = tmp_path / "study"
+    study_dir.mkdir()
+    (study_dir / "PROBLEM_STATEMENT.md").write_text("x")
+    (study_dir / "config.yaml").write_text("budget: 100\n")
+    (study_dir / "run.py").write_text("print('hi')\n")
+
+    captured = {}
+
+    def fake_run_under_watchdog(cmd, *, deadline_s, **kwargs):
+        captured["cmd"] = cmd
+        captured["deadline_s"] = deadline_s
+        return wl.WatchdogResult(timed_out=False, returncode=0, pgid=1234)
+
+    monkeypatch.setattr(wl, "run_under_watchdog", fake_run_under_watchdog)
+    rc = wl.main([str(study_dir), "--entrypoint", "run.py"])
+
+    assert rc == 0
+    assert captured["cmd"] == [sys.executable, str(study_dir / "run.py")]
+    # Budget still comes from config.yaml and still derives the deadline —
+    # only the launched command changes.
+    assert captured["deadline_s"] == 200.0
+
+
+def test_cli_entrypoint_rejects_model_and_budget_flags(tmp_path, capsys):
+    from adda._src.infra.watchdog_launcher import main
+
+    study_dir = tmp_path / "study"
+    study_dir.mkdir()
+    (study_dir / "PROBLEM_STATEMENT.md").write_text("x")
+    (study_dir / "config.yaml").write_text("budget: 100\n")
+    (study_dir / "run.py").write_text("print('hi')\n")
+
+    rc = main([str(study_dir), "--entrypoint", "run.py", "--budget", "60"])
+    assert rc == 2
+    assert "--entrypoint" in capsys.readouterr().err
+
+    rc = main([str(study_dir), "--entrypoint", "run.py", "--model", "x"])
+    assert rc == 2
+    assert "--entrypoint" in capsys.readouterr().err
+
+
+def test_cli_entrypoint_missing_script_errors_before_spawning(tmp_path, monkeypatch, capsys):
+    import adda._src.infra.watchdog_launcher as wl
+
+    study_dir = tmp_path / "study"
+    study_dir.mkdir()
+    (study_dir / "PROBLEM_STATEMENT.md").write_text("x")
+    (study_dir / "config.yaml").write_text("budget: 100\n")
+    # No run.py written.
+
+    def fake_run_under_watchdog(*args, **kwargs):
+        raise AssertionError("must not spawn anything for a missing entrypoint")
+
+    monkeypatch.setattr(wl, "run_under_watchdog", fake_run_under_watchdog)
+    rc = wl.main([str(study_dir), "--entrypoint", "run.py"])
+    assert rc == 2
+    assert "run.py" in capsys.readouterr().err
+
+
+def test_cli_without_entrypoint_behaviour_is_unchanged(tmp_path, monkeypatch):
+    """Backward compatibility: omitting --entrypoint still builds the
+    `python -m adda <study-dir>` command exactly as before."""
+    import adda._src.infra.watchdog_launcher as wl
+
+    study_dir = tmp_path / "study"
+    study_dir.mkdir()
+    (study_dir / "PROBLEM_STATEMENT.md").write_text("x")
+    (study_dir / "config.yaml").write_text("budget: 100\n")
+
+    captured = {}
+
+    def fake_run_under_watchdog(cmd, *, deadline_s, **kwargs):
+        captured["cmd"] = cmd
+        return wl.WatchdogResult(timed_out=False, returncode=0, pgid=1234)
+
+    monkeypatch.setattr(wl, "run_under_watchdog", fake_run_under_watchdog)
+    rc = wl.main([str(study_dir), "--model", "some-model"])
+
+    assert rc == 0
+    assert captured["cmd"] == [
+        sys.executable, "-m", "adda", str(study_dir),
+        "--budget", "100.0", "--model", "some-model",
+    ]

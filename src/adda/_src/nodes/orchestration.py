@@ -543,6 +543,23 @@ class OrchestrationMixin:
                         "ERROR_RETURN",
                         result[:300],
                     )
+                # A tool can carry a diagnostic source (e.g. ConsultLiterature
+                # tags itself with its LiteratureCorpus) for facts that are
+                # true of the environment, not of one call's return value —
+                # e.g. the dense embedder being unavailable — and so would
+                # otherwise never reach diagnostics.jsonl or the agent. This
+                # is the one place with both the per-run diagnostics path
+                # and, via the tag, a handle back to the source; it fires
+                # once (the source pops its own event) rather than on every
+                # call.
+                _diag_src = getattr(fn, "_adda_diagnostic_source", None)
+                if _diag_src is not None:
+                    _event = _diag_src.pop_diagnostic_event()
+                    if _event is not None:
+                        _kind, _msg = _event
+                        node._record_intervention(_kind, node_name, _msg)
+                        if isinstance(result, str):
+                            result = wrap_notice(_msg) + result
                 # Only for this node's OWN tools. A dispatched worker's
                 # closures are wrapped by the delegating node too (it records
                 # their errors), and draining there would hand the

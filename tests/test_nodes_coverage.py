@@ -139,6 +139,109 @@ def test_worker_node_sandboxed_write_rejects_escape(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# build_sandboxed_write: the study workspace/ allowance (Elvis, option A —
+# report 1, run 20260926T214835: a worker had no sanctioned way to satisfy a
+# problem statement naming a deliverable path under study workspace/, and
+# reached for Bash instead, which this guard cannot see at all).
+# ---------------------------------------------------------------------------
+
+def _build_write(tmp_path, *, with_study_workspace=True):
+    from adda._src.nodes.tools.routing.delegation import build_sandboxed_write
+
+    study_dir = tmp_path / "study"
+    delegation_dir = study_dir / "runs" / "T1" / "debug" / "delegations" / "D001"
+    delegation_dir.mkdir(parents=True)
+    study_ws = study_dir / "workspace"
+    return build_sandboxed_write(
+        delegation_dir,
+        strip_prefix="D001",
+        scope_label="D001/",
+        study_workspace=study_ws if with_study_workspace else None,
+    ), study_dir, delegation_dir, study_ws
+
+
+def test_write_reaches_the_study_workspace_with_a_relative_path(tmp_path):
+    Write, study_dir, _delegation_dir, study_ws = _build_write(tmp_path)
+    result = Write("workspace/km_baseline.m", "function y = f(x)\nend\n")
+    assert "ERROR" not in result
+    assert (study_ws / "km_baseline.m").exists()
+
+
+def test_write_reaches_the_study_workspace_with_an_absolute_path(tmp_path):
+    Write, study_dir, _delegation_dir, study_ws = _build_write(tmp_path)
+    abs_path = str(study_ws / "lcp_model.m")
+    result = Write(abs_path, "function y = g(x)\nend\n")
+    assert "ERROR" not in result
+    assert (study_ws / "lcp_model.m").exists()
+
+
+def test_write_still_reaches_its_own_delegation_directory(tmp_path):
+    Write, _study_dir, delegation_dir, _study_ws = _build_write(tmp_path)
+    result = Write("D001/result.csv", "col,val\n1,2\n")
+    assert "ERROR" not in result
+    assert (delegation_dir / "result.csv").exists()
+
+
+def test_write_rejects_a_sibling_runs_directory(tmp_path):
+    Write, study_dir, _delegation_dir, _study_ws = _build_write(tmp_path)
+    other_run = study_dir / "runs" / "T2" / "debug" / "delegations" / "D001"
+    other_run.mkdir(parents=True)
+    result = Write(str(other_run / "leak.txt"), "leaked")
+    assert result.startswith("ERROR")
+    assert not (other_run / "leak.txt").exists()
+
+
+def test_write_rejects_the_study_root_itself(tmp_path):
+    Write, study_dir, _delegation_dir, _study_ws = _build_write(tmp_path)
+    result = Write(str(study_dir / "PROBLEM_STATEMENT.md"), "tampered")
+    assert result.startswith("ERROR")
+    assert not (study_dir / "PROBLEM_STATEMENT.md").exists()
+
+
+def test_write_rejects_dotdot_escape_through_workspace_prefix(tmp_path):
+    """'workspace/../../secret' must not escape the study root via the new
+    workspace/ allowance — '..' is collapsed by resolve() before the
+    relative_to check, same as the pre-existing delegation-dir escape guard."""
+    Write, study_dir, _delegation_dir, _study_ws = _build_write(tmp_path)
+    outside = study_dir.parent / "secret.txt"
+    result = Write("workspace/../../secret.txt", "escaped")
+    assert result.startswith("ERROR")
+    assert not outside.exists()
+
+
+def test_write_rejects_symlink_escape_from_study_workspace(tmp_path):
+    Write, study_dir, _delegation_dir, study_ws = _build_write(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    study_ws.mkdir(parents=True)
+    link = study_ws / "escape"
+    link.symlink_to(outside)
+    result = Write("workspace/escape/pwned.txt", "hacked")
+    assert result.startswith("ERROR")
+    assert not (outside / "pwned.txt").exists()
+
+
+def test_write_rejection_message_is_honest_about_allowed_targets(tmp_path):
+    """No implied sandbox the toolset lacks, and no mention of Bash as a
+    workaround — just the two directories Write actually permits."""
+    Write, study_dir, _delegation_dir, study_ws = _build_write(tmp_path)
+    result = Write(str(study_dir.parent / "elsewhere.txt"), "x")
+    assert "D001/" in result
+    assert str(study_ws) in result
+    assert "bash" not in result.lower()
+
+
+def test_write_without_study_workspace_configured_is_unchanged(tmp_path):
+    """A leaf/scope built with no study_workspace= at all (the pre-fix
+    call shape) behaves exactly as before — no accidental broadening."""
+    Write, _study_dir, _delegation_dir, study_ws = _build_write(
+        tmp_path, with_study_workspace=False)
+    result = Write(f"{study_ws}/km_baseline.m", "x")
+    assert result.startswith("ERROR")
+    assert not study_ws.exists()
+
+
+# ---------------------------------------------------------------------------
 # Node RecallHistory
 # ---------------------------------------------------------------------------
 

@@ -250,6 +250,27 @@ def _build_parser() -> argparse.ArgumentParser:
              "(twice the run's own budget) — a merely slow run must never be "
              "killed, so this can be raised but never lowered.",
     )
+    parser.add_argument(
+        "--entrypoint",
+        default=None,
+        metavar="SCRIPT",
+        help=(
+            "Run the study's OWN entrypoint script (path relative to "
+            "study-dir, e.g. `run.py`) instead of `python -m adda "
+            "<study-dir>`. `python -m adda` never accepts a custom graph= — "
+            "it always builds AgenticRun's built-in default graph — so a "
+            "study whose run.py declares its own Graph (extra roles like "
+            "math_expert, different edges) silently gets a DIFFERENT, "
+            "smaller graph when launched through the CLI. Without this flag "
+            "such a study can only be run-protected by hand-invoking "
+            "run_under_watchdog, which is exactly why it wasn't (the Oscar "
+            "zero-shot harness launched bare `python run.py`, and a hang "
+            "went unwatched). Incompatible with --model/--budget: an "
+            "arbitrary entrypoint script takes no CLI arguments of its own "
+            "to forward them to, so the watchdog deadline is derived from "
+            "the study's config.yaml `budget:` only.",
+        ),
+    )
     return parser
 
 
@@ -259,6 +280,27 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     study_dir = Path(args.study_dir).resolve()
+
+    entry_path: Path | None = None
+    if args.entrypoint is not None:
+        if args.model or args.budget:
+            print(
+                "Error: --entrypoint can't be combined with --model/--budget "
+                "— an arbitrary entrypoint script takes no CLI arguments of "
+                "its own to forward them to. Set `budget:` in the study's "
+                "config.yaml instead (the entrypoint's own AgenticRun call "
+                "resolves its model the same way).",
+                file=sys.stderr,
+            )
+            return 2
+        entry_path = (study_dir / args.entrypoint).resolve()
+        if not entry_path.is_file():
+            print(
+                f"Error: --entrypoint {args.entrypoint!r} not found at "
+                f"{entry_path}.",
+                file=sys.stderr,
+            )
+            return 2
 
     cfg = _load_study_config(study_dir)
     budget_raw = args.budget if args.budget is not None else cfg.get("budget")
@@ -286,9 +328,12 @@ def main(argv: list[str] | None = None) -> int:
         p.name for p in runs_dir.iterdir() if p.is_dir()
     ) if runs_dir.is_dir() else frozenset()
 
-    cmd = [sys.executable, "-m", "adda", str(study_dir), "--budget", str(budget_s)]
-    if args.model:
-        cmd += ["--model", args.model]
+    if entry_path is not None:
+        cmd = [sys.executable, str(entry_path)]
+    else:
+        cmd = [sys.executable, "-m", "adda", str(study_dir), "--budget", str(budget_s)]
+        if args.model:
+            cmd += ["--model", args.model]
 
     print(
         f"adda.watchdog: launching {' '.join(cmd)} under a "

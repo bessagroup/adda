@@ -205,6 +205,42 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   (`_reproduction_gate`) and `nodes/tools/routing/` (`RunNotebook`, scratch).
 - **Status:** telemetry/ergonomics, not a new cap. Run 20260705T181941 friction.
 
+### Sandboxed Write also reaches the study's workspace/
+- **What:** `build_sandboxed_write` (a worker's `Write` tool) used to hard-reject
+  any path outside the delegation's own `D###/` subfolder, full stop — but study
+  problem statements routinely name deliverable paths under the study's OWN
+  `workspace/` (e.g. `studies/lcp_matlab_regression/PROBLEM_STATEMENT.md`'s
+  "workspace/km_baseline.m", the same convention `config.yaml`'s
+  `evaluator.entrypoint` uses), and a worker had no sanctioned way to satisfy
+  that instruction (run 20260926T124841/20260926T214835: rejected, then written
+  via Bash instead — trusted and unsandboxed, so invisible to this guard
+  entirely; Elvis's decision: keep Bash trusted, extend Write instead of
+  sandboxing Bash). `Write` now accepts an OPTIONAL second permitted root, the
+  study's `workspace/`, passed as `study_workspace=` at both call sites
+  (`node.py::_setup_sandboxed_write`, `delegation.py::_setup_worker_write`). A
+  bare relative path (`workspace/foo.m`, or exactly `workspace`) resolves
+  against the STUDY root rather than the delegation root; an absolute path
+  that already resolves under the study's workspace/ is accepted either way.
+  Both permitted roots resolve symlinks/`..` before the containment check, so
+  the allowance can't be used to escape into `runs/<other>/` or the study root.
+  The rejection message now states BOTH permitted directories honestly — no
+  implied sandbox the toolset lacks, and no mention of Bash (a separate,
+  deliberately-unsandboxed boundary, not this guard's concern).
+- **Naming fix, same commit:** the corpus used "workspace"/"workspace_dir" for
+  TWO different directories — the study's own `workspace/` (this feature) and
+  the per-delegation sandbox root (`<run>/debug/delegations/`) — under the
+  SAME bare word. `RUN_PATHS_PREAMBLE_TEMPLATE`, `WORKSPACE_PREAMBLE_TEMPLATE`,
+  the `<bash_tool>` block, and `deliverable_format.py` now say "delegation
+  directory" / "delegations_dir" / "delegation_root" for the sandbox root,
+  reserving "workspace/" exclusively for the study folder everywhere an agent
+  reads it.
+- **Where:** `nodes/tools/routing/delegation.py` (`build_sandboxed_write`,
+  `_setup_worker_write`); `nodes/node.py` (`_setup_sandboxed_write`);
+  `prompts/agent_prompts.py`; `prompts/deliverable_format.py`.
+- **Status:** done. Bash remains trusted and unsandboxed by design — not
+  addressed here; see the (deferred) Bash-boundary discussion this same
+  finding raised.
+
 ### Output-column guidance fix
 - **What:** notebook guidance requires naming the objective column EXPLICITLY. The
   earlier "first non-provenance output" auto-detect was unsafe: `output_names` is
@@ -300,6 +336,87 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   than extending it.
 - **Where:** `backends/base.py`'s `Agent.build_closure_tools` default.
   **Status:** core.
+
+### Retrieval degradation is a diagnostics event, not just a log line
+- **What:** when `ConsultLiterature`'s dense embedder is unavailable (fastembed
+  unimportable in-process AND the out-of-process embed-worker probe failed —
+  the sandboxed/Slurm case), retrieval silently downgraded to BM25 (lexical)
+  only, and the only trace was a `log.warning()` nobody watching a run would
+  see — not even the agent doing the searching. `LiteratureCorpus` now records
+  *why* on `embedder_fallback_reason` and exposes it exactly once per corpus
+  instance via `pop_diagnostic_event()` (`("RETRIEVAL_DEGRADED", reason)`).
+  `ConsultLiterature` tags itself with its corpus
+  (`fn._adda_diagnostic_source = corpus`); `orchestration.py`'s
+  `_wrap_closure` — the one place with both a per-run diagnostics path and,
+  via the tag, a handle back to the corpus — pops the event, records it to
+  `debug/diagnostics.jsonl` via `_record_intervention` (event `RETRIEVAL_DEGRADED`,
+  same neutral `fault="nudge"` classification as other environment-fact
+  events, not an agent error), and prepends an `<adda-note>`-wrapped notice
+  (`nodes/notices.py`) to that call's result so the agent itself learns its
+  literature coverage is reduced. One diagnostics path, fired once per run —
+  not a second writer, not a node-handle threaded into the corpus module.
+- **Where:** `literature/literature_corpus.py` (`embedder_fallback_reason`,
+  `pop_diagnostic_event`); `agents/literature_tools/corpus.py`
+  (`build_corpus_read_closures` tagging); `nodes/orchestration.py`
+  (`_wrap_closure`). **Status:** core.
+
+### A stream ending mid-turn, and the retry it silently triggers, are now diagnostics events
+- **What:** `ainvoke()` (backends/claude.py) can reach the end of the CLI's
+  stream with neither a `ResultMessage` nor a deliberate `route_watcher`
+  break — the CLI session ended (or the SDK's async generator was
+  exhausted) before the turn actually finished, e.g. mid a Bash/TaskOutput
+  call. That used to return silently: whatever near-empty `text` the last
+  `AssistantMessage` carried (often nothing, since a tool-call message
+  rarely has a `TextBlock`) came back as if the turn had completed
+  normally. Reaching `WorkerSession._invoke_with_report_retry`
+  (`nodes/tools/routing/delegation.py`), that near-empty text reads as a
+  MALFORMED report (`_classify_response`), which silently triggers ONE
+  corrective retry — a fresh `worker.invoke()` call, a new CLI session,
+  with the delegation's ORIGINAL `task_msg` still the bulk of the prompt.
+  Nothing was logged on either side: an investigation (`root-cause work,
+  Oscar run 20260830T004106`) could see a delegation's first CLI session
+  end abruptly and a new one start seconds later with essentially the same
+  task, with no trace anywhere of what happened or why — indistinguishable,
+  after the fact, from a silent restart-from-scratch. Two new diagnostics
+  events close that gap (report only; neither changes the retry/return
+  behaviour itself — that's a separate, still-open decision, see the repo's
+  private notes on report 7): `STREAM_ENDED_WITHOUT_RESULT` (`ainvoke`,
+  fault="system" — the last tool in flight and the CLI's own session id,
+  when available) and `REPORT_RETRY` (`_invoke_with_report_retry`,
+  fault="nudge" — the classification reason, fired every time a report-retry
+  actually happens).
+- **Where:** `backends/claude.py` (`_record_stream_diagnostic`, the
+  `_deliberate_break`/`last_result is None` check in `ainvoke`);
+  `nodes/tools/routing/delegation.py`
+  (`WorkerSession._invoke_with_report_retry`). **Status:** core — observability
+  only; the underlying retry-on-a-possibly-in-flight-turn behaviour is a
+  deliberate open question, not addressed here.
+
+### SystemMessage is a transcript record, not a silent drop
+- **What:** `ainvoke()`'s `_record()` (backends/claude.py) mapped every
+  `claude_agent_sdk.SystemMessage` to `None` — including `compact_boundary`,
+  the SDK's own signal that it force-compacted a session's context mid-turn.
+  A run that got compacted mid-delegation left no trace anywhere: not the
+  transcript, not diagnostics, nothing an analyst could grep for short of
+  reasoning backward from a sudden context/behaviour discontinuity. A live
+  probe of a real short session's raw message stream (bypassing adda's own
+  filtering) showed the actual subtype distribution is `{'init': 1,
+  'status': 2, 'thinking_tokens': 47}` — `thinking_tokens` alone accounts for
+  the bulk (measured 47-103 of 50-119 SystemMessages per short session) and
+  carries no information an analyst needs. `_record()` now denylists only
+  that one subtype (`_SYSTEM_MESSAGE_NOISE_SUBTYPES`) and records everything
+  else — including any future/unknown subtype, which defaults to VISIBLE —
+  as a `{"type": "system", "subtype": ..., "data": ...}` transcript record.
+  `compact_boundary` additionally fires an unconditional `CONTEXT_COMPACTED`
+  diagnostics event (`_record_stream_diagnostic`, thread-local delegation
+  id/run dir, the SDK's own compaction metadata verbatim) so the event shows
+  up in `debug/diagnostics.jsonl` without anyone reading transcripts.
+- **Where:** `backends/claude.py` (`_SYSTEM_MESSAGE_NOISE_SUBTYPES`,
+  `_record()`'s new `SystemMessage` branch, the `compact_boundary` check in
+  `ainvoke`). The viewer (`viewer/app.py::_bubble_html`) already renders any
+  unrecognized event type as an empty fragment, so the new `"system"` type
+  needed no viewer change — only a regression test confirming it. **Status:**
+  core — observability only.
 
 ### Delegation-bounded version control of the run workspace
 - **What:** one git repository per run, rooted at the run's own
@@ -596,6 +713,29 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
 - **Status:** done, headless-tested (`tests/test_watchdog_launcher.py`) against
   a trivial sub-second child, including a grandchild-reap assertion.
 
+### `--entrypoint`: the watchdog CLI can launch a study's own script
+- **What:** `python -m adda.watchdog <study-dir>` always builds
+  `AgenticRun`'s built-in DEFAULT graph — it never forwards a custom
+  `graph=`. A study whose own `run.py` declares a different `Graph` (extra
+  roles, different edges — e.g. `studies/lcp_matlab_regression/run.py`'s
+  6-node graph, which adds `math_expert` and isn't reachable through
+  `python -m adda` at all) used to be launch-protectable only by hand-calling
+  `run_under_watchdog` directly, which is exactly why it wasn't: the Oscar
+  zero-shot harness launched bare `python run.py` and a hang went unwatched
+  (bug report, adda-boss-whopper). `--entrypoint SCRIPT` (a path relative to
+  `study-dir`, e.g. `run.py`) launches that script directly instead of
+  `python -m adda <study-dir>`, under the SAME watchdog protection (deadline,
+  kill, reap, retrospective) — a bug fix to the documented safe launcher, not
+  a new capability. Incompatible with `--model`/`--budget`: an arbitrary
+  entrypoint script takes no CLI arguments of its own to forward them to, so
+  those two must error out together with `--entrypoint` rather than be
+  silently dropped; the deadline still derives from the study's
+  `config.yaml` `budget:`.
+- **Where:** `_src/infra/watchdog_launcher.py` (`_build_parser`, `main`).
+- **Status:** done, headless-tested (`tests/test_watchdog_launcher.py`) —
+  entrypoint spawn, the two-flag rejection, a missing-script error before
+  anything is spawned, and unchanged behaviour when the flag is omitted.
+
 ### Synthetic watchdog retrospective (#12)
 - **What:** a watchdog kill leaves a labelled post-mortem so the analysis protocol
   isn't blind.
@@ -613,15 +753,34 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   (`source_id` prefixed `SYNTHESIZED:`). "Capture, don't request": the
   post-Done exit interview asks for one more cooperative Done() call, and
   nothing used to enforce the reply actually arrived.
+- **The claim must stay true.** `_record_retrospective` (nodes/recording.py)
+  used to silently drop a Done() summary that arrived but whose `###
+  Retrospective` heading carried trailing text (e.g. "### Retrospective
+  (System & Framework)") — `_extract_report_section`'s regex required
+  nothing but whitespace before the newline. That made THIS mechanism's own
+  claim false: `write_fallback_retrospective`'s "never arrived" reason fired
+  even though a real, substantive reply had (run 20260926T214835 — a
+  self-consistency wet-test finding, not from a crash). Fixed two ways:
+  the extraction regex now only requires a word boundary after the heading
+  name (rejects a genuinely different heading like "### RetrospectiveNotes",
+  accepts trailing text on the same line); and `_record_retrospective` now
+  records ANY non-empty Done() summary even if the section still fails to
+  parse for some other reason — flagged `"parse_failed": true`, raw text
+  preserved — rather than silently returning. Both close the same class of
+  gap: a real reply must never be indistinguishable from one that never
+  arrived.
 - **Where:** `watchdog_cleanup.py` `write_fallback_retrospective` (shares its
   disk-reading/append core with `write_watchdog_retrospective` rather than
   duplicating it); called from `agent_runtime.py`
   `AgenticRun._fallback_retrospective`, wired at both the normal close
   (`_finalize_run`) and the crash path (`_invoke_graph`'s
   `except BaseException`, before the re-raise). Idempotent — a compliant
-  close's real entry is never duplicated. **Status:** done for every
-  in-process close; a watchdog kill is a SEPARATE case, covered by
-  `write_watchdog_retrospective` instead (see #12 above).
+  close's real entry (including a parse-failed one — it is still non-
+  synthesized) is never duplicated. `nodes/parsing.py`
+  `_extract_report_section`; `nodes/recording.py`
+  `_record_retrospective`. **Status:** done for every in-process close; a
+  watchdog kill is a SEPARATE case, covered by `write_watchdog_retrospective`
+  instead (see #12 above).
 
 ### KB (handbook) entries
 - **What:** curated knowledge the agents consult (incl. running on SLURM, pipeline

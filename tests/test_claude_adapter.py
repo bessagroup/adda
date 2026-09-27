@@ -26,6 +26,12 @@ class _StreamEvent:
     pass
 
 
+class _SystemMessage:
+    def __init__(self, subtype, data=None) -> None:
+        self.subtype = subtype
+        self.data = data or {}
+
+
 class _UserMessage:
     def __init__(self, blocks=None) -> None:
         self.content = blocks or []
@@ -55,6 +61,7 @@ def _install_fake_sdk(**extra):
     mod.TextBlock = _TextBlock
     mod.SdkMcpTool = object  # not used in these tests
     mod.StreamEvent = _StreamEvent
+    mod.SystemMessage = _SystemMessage
     mod.UserMessage = _UserMessage
     mod.ToolUseBlock = _ToolUseBlockType
     mod.ClaudeAgentOptions = lambda **kw: kw
@@ -222,6 +229,26 @@ def test_non_buffer_stream_error_still_raises():
             [{"role": "user", "content": "hi"}])
 
 
+def test_no_stale_computer_tool_in_native_tools_or_disallowed():
+    """Regression (wet-test self-consistency finding #3, run 20260926T214835):
+    'computer' was listed in NATIVE_TOOLS as if it were a real, selectable
+    native SDK tool, and unconditionally denied in _base_disallowed for every
+    agent — but no bare 'computer' tool exists in the bundled CLI (its real
+    Computer Use surface is an MCP server, not a native tool type adda ever
+    wires up), so the CLI printed "Permission deny rule 'computer' matches no
+    known tool" on every single agent session in the run. Confirmed by
+    `strings` on the bundled CLI binary: no bare 'computer' native tool type
+    exists there either."""
+    from adda._src.backends.claude import ClaudeAdapter
+    assert "computer" not in ClaudeAdapter.NATIVE_TOOLS
+
+    cap: dict = {}
+    _install_fake_sdk(query=_capture_options_gen(cap))
+    adapter = _get_adapter()("claude-3", "sys", None, [])
+    adapter.invoke([{"role": "user", "content": "hi"}])
+    assert "computer" not in cap["options"]["disallowed_tools"]
+
+
 def test_session_is_hermetic_setting_sources_empty():
     """#1 fresh hooks: sessions load NO filesystem settings, so worker/critic
     subprocesses don't inherit the developer's global ~/.claude hooks."""
@@ -251,6 +278,20 @@ def test_delegation_id_injected_into_session_env(monkeypatch):
     cap.clear()
     adapter.invoke([{"role": "user", "content": "hi"}])
     assert "F3DASM_DELEGATION_ID" not in cap["options"]["env"]
+
+
+def test_auto_memory_disabled_in_built_options():
+    """Regression (run 20260926T124841): setting_sources=[] does NOT stop the
+    bundled CLI's auto-memory injection — only CLAUDE_CODE_DISABLE_AUTO_MEMORY
+    does. Assert it on the ACTUAL ClaudeAgentOptions.env this adapter builds
+    (not just _build_session_env's return value), so a second construction
+    site bypassing _build_session_env would also be caught."""
+    cap: dict = {}
+    _install_fake_sdk(query=_capture_options_gen(cap))
+    ClaudeAdapter = _get_adapter()
+    ClaudeAdapter("claude-3", "sys", None, []).invoke(
+        [{"role": "user", "content": "hi"}])
+    assert cap["options"]["env"].get("CLAUDE_CODE_DISABLE_AUTO_MEMORY") == "1"
 
 
 def test_stream_event_types_captured_for_ping_measurement(tmp_path, monkeypatch):
@@ -415,3 +456,221 @@ def test_last_usage_recovered_from_assistant_message_when_route_watcher_breaks_e
     assert adapter.last_usage["input_tokens"] == 1200
     assert adapter.last_usage["output_tokens"] == 340
     assert adapter.last_usage["total_cost_usd"] is None
+
+
+# ---------------------------------------------------------------------------
+# STREAM_ENDED_WITHOUT_RESULT (report 7, run 20260830T004106, Oscar): a
+# stream that ends mid-tool with no ResultMessage used to return silently,
+# with nothing recorded anywhere.
+# ---------------------------------------------------------------------------
+
+class _ToolUseBlockWithName:
+    def __init__(self, name, input_):
+        self.name = name
+        self.input = input_
+
+
+def _bind_delegation_diagnostics(tmp_path):
+    """Bind the thread-locals _record_stream_diagnostic reads, so it writes
+    to tmp_path/debug/diagnostics.jsonl; returns that path (unlinking any
+    prior teardown state on exit is the caller's job via try/finally)."""
+    import json as _json
+
+    from adda._src.backends.base import set_delegation_id, set_run_config_path
+    debug = tmp_path / "debug"
+    debug.mkdir(parents=True, exist_ok=True)
+    rc = debug / "run_config.json"
+    rc.write_text(_json.dumps({"store_dir": str(tmp_path), "study_dir": "x"}))
+    set_delegation_id("D007")
+    set_run_config_path(str(rc))
+    return debug / "diagnostics.jsonl"
+
+
+def _unbind_delegation_diagnostics():
+    from adda._src.backends.base import set_delegation_id, set_run_config_path
+    set_delegation_id(None)
+    set_run_config_path(None)
+
+
+def _read_diagnostics(path):
+    import json as _json
+    if not path.exists():
+        return []
+    return [_json.loads(ln) for ln in path.read_text().splitlines() if ln]
+
+
+def test_stream_ended_without_result_is_recorded(tmp_path):
+    """A stream that ends right after an AssistantMessage carrying only a
+    tool call (no TextBlock, no ResultMessage) is exactly what a mid-tool
+    CLI death looks like from ainvoke()'s side — confirmed to make
+    _invoke_with_report_retry silently re-invoke with the original task
+    (its near-empty text reads as malformed). Must now be recorded."""
+    async def _gen_dies_mid_tool(prompt, options):
+        yield _AssistantMessage([_ToolUseBlockWithName("Bash", {"command": "sleep 20"})])
+        return
+
+    _install_fake_sdk(query=_gen_dies_mid_tool, ToolUseBlock=_ToolUseBlockWithName)
+    ClaudeAdapter = _get_adapter()
+    adapter = ClaudeAdapter("claude-3", "sys", None, [])
+
+    diag_path = _bind_delegation_diagnostics(tmp_path)
+    try:
+        result = adapter.invoke([{"role": "user", "content": "original task"}])
+    finally:
+        _unbind_delegation_diagnostics()
+
+    assert result == ""  # near-empty text, exactly what looks malformed
+    records = _read_diagnostics(diag_path)
+    hits = [r for r in records if r.get("error_type") == "STREAM_ENDED_WITHOUT_RESULT"]
+    assert len(hits) == 1
+    assert hits[0]["last_tool_in_flight"] == "Bash"
+    assert hits[0]["node"] == "D007"
+
+
+def test_normal_completion_does_not_record_stream_diagnostic(tmp_path):
+    _install_fake_sdk(query=make_async_gen_with_messages("all good"))
+    ClaudeAdapter = _get_adapter()
+    adapter = ClaudeAdapter("claude-3", "sys", None, [])
+
+    diag_path = _bind_delegation_diagnostics(tmp_path)
+    try:
+        adapter.invoke([{"role": "user", "content": "hi"}])
+    finally:
+        _unbind_delegation_diagnostics()
+
+    hits = [r for r in _read_diagnostics(diag_path)
+            if r.get("error_type") == "STREAM_ENDED_WITHOUT_RESULT"]
+    assert hits == []
+
+
+def test_route_watcher_break_does_not_record_stream_diagnostic(tmp_path):
+    """A deliberate route_watcher break (e.g. Done() closing the run) is the
+    NORMAL "no ResultMessage" case — must not be confused with an abnormal
+    stream end."""
+    class _AssistantMessageWithUsage(_AssistantMessage):
+        def __init__(self, blocks, usage):
+            super().__init__(blocks)
+            self.usage = usage
+
+    async def _gen_route_watcher_breaks(prompt, options):
+        yield _AssistantMessageWithUsage(
+            [_TextBlock("Run complete.")], {"input_tokens": 1, "output_tokens": 1})
+
+    _install_fake_sdk(query=_gen_route_watcher_breaks)
+    ClaudeAdapter = _get_adapter()
+    adapter = ClaudeAdapter("claude-3", "sys", None, [])
+    adapter.route_watcher = lambda: True
+
+    diag_path = _bind_delegation_diagnostics(tmp_path)
+    try:
+        adapter.invoke([{"role": "user", "content": "hi"}])
+    finally:
+        _unbind_delegation_diagnostics()
+
+    hits = [r for r in _read_diagnostics(diag_path)
+            if r.get("error_type") == "STREAM_ENDED_WITHOUT_RESULT"]
+    assert hits == []
+
+
+# ---------------------------------------------------------------------------
+# SystemMessage: used to be entirely invisible (a compact_boundary would
+# leave no trace anywhere an analyst could see).
+# ---------------------------------------------------------------------------
+
+def test_compact_boundary_is_recorded_and_flagged_as_a_diagnostic(tmp_path, monkeypatch):
+    """A real compact_boundary must reach BOTH the transcript (so an analyst
+    reading it directly sees it) and diagnostics.jsonl (so they don't have
+    to — CONTEXT_COMPACTED), unconditionally, not gated on debug mode."""
+    from adda._src.backends.base import set_transcript_sink
+
+    async def _gen_with_compaction(prompt, options):
+        yield _SystemMessage("compact_boundary", {"trigger": "auto", "preTokens": 190000})
+        yield _AssistantMessage([_TextBlock("continuing after compaction")])
+        yield _ResultMessage()
+
+    monkeypatch.setenv("F3DASM_DEBUG", "1")
+    _install_fake_sdk(query=_gen_with_compaction)
+    ClaudeAdapter = _get_adapter()
+    adapter = ClaudeAdapter("claude-3", "sys", None, [])
+    sink = tmp_path / "D001.jsonl"
+    set_transcript_sink(str(sink))
+
+    diag_path = _bind_delegation_diagnostics(tmp_path)
+    try:
+        adapter.invoke([{"role": "user", "content": "hi"}])
+    finally:
+        set_transcript_sink(None)
+        _unbind_delegation_diagnostics()
+
+    import json
+    recs = [json.loads(x) for x in sink.read_text().strip().splitlines()]
+    system_recs = [r for r in recs if r["type"] == "system"]
+    assert len(system_recs) == 1
+    assert system_recs[0]["subtype"] == "compact_boundary"
+    assert system_recs[0]["data"]["trigger"] == "auto"
+
+    hits = [r for r in _read_diagnostics(diag_path)
+            if r.get("error_type") == "CONTEXT_COMPACTED"]
+    assert len(hits) == 1
+    assert hits[0]["compaction_data"]["preTokens"] == 190000
+
+
+def test_thinking_tokens_system_message_is_noise_not_recorded(tmp_path, monkeypatch):
+    """The overwhelming majority (measured: 47-103 per short session) of
+    SystemMessages are subtype 'thinking_tokens' — a per-token heartbeat
+    stream_evt already covers. Recording every one would be volume, not
+    signal, and must not fire a diagnostic either."""
+    from adda._src.backends.base import set_transcript_sink
+
+    async def _gen_with_heartbeat(prompt, options):
+        yield _SystemMessage("thinking_tokens", {"count": 12})
+        yield _AssistantMessage([_TextBlock("hi")])
+        yield _ResultMessage()
+
+    monkeypatch.setenv("F3DASM_DEBUG", "1")
+    _install_fake_sdk(query=_gen_with_heartbeat)
+    ClaudeAdapter = _get_adapter()
+    adapter = ClaudeAdapter("claude-3", "sys", None, [])
+    sink = tmp_path / "D001.jsonl"
+    set_transcript_sink(str(sink))
+
+    diag_path = _bind_delegation_diagnostics(tmp_path)
+    try:
+        adapter.invoke([{"role": "user", "content": "hi"}])
+    finally:
+        set_transcript_sink(None)
+        _unbind_delegation_diagnostics()
+
+    import json
+    recs = [json.loads(x) for x in sink.read_text().strip().splitlines()]
+    assert not [r for r in recs if r["type"] == "system"]
+    assert not [r for r in _read_diagnostics(diag_path)
+                if r.get("error_type") == "CONTEXT_COMPACTED"]
+
+
+def test_unknown_system_subtype_defaults_to_recorded(tmp_path, monkeypatch):
+    """A subtype this file has never seen before (e.g. 'init', or anything
+    added to the SDK later) must default to VISIBLE — the noise list is an
+    explicit denylist, not an allowlist, so a new subtype is never silently
+    dropped the way every SystemMessage used to be."""
+    from adda._src.backends.base import set_transcript_sink
+
+    async def _gen_with_init(prompt, options):
+        yield _SystemMessage("init", {"model": "claude-haiku-4-5-20251001"})
+        yield _AssistantMessage([_TextBlock("hi")])
+        yield _ResultMessage()
+
+    monkeypatch.setenv("F3DASM_DEBUG", "1")
+    _install_fake_sdk(query=_gen_with_init)
+    ClaudeAdapter = _get_adapter()
+    adapter = ClaudeAdapter("claude-3", "sys", None, [])
+    sink = tmp_path / "D001.jsonl"
+    set_transcript_sink(str(sink))
+    adapter.invoke([{"role": "user", "content": "hi"}])
+    set_transcript_sink(None)
+
+    import json
+    recs = [json.loads(x) for x in sink.read_text().strip().splitlines()]
+    system_recs = [r for r in recs if r["type"] == "system"]
+    assert len(system_recs) == 1
+    assert system_recs[0]["subtype"] == "init"

@@ -220,11 +220,23 @@ def _extract_report_section(text: str, name: str) -> str:
 
     Captures from the heading to the next ``###``/``##`` heading, a
     horizontal rule, or end of text. Best-effort and tolerant of trailing
-    free-form content.
+    free-form content — INCLUDING on the heading line itself: ``\\b`` after
+    ``name`` (not ``\\s*\\n``) means "### Retrospective (System & Framework)"
+    or "### Retrospective:" still match, and only a genuinely different
+    heading that merely starts with the same word (e.g. "### RetrospectiveNotes",
+    no word boundary between "Retrospective" and "Notes") is rejected. The
+    stricter regex used to require nothing but whitespace before the newline,
+    so an agent's good-faith elaboration on the heading — asked for by name in
+    _EXIT_INTERVIEW's prompt, which never says the heading must be bare —
+    silently discarded a real, well-formed retrospective (run 20260926T214835:
+    the strategizer's "### Retrospective (System & Framework)" vanished, and
+    the run's own record then wrongly claimed no retrospective ever arrived —
+    see _record_retrospective's parse_failed path, which this regex fix is
+    the other half of).
     """
     import re as _re
     m = _re.search(
-        rf"(?mis)^###\s+{_re.escape(name)}\s*\n(.*?)"
+        rf"(?mis)^###\s+{_re.escape(name)}\b[^\n]*\n(.*?)"
         r"(?=^\s*###\s|^\s*##\s|^---\s*$|\Z)",
         text,
     )

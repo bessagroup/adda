@@ -111,6 +111,59 @@ def _rev(source: str) -> str:
     return hashlib.sha256((source or "").encode("utf-8")).hexdigest()[:8]
 
 
+def _integrity_error_message(tool_name: str, changed: dict) -> str:
+    """Render ``_canonical_integrity_guard``'s report as the ERROR text
+    RunScratch/RunNotebook prepend to their own result. Reverted and
+    left-in-place paths are reported for different reasons: the first is a
+    destructive change (a rewrite of existing bytes, or a deletion) with no
+    other possible author — pipeline.ipynb because only WriteCell may touch
+    it, the store
+    because no delegation was running to have written it; the second is
+    EITHER a pure append (never reverted, regardless of delegation state —
+    it may be a real evaluation a concurrent delegation just wrote) OR a
+    destructive change left in place because a delegation WAS running and
+    may legitimately still be writing."""
+    parts = [
+        f"ERROR: {tool_name} changed real canonical-store/pipeline.ipynb "
+        "paths. Always load the store via F3DASM_CANONICAL_STORE / adda's "
+        "helpers, never a hardcoded run path."
+    ]
+    if changed["reverted"]:
+        parts.append(f"Reverted (no other legitimate writer): {changed['reverted']}.")
+    if changed["left_in_place"]:
+        parts.append(
+            "NOT reverted — either a pure append (may be a real evaluation "
+            "a concurrent delegation wrote) or a change made while a "
+            "delegation was running (may be its legitimate write); left in "
+            f"place: {changed['left_in_place']}."
+        )
+    return " ".join(parts)
+
+
+def _classify_file_change(before: bytes | None, after: bytes | None) -> str:
+    """'unchanged' | 'append' | 'other' (rewrite of existing bytes, or a
+    deletion).
+
+    f3dasm's store append is exactly a bytes-level append (get_evaluator()
+    only ever grows output.csv/input.csv/jobs.csv), so "old content is an
+    exact prefix of new content" is sufficient to recognise a real evaluation
+    landing mid-call — no CSV row parsing needed. A brand-new file (``before``
+    is None) is ALSO an append — trivially, absent content is an exact
+    (empty) prefix of anything — because a late writer's FIRST evaluation in
+    a store, or a first write to a brand-new design-namespace store, creates
+    its files rather than growing them; deleting those is the same data-loss
+    case as reverting a normal append. Used by
+    ``NotebookTools._canonical_integrity_guard`` to tell a concurrent
+    delegation's legitimate write (report only, always) from snippet damage
+    (revert candidate, but ONLY when no delegation was running — see the
+    guard)."""
+    if before == after:
+        return "unchanged"
+    if after is not None and (before is None or after.startswith(before)):
+        return "append"
+    return "other"
+
+
 class NotebookTools:
     """The deliverable-authoring tools, bound to one node."""
 
@@ -182,6 +235,164 @@ class NotebookTools:
                 sb_store, sb_cfg, study_root=self.node._study_dir)
         finally:
             _shutil.rmtree(sandbox, ignore_errors=True)
+
+    def _any_delegation_running(self) -> bool:
+        """True while at least one delegation is Working/FollowUp.
+
+        A running delegation may be writing metered evals into the canonical
+        store through get_evaluator() at the same moment RunScratch/RunNotebook
+        is fingerprinting it — see ``_canonical_integrity_guard``, which
+        checks this at both ends of the call before deciding whether a
+        detected store change is safe to revert."""
+        node = self.node
+        with node._registry_lock:
+            return any(
+                e.get("status") in ("Working", "FollowUp")
+                for e in node._registry.values()
+            )
+
+    @contextmanager
+    def _canonical_integrity_guard(self):
+        """Detect any write the sandboxed subprocess made to the REAL
+        canonical store or pipeline.ipynb, and undo it WHERE THAT IS SAFE.
+
+        ``_ledger_sandbox`` runs the snippet/notebook against a COPY, but
+        that only redirects ``F3DASM_CANONICAL_STORE`` — the subprocess is a
+        plain OS process with full filesystem access, and ``cwd=sandbox``
+        restricts nothing. Agent code using an absolute path can still read,
+        rewrite or delete the real files (run 20260926T124841: a RunScratch
+        call ``os.remove()``'d real experiment_data rows and wrote a
+        fabricated replacement in their place). This is the backstop for
+        that class of damage.
+
+        pipeline.ipynb is reverted UNCONDITIONALLY when changed: only the
+        strategizer writes it, and only through WriteCell, so any other
+        change to it is definitionally the snippet/notebook run, never a
+        legitimate concurrent writer.
+
+        The canonical store is NEVER reverted on a PURE APPEND (old content
+        an exact byte prefix of new — see ``_classify_file_change``), no
+        matter what the delegation registry says. A delegation's own registry
+        entry is not proof it is the only writer that can still be running:
+        a worker's backgrounded shell (``Bash(run_in_background=True)``,
+        reaped only by the RUN's watchdog at exit — see
+        ``infra/watchdog_cleanup.py`` / ``watchdog_launcher.py`` — never per
+        delegation) or an async solve pool (e.g. a SlurmAsyncPool backing a
+        long external solver call) can flush a real, metered evaluation into the
+        store after its delegation already reads Done, or after a
+        cooperative-cancellation Cancelled. Reverting one of those rows —
+        priority 2's supercompressible study is exactly this shape, one
+        solve running minutes to hours — is worse than the damage this
+        guard exists to catch, so a pure append is always reported (the
+        changed path, left for the critic/analysis to see) and NEVER touched.
+
+        A DESTRUCTIVE store change (a rewrite of existing bytes, or a
+        deletion — anything that is not a pure append, where a brand-new
+        file counts as an append: a late writer's FIRST evaluation in a
+        store, or the first write to a brand-new design-namespace store,
+        creates files rather than growing them, and deleting one of those
+        is the same data-loss case) is the only thing ever reverted, and
+        only when no delegation was
+        Working/FollowUp at EITHER end of the call (``_any_delegation_running``,
+        checked before AND after — a delegation that starts and finishes
+        entirely inside the call's window without being caught by either
+        check is a residual gap this accepts, matching the same before/after
+        check used everywhere else in this file, e.g. WriteCell's rev guard).
+        This is the actual damage observed in run 20260926T124841
+        (os.remove() + a hand-written replacement) and stays fully caught.
+
+        Residual gap, by design: a FABRICATED row appended (not rewritten) by
+        the snippet is indistinguishable from a real concurrent eval and so
+        is reported, never reverted. Acceptable — it is visible in the error
+        and diagnostics.jsonl, not silent — but real; see the fix commit's
+        DEFERRED section.
+
+        Each store snapshot (before and after) is taken under that store's
+        OWN ``.lock`` (the same ``FileLock`` ``InstrumentedDataGenerator``
+        flushes evals under — see evaluation/instrumented.py) so a snapshot
+        can never land mid-write and read a torn CSV. The lock is held only
+        for the snapshot, not across the snippet's run, so a live campaign's
+        writes are never stalled by it. Best-effort: a lock that cannot be
+        acquired within 5s is skipped (never blocks a run on a diagnostic
+        backstop) and that file is simply read unlocked.
+
+        Yields a one-item list; after the block it holds ``None`` if nothing
+        changed, else ``{"reverted": [...], "left_in_place": [...]}`` — the
+        caller only needs it to report what happened."""
+        from filelock import FileLock
+        from filelock import Timeout as _LockTimeout
+
+        node = self.node
+        store_dirs: list[Path] = []
+        run_dir = node._resolve_run_dir()
+        if run_dir is not None:
+            from ....evaluation.ledger_summary import experiment_stores
+            for _root in experiment_stores(run_dir):
+                _data_dir = _root / "experiment_data"
+                if _data_dir.exists():
+                    store_dirs.append(_data_dir)
+        nb_paths: list[Path] = []
+        if node._study_dir is not None:
+            nb_path = Path(node._study_dir) / "pipeline.ipynb"
+            if nb_path.exists():
+                nb_paths.append(nb_path)
+
+        def _snapshot() -> dict[Path, bytes]:
+            contents: dict[Path, bytes] = {}
+            for d in store_dirs:
+                lock = FileLock(str(d / ".lock"))
+                try:
+                    with lock.acquire(timeout=5):
+                        for f in sorted(d.rglob("*")):
+                            if f.is_file():
+                                contents[f] = f.read_bytes()
+                except _LockTimeout:
+                    for f in sorted(d.rglob("*")):
+                        if f.is_file():
+                            contents[f] = f.read_bytes()
+            for n in nb_paths:
+                if n.exists():
+                    contents[n] = n.read_bytes()
+            return contents
+
+        before = _snapshot()
+        was_running_before = self._any_delegation_running()
+        report: list = [None]
+        try:
+            yield report
+        finally:
+            after = _snapshot()
+            was_running_after = self._any_delegation_running()
+            may_be_concurrent = was_running_before or was_running_after
+
+            reverted_paths: list[str] = []
+            left_in_place: list[str] = []
+            for p in set(before) | set(after):
+                b, a = before.get(p), after.get(p)
+                kind = _classify_file_change(b, a)
+                if kind == "unchanged":
+                    continue
+                is_nb = any(str(p) == str(n) for n in nb_paths)
+                if kind == "append" and not is_nb:
+                    left_in_place.append(str(p))
+                    continue
+                # 'other' (rewrite/delete/new-file), or ANY pipeline.ipynb
+                # change (never a legitimate concurrent writer).
+                if is_nb or not may_be_concurrent:
+                    if b is None:
+                        p.unlink(missing_ok=True)
+                    else:
+                        p.parent.mkdir(parents=True, exist_ok=True)
+                        p.write_bytes(b)
+                    reverted_paths.append(str(p))
+                else:
+                    left_in_place.append(str(p))
+
+            if reverted_paths or left_in_place:
+                report[0] = {
+                    "reverted": sorted(reverted_paths),
+                    "left_in_place": sorted(left_in_place),
+                }
 
     # ── Writing and checking the deliverable ─────────────────────────────────
 
@@ -667,49 +878,68 @@ class NotebookTools:
         "RunScratch(\"from adda import load_experiments; "
         "print({k: len(v) for k, v in load_experiments().items()})\")")
     def RunScratch(self, code: str) -> str:
-        """Run a short Python snippet against a COPY of the canonical store and
-        return its stdout/stderr — your scratchpad for INSPECTING state before
-        committing it to pipeline.ipynb. f3dasm and adda are importable and
-        F3DASM_CANONICAL_STORE points at a temp copy of the store, so you can
-        e.g. ``from adda import load_experiments; experiments =
-        load_experiments()`` (returns every store — default AND every design
-        namespace — as ``{name: ExperimentData}``; a bare
-        ``ExperimentData.from_file(os.environ['F3DASM_CANONICAL_STORE'])`` only
-        sees the default store and silently misses namespace evals), print best
-        values, check a path resolves, or verify a DataFrame populates. Runs
-        against a COPY — it cannot touch the real store or pipeline.ipynb —
-        and does NOT count toward the eval budget. Use it to debug instead of
-        guessing (e.g. 'does hypotheses.json load? does h_dict populate?')
-        rather than discovering a silent bug only at the Done() gate."""
+        """Run a short Python snippet and return its stdout/stderr — your
+        scratchpad for INSPECTING state before committing it to
+        pipeline.ipynb. f3dasm and adda are importable and
+        F3DASM_CANONICAL_STORE points at a temp COPY of the store, so the
+        store-loading idiom below reads that copy, not the real one, and
+        does NOT count toward the eval budget: e.g. ``from adda import
+        load_experiments; experiments = load_experiments()`` (returns every
+        store — default AND every design namespace — as ``{name:
+        ExperimentData}``; a bare
+        ``ExperimentData.from_file(os.environ['F3DASM_CANONICAL_STORE'])``
+        only sees the default store and silently misses namespace evals),
+        print best values, check a path resolves, or verify a DataFrame
+        populates.
+
+        This redirects the STORE-LOADING PATH — it is NOT a filesystem
+        sandbox: the snippet is a real OS process with full filesystem
+        access, so code using an ABSOLUTE path (``os.remove``,
+        ``open(..., 'w')``, ``shutil.*``) still reaches the real
+        experiment_data or pipeline.ipynb. Always go through the env var /
+        relative-import idiom above, never a hardcoded run path. As a
+        backstop, not a substitute for that — the real canonical store and
+        pipeline.ipynb are hashed before and after every call; any change is
+        reverted and reported as an ERROR here rather than left in place.
+        Use it to debug instead of guessing (e.g. 'does hypotheses.json
+        load? does h_dict populate?') rather than discovering a silent bug
+        only at the Done() gate."""
         import subprocess as _sub
         node = self.node
         if not (code or "").strip():
             return "ERROR: `code` is empty."
         if getattr(node, "_current_notes_dir", None) is None:
             return "ERROR: no run context available for scratch execution."
-        with self._ledger_sandbox("f3dasm_scratch_") as (sandbox, env):
+        with self._ledger_sandbox("f3dasm_scratch_") as (sandbox, env), \
+                self._canonical_integrity_guard() as changed:
             snippet = sandbox / "_scratch.py"
             snippet.write_text(code)
             try:
                 from ....evaluation.notebook_exec import run_deliverable
                 proc = run_deliverable(
                     snippet, cwd=sandbox, env=env, timeout=120)
+                out = (proc.stdout or "")[-4000:]
+                err = (proc.stderr or "")[-2000:]
+                result = (f"[scratch exit {proc.returncode}]\n--- stdout ---\n"
+                          + (out or "(empty)")
+                          + (f"\n--- stderr ---\n{err}" if err.strip() else ""))
             except _sub.TimeoutExpired:
-                return ("Scratch snippet exceeded 120s and was killed. "
-                        "Keep it lightweight — load the store and print; do not "
-                        "re-run a campaign.")
-            out = (proc.stdout or "")[-4000:]
-            err = (proc.stderr or "")[-2000:]
-            return (f"[scratch exit {proc.returncode}]\n--- stdout ---\n"
-                    + (out or "(empty)")
-                    + (f"\n--- stderr ---\n{err}" if err.strip() else ""))
+                result = ("Scratch snippet exceeded 120s and was killed. "
+                          "Keep it lightweight — load the store and print; "
+                          "do not re-run a campaign.")
+        if changed[0]:
+            return _integrity_error_message("RunScratch", changed[0]) + "\n\n" + result
+        return result
 
     @tool_examples("RunNotebook()", "RunNotebook(upto='ml')",
                    "RunNotebook(gate=True)")
     def RunNotebook(self, upto: str = None, gate: bool = False) -> str:
-        """Execute pipeline.ipynb against a COPY of the canonical store — it
-        cannot touch the real store or the notebook, and does NOT count toward
-        the eval budget.
+        """Execute pipeline.ipynb's cells; does NOT count toward the eval
+        budget. F3DASM_CANONICAL_STORE points at a temp COPY of the store
+        while it runs, so the notebook's normal store-loading calls read
+        that copy. This is NOT a filesystem sandbox (see RunScratch) — the
+        real pipeline.ipynb and canonical store are hashed before/after and
+        any change is reverted and reported as an ERROR, as a backstop.
 
         Default → a PER-CELL trace: every code cell with its stdout, and the
         first failure with its exact traceback. `upto` (a code cell's name)
@@ -738,24 +968,29 @@ class NotebookTools:
             return "No pipeline.ipynb yet — author it first with WriteCell."
         if getattr(node, "_current_notes_dir", None) is None:
             return "ERROR: no run context available for cell execution."
-        with self._ledger_sandbox("f3dasm_cell_") as (sandbox, env):
+        with self._ledger_sandbox("f3dasm_cell_") as (sandbox, env), \
+                self._canonical_integrity_guard() as changed:
             try:
                 from ....evaluation.notebook_exec import diagnose_notebook
                 trace = diagnose_notebook(
                     nb_path, cwd=sandbox, env=env, timeout=180, upto_name=name)
+                if trace.get("missing_name"):
+                    result = (f"No CODE cell named {name!r} — this can be a "
+                              "standard pillar (doe, data_generation, ml, "
+                              "optimization, analysis) or a custom code cell "
+                              "you added, but it must be a code cell (a "
+                              "markdown-only cell like 'problem' or "
+                              "'verdict' has no execution state to run up "
+                              "to). Use ShowNotebook() to see the cells.")
+                else:
+                    result = _render_cell_trace(trace, name)
             except _sub.TimeoutExpired:
-                return ("Notebook diagnosis exceeded 180s and was killed "
-                        "— a cell is running a real campaign; it should load the "
-                        "store lazily, not recompute.")
-            if trace.get("missing_name"):
-                return (f"No CODE cell named {name!r} — this can be a "
-                        "standard pillar (doe, data_generation, ml, "
-                        "optimization, analysis) or a custom code cell you "
-                        "added, but it must be a code "
-                        "cell (a markdown-only cell like 'problem' or "
-                        "'verdict' has no execution state to run up to). "
-                        "Use ShowNotebook() to see the cells.")
-            return _render_cell_trace(trace, name)
+                result = ("Notebook diagnosis exceeded 180s and was killed "
+                          "— a cell is running a real campaign; it should "
+                          "load the store lazily, not recompute.")
+        if changed[0]:
+            return _integrity_error_message("RunNotebook", changed[0]) + "\n\n" + result
+        return result
 
 
 def _render_cell_trace(trace: dict, name: str | None) -> str:

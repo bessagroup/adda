@@ -33,6 +33,29 @@ class TestSectionExtractor:
         assert "CONSISTENCY: ok" in body
         assert "Required keys" not in body
 
+    def test_tolerates_trailing_text_on_the_heading_line(self):
+        """Regression (run 20260926T214835): the exit interview never says
+        the heading must be bare, and a good-faith elaboration matching its
+        OWN framing ("a quick question about the SYSTEM... NOT the science")
+        used to silently discard a real, well-formed retrospective."""
+        text = (
+            "### Retrospective (System & Framework)\n"
+            "- CONSISTENCY: ok\n- DECISION: x\n"
+        )
+        body = _extract_report_section(text, "Retrospective")
+        assert "CONSISTENCY: ok" in body
+
+    def test_tolerates_a_trailing_colon_on_the_heading_line(self):
+        text = "### Retrospective:\n- CONSISTENCY: ok\n"
+        body = _extract_report_section(text, "Retrospective")
+        assert "CONSISTENCY: ok" in body
+
+    def test_rejects_a_genuinely_different_heading_with_the_same_prefix(self):
+        """'### RetrospectiveNotes' is a DIFFERENT heading — no word boundary
+        between 'Retrospective' and 'Notes' — must not match."""
+        text = "### RetrospectiveNotes\nunrelated content\n"
+        assert _extract_report_section(text, "Retrospective") == ""
+
     def test_flag_detection_regex(self):
         import re
         flagged = "- CONSISTENCY: flagged — 'do X' vs 'never do X'"
@@ -286,6 +309,77 @@ class TestStrategizerGranularity:
         assert "when the question permits" in STRATEGIZER_SYSTEM_PROMPT.lower()
         assert "legitimate, cleanly falsifiable hypothesis" in \
             STRATEGIZER_SYSTEM_PROMPT.lower()
+
+
+class TestRetrospectiveParseFailureIsHonest:
+    """A Done() summary that arrives but whose ### Retrospective section
+    can't be parsed must be recorded as a real (non-synthesized) entry with
+    the raw text preserved — never silently dropped, which used to make
+    write_fallback_retrospective's downstream "never arrived" claim false
+    for a reply that had, in fact, arrived (run 20260926T214835)."""
+
+    def _node(self, tmp_path):
+        from adda._src.backends.base import Agent, Edge, Graph
+        from adda._src.nodes import Node
+
+        class A(Agent):
+            role = "strategizer"
+            tools = frozenset({"Done"})
+            description = "s"
+
+        class B(Agent):
+            description = "i"
+
+        spec = Graph(nodes={"strategizer": A(), "implementer": B()},
+                     edges=(Edge("strategizer", "implementer"),), entry="strategizer")
+
+        class _Stub:
+            def __init__(self):
+                self.closure_tools = {}
+
+            def invoke(self, messages):
+                return "ok"
+
+        notes = tmp_path / "debug" / "strategizer_notes"
+        notes.mkdir(parents=True)
+        node = Node(_Stub(), name="strategizer", outgoing=["implementer"],
+                    spec=spec, study_dir=tmp_path)
+        node._current_notes_dir = notes
+        return node
+
+    def _entries(self, tmp_path):
+        import json
+        path = tmp_path / "debug" / "retrospectives.jsonl"
+        if not path.exists():
+            return []
+        return [json.loads(ln) for ln in path.read_text().splitlines() if ln]
+
+    def test_unparseable_summary_is_still_recorded(self, tmp_path):
+        node = self._node(tmp_path)
+        raw = "I finished the run. It went well, no issues to report."
+        node._record_retrospective("strategizer", "DONE", raw)
+
+        entries = self._entries(tmp_path)
+        assert len(entries) == 1
+        rec = entries[0]
+        assert rec["parse_failed"] is True
+        assert not rec["source_id"].startswith("SYNTHESIZED:")
+        assert raw in rec["text"]
+        assert "could not be parsed" in rec["text"]
+
+    def test_genuinely_empty_summary_records_nothing(self, tmp_path):
+        node = self._node(tmp_path)
+        node._record_retrospective("strategizer", "DONE", "")
+        assert self._entries(tmp_path) == []
+
+    def test_successfully_parsed_summary_is_not_flagged_parse_failed(self, tmp_path):
+        node = self._node(tmp_path)
+        node._record_retrospective(
+            "strategizer", "DONE",
+            "### Retrospective\n- CONSISTENCY: ok\n- DECISION: x\n")
+        entries = self._entries(tmp_path)
+        assert len(entries) == 1
+        assert entries[0]["parse_failed"] is False
 
 
 class TestRetrospectiveTextCap:
