@@ -292,6 +292,10 @@ mark{background:var(--mark);color:var(--ink);border-radius:2px;padding:0 1px}
 /* ---------- tables ---------- */
 .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
 table{border-collapse:collapse;width:100%;font-size:12.5px;min-width:520px}
+table.reflect{min-width:760px}
+table.reflect td{vertical-align:top}
+.cite{margin-bottom:4px}
+.cite .src{display:block;font-size:11px}
 th{text-align:left;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);
   font-weight:600;padding:9px 13px;border-bottom:1px solid var(--line);white-space:nowrap}
 td{padding:8px 13px;border-top:1px solid var(--line-soft);vertical-align:top}
@@ -645,6 +649,8 @@ function buildRail(){
   const views = $("#rail-views");
   [["gates","Gates",DATA.gates.length],["config","Config knobs",DATA.switches.length],
    ["shared","Shared blocks",DATA.shared.length],
+   ["reflection","Reflection",DATA.reflection.rows.length],
+   ["changes","Changes",DATA.changelog.length],
    ["edits","My edits",0]].forEach(([k,label,n])=>{
     const b=document.createElement("button");
     b.className="railbtn"; b.type="button"; b.dataset.view=k;
@@ -1125,6 +1131,52 @@ function renderConfig(){
     </table></div>`;
 }
 
+/* ---------------- reflection ---------------- */
+/* Who is asked to reflect on the SYSTEM (not the science), when, and what holds
+   them to it. Every citation is resolved from the code by the generator; a
+   mechanism the code does not have is said so in the row, not left blank. */
+function citeList(cs){
+  if(!cs.length) return `<span class="src">—</span>`;
+  return cs.map(c=>`<div class="cite">${esc(c.label)}${c.file
+    ? ` <span class="src">${esc(c.file.replace(/^src\/adda\/_src\//,""))}:${c.line}</span>` : ""}</div>`).join("");
+}
+function renderReflection(){
+  const R = DATA.reflection;
+  return `<p class="eyebrow">Machinery</p>
+    <h1>Reflection</h1>
+    <p class="lede">Each agent is asked for a <code>### Retrospective</code> about the system it
+      worked within — its rules, tools and feedback — not about the science. It reports
+      CONSISTENCY (ok or flagged, quoting both sides of any contradiction), DECISION and FRICTION;
+      the strategizer's interview adds BLOCKED, for capability gaps.</p>
+    <p class="lede" style="color:var(--ink-3)">The text of each request is in the role's prompt
+      (workers) or on the <b>Exit interview</b> gate (strategizer); a malformed worker report is
+      re-requested by the <b>Report shape retry</b> gate. This table is built from the code.</p>
+    <div class="tablewrap"><table class="reflect">
+      <thead><tr><th>Role</th><th>Asked by</th><th>When</th><th>Enforced by</th><th>Recorded by</th></tr></thead>
+      <tbody>${R.rows.map(r=>`<tr>
+        <td class="m">${esc(r.role)}</td>
+        <td>${citeList(r.asks)}</td>
+        <td>${esc(r.when)}</td>
+        <td>${citeList(r.enforced)}</td>
+        <td>${citeList(r.recorded)}</td>
+      </tr>`).join("")}</tbody>
+    </table></div>
+    <div class="sectionhead"><h2>Where the answers land</h2>
+      <p><code>${esc(R.sink.path)}</code>, one line per retrospective:
+        ${R.sink.fields.map(f=>`<code>${esc(f)}</code>`).join(", ")}. ${esc(R.sink.flag)}
+        Written by <span class="src">${esc(R.sink.source.file.replace(/^src\/adda\/_src\//,""))}:${R.sink.source.line}</span>.</p></div>`;
+}
+
+/* ---------------- changes ---------------- */
+function renderChanges(){
+  return `<p class="eyebrow">This page</p>
+    <h1>Changes</h1>
+    <p class="lede">What changed in this map itself, newest first. Changes to the prompts are in
+      the repository's git history.</p>
+    ${DATA.changelog.map(c=>`<div class="sectionhead"><h2>${esc(c.date)}</h2>
+      <p>${esc(c.text)}</p></div>`).join("")}`;
+}
+
 /* ---------------- shared blocks ---------------- */
 function renderShared(){
   return `<p class="eyebrow">Machinery</p>
@@ -1193,6 +1245,8 @@ function render(){
   else if(view.kind==="role"){ main.innerHTML = renderRole(DATA.roles.find(r=>r.id===view.id)); }
   else if(view.kind==="gates"){ main.innerHTML = renderGates(); }
   else if(view.kind==="config"){ main.innerHTML = renderConfig(); }
+  else if(view.kind==="reflection"){ main.innerHTML = renderReflection(); }
+  else if(view.kind==="changes"){ main.innerHTML = renderChanges(); }
   else if(view.kind==="edits"){ main.innerHTML = renderEdits(); }
   else { main.innerHTML = renderShared(); }
   syncRail();

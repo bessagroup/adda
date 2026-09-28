@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+ROOT = Path(__file__).resolve().parents[1]
+
 # The full build (see `data` below) assembles all 5 roles' prompts from the
 # live corpus -- ~170s, measured. Every test in this module needs the SAME
 # build, so it is session-scoped (not just module-scoped): the only two
@@ -303,7 +305,8 @@ def test_a_gate_offers_only_what_it_tells_the_agent(promptmap):
     for gate in promptmap.build_gates():
         assert "doc" not in gate and "edit" not in gate, gate["symbol"]
         for m in gate["messages"]:
-            assert m["edit"]["mode"] == "message", gate["symbol"]
+            want = "constant" if m.get("constant") else "message"
+            assert m["edit"]["mode"] == want, gate["symbol"]
 
 
 def test_a_gate_message_is_what_its_cited_expression_renders(promptmap):
@@ -319,6 +322,8 @@ def test_a_gate_message_is_what_its_cited_expression_renders(promptmap):
     for gate in promptmap.build_gates():
         for message in gate["messages"]:
             total += 1
+            if message.get("constant"):
+                continue    # proved by test_a_named_constant_shows_its_own_text
             # The segment is a multi-line expression lifted out of its
             # parentheses, so give it its own before re-parsing.
             expr = ast.parse("(" + message["source_expr"] + ")", mode="eval").body
@@ -326,6 +331,44 @@ def test_a_gate_message_is_what_its_cited_expression_renders(promptmap):
                 f"{gate['symbol']}: the card shows a message its source does not render")
             assert message["edit"]["ok"] and message["edit"]["mode"] == "message"
     assert total >= 10, "the gates stopped saying anything to the agent — suspicious"
+
+
+def test_a_named_constant_shows_its_own_text(promptmap):
+    """``return prefix + _EXIT_INTERVIEW`` used to render as the placeholder
+    ``<prefix><_EXIT_INTERVIEW>``, so the interview text the strategizer reads
+    appeared nowhere on the map. A message handed over by name must show the
+    constant's value, cited to its own assignment."""
+    import importlib
+
+    seen = set()
+    for gate in promptmap.build_gates():
+        for m in gate["messages"]:
+            if not m.get("constant"):
+                continue
+            mod = m["file"].removeprefix("src/").removesuffix(".py").replace("/", ".")
+            assert getattr(importlib.import_module(mod), m["constant"]) == m["text"]
+            seen.add(m["constant"])
+    assert {"_EXIT_INTERVIEW", "_FAILED_RETROSPECTIVE"} <= seen
+
+
+def test_reflection_covers_every_role_and_cites_real_lines(data):
+    """Every role in the map has a reflection row, and every citation in it
+    points inside a real file. A worker whose report_sections ask for a
+    ### Retrospective must have the line in its prompt that asks."""
+    rows = {r["role"]: r for r in data["reflection"]["rows"]}
+    assert set(rows) == {r["id"] for r in data["roles"]}
+    for row in rows.values():
+        for cite in row["asks"] + row["enforced"] + row["recorded"]:
+            if "file" not in cite:
+                continue
+            lines = (ROOT / cite["file"]).read_text(encoding="utf-8").splitlines()
+            assert 1 <= cite["line"] <= len(lines), cite
+        if not row["when"].startswith("Not asked"):
+            assert row["asks"], row["role"]
+            for cite in row["asks"]:
+                lines = (ROOT / cite["file"]).read_text(encoding="utf-8").splitlines()
+                span = lines[cite["line"] - 1:cite.get("line_end", cite["line"])]
+                assert "Retrospective" in "\n".join(span), cite
 
 
 def test_a_computed_block_is_never_silently_reported_as_absent(data):

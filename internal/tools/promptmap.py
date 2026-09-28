@@ -265,6 +265,79 @@ def _render_message(node: ast.AST) -> str | None:
     return None
 
 
+def _module_str_constant(path: Path, name: str) -> tuple[ast.Assign, str] | None:
+    """The module-level string constant ``name`` in ``path``, if it is one."""
+    if not path.is_file():
+        return None
+    for node in ast.parse(_read(path)).body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == name for t in node.targets
+        ):
+            try:
+                value = ast.literal_eval(node.value)
+            except ValueError:
+                return None
+            return (node, value) if isinstance(value, str) else None
+    return None
+
+
+def _import_target(path: Path, node: ast.ImportFrom) -> Path | None:
+    """The file a relative ``from ... import`` inside the package points at."""
+    if not node.level:
+        return None
+    base = path.parent
+    for _ in range(node.level - 1):
+        base = base.parent
+    stem = base / (node.module or "").replace(".", "/")
+    for candidate in (stem.with_suffix(".py"), stem / "__init__.py"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def named_constants(path: Path, expr: ast.AST) -> list[dict]:
+    """The string constants a returned expression hands over by NAME.
+
+    ``return prefix + _EXIT_INTERVIEW`` renders as ``<prefix><_EXIT_INTERVIEW>``
+    — true, and useless: the agent reads the constant's text, and that text is
+    written somewhere the map can cite exactly. Names are resolved in the
+    gate's own module first, then through the relative imports that bring them
+    in (at module level or inside the function), so a diagnosis defined in
+    ``prompts/agent_prompts.py`` is shown where it is written.
+    """
+    tree = ast.parse(_read(path))
+    imports: dict[str, tuple[Path, str]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            target = _import_target(path, node)
+            if target is not None:
+                for alias in node.names:
+                    imports[alias.asname or alias.name] = (target, alias.name)
+    out, seen = [], set()
+    for node in ast.walk(expr):
+        if not isinstance(node, ast.Name) or node.id in seen:
+            continue
+        seen.add(node.id)
+        home, real = path, node.id
+        found = _module_str_constant(home, real)
+        if found is None and node.id in imports:
+            home, real = imports[node.id]
+            found = _module_str_constant(home, real)
+        if found is None or len(found[1].strip()) < 24:
+            continue
+        assign, value = found
+        out.append({
+            "text": value, "constant": real,
+            "file": _rel(home), "line": assign.lineno,
+            "line_end": assign.end_lineno,
+            "source_expr": real,
+        })
+    return out
+
+
+_SPLICED = re.compile(r"<[^<>\n]*>|\{[^{}\n]*\}")
+
+
 def gate_messages(module_rel: str, qualname: str) -> list[dict]:
     """Every text a gate can hand back to the agent, with where it is written.
 
@@ -297,16 +370,21 @@ def gate_messages(module_rel: str, qualname: str) -> list[dict]:
         if not isinstance(node, ast.Return) or node.value is None:
             continue
         text = _render_message(node.value)
-        if not text or len(text.strip()) < 24:
-            continue
-        out.append({
-            "text": text,
-            "file": _rel(path),
-            "line": node.value.lineno,
-            "line_end": node.value.end_lineno,
-            "source_expr": ast.get_source_segment(_read(path), node.value) or "",
-        })
-    out.sort(key=lambda m: m["line"])
+        consts = named_constants(path, node.value)
+        # A return whose only words are the constants it names is a pointer:
+        # show the constants, not the pointer.
+        own_words = _SPLICED.sub("", text or "").strip()
+        if text and (len(own_words) >= 24 or not consts) and len(text.strip()) >= 24:
+            out.append({
+                "text": text,
+                "file": _rel(path),
+                "line": node.value.lineno,
+                "line_end": node.value.end_lineno,
+                "source_expr": ast.get_source_segment(_read(path), node.value) or "",
+            })
+        out.extend(c for c in consts
+                   if not any(m.get("constant") == c["constant"] for m in out))
+    out.sort(key=lambda m: (m["file"], m["line"]))
     return out
 
 
@@ -1459,7 +1537,11 @@ GATES: list[dict] = [
     dict(id="retrospective", title="Exit interview", kind="procedural",
          phase="Done()", module="nodes/tools/routing/feedback.py",
          symbol="FeedbackTools._capture_retrospective",
-         effect="Holds the close for one turn to capture the retrospective."),
+         also=[("nodes/tools/routing/feedback.py",
+                "FeedbackTools._enter_retrospective_round")],
+         constants=[("nodes/tools/routing/feedback.py", "_EXIT_INTERVIEW")],
+         effect="Once the run's outcome is settled, Done() is held one more turn "
+                "for a ### Retrospective about the system; it never reopens the run."),
     dict(id="milestones", title="Milestone backlog", kind="hard",
          phase="Done() + pre-delegation", module="nodes/tools/routing/feedback.py",
          symbol="FeedbackTools._milestone_gate", switch="milestones_enabled",
@@ -1542,7 +1624,144 @@ GATES: list[dict] = [
     dict(id="report_shape", title="Report shape retry", kind="soft",
          phase="worker return", module="nodes/parsing.py",
          symbol="_classify_response",
-         effect="A malformed worker report is diagnosed and retried."),
+         also=[("prompts/agent_prompts.py", "build_report_retry_prompt")],
+         effect="A worker report missing a required section, ### Retrospective "
+                "included, is retried once with the corrective prompt (REPORT_RETRY)."),
+]
+
+
+# --------------------------------------------------------------------------
+# reflection: who is asked for a ### Retrospective, when, and what holds them to it
+# --------------------------------------------------------------------------
+
+def _cite(module_rel: str, qualname: str, label: str) -> dict:
+    s = resolve_symbol(module_rel, qualname)
+    return {"label": label, "file": s["file"], "line": s["line"]}
+
+
+def _cite_constant(module_rel: str, name: str, label: str) -> dict:
+    s = assign_span(module_rel, name)
+    return {"label": label, "file": s["file"], "line": s["line"],
+            "line_end": s["line_end"]}
+
+
+def _retrospective_line(mod_path: Path) -> int | None:
+    """Where an agent's own prompt first asks for its ### Retrospective."""
+    text = _read(mod_path)
+    idx = text.find("### Retrospective\n")
+    return _line_of(text, idx) if idx >= 0 else None
+
+
+def build_reflection() -> dict:
+    """Per role: the text that asks for a retrospective, when, and what enforces it.
+
+    Everything here is resolved from the live graph and the source: whether a
+    worker is asked is read off its own ``report_sections``, the prompt line
+    off its module, and every mechanism is cited by the symbol that implements
+    it. What is hand-written is only the plain-language WHEN of each path.
+    """
+    graph = _map_graph()
+    has_critic = any(getattr(a, "role", None) == "critic" for a in graph.nodes.values())
+    record = _cite("nodes/recording.py", "RecordingMixin._record_retrospective",
+                   "parsed and appended to debug/retrospectives.jsonl")
+    rows = []
+    for name, agent in graph.nodes.items():
+        mod_path = Path(sys.modules[type(agent).__module__].__file__).resolve()
+        if name == graph.entry:
+            rows.append({
+                "role": name,
+                "asks": [
+                    _cite_constant("nodes/tools/routing/feedback.py", "_EXIT_INTERVIEW",
+                                   "exit interview (after a critic PASS)"),
+                    _cite_constant("nodes/tools/routing/feedback.py",
+                                   "_FAILED_RETROSPECTIVE",
+                                   "failure retrospective (UNGATED or FAILED close)"),
+                ],
+                "when": ("Once, at the end: the run's outcome is settled, and Done() "
+                         "is answered with the interview instead of closing. The "
+                         "next Done() carries only the ### Retrospective and closes."
+                         + ("" if has_critic else
+                            " NOT IN THIS GRAPH: with no critic wired, a run closes "
+                            "directly and no interview is asked.")),
+                "enforced": [
+                    _cite("nodes/tools/routing/feedback.py",
+                          "FeedbackTools._capture_retrospective",
+                          "holds the close for that one turn"),
+                    _cite("runtime/agent_runtime.py", "AgenticRun._fallback_retrospective",
+                          "if no answer arrives, a retrospective is written from "
+                          "the run's own record"),
+                ],
+                "recorded": [_cite("nodes/tools/routing/feedback.py",
+                                   "FeedbackTools._capture_retrospective",
+                                   "source_id DONE"), record],
+            })
+            continue
+        sections = list(getattr(agent, "report_sections", None) or [])
+        asked = "### Retrospective" in sections
+        # The Abaqus datagenerator inherits its prompt: look where it is written.
+        ask_path, line = mod_path, None
+        for cls in type(agent).__mro__:
+            mod = sys.modules.get(cls.__module__)
+            if mod and getattr(mod, "__file__", None) and "adda" in mod.__file__:
+                line = _retrospective_line(Path(mod.__file__).resolve())
+                if line:
+                    ask_path = Path(mod.__file__).resolve()
+                    break
+        is_critic = getattr(agent, "role", None) == "critic"
+        asks = ([{"label": "### Retrospective in its <output_format>",
+                  "file": _rel(ask_path), "line": line}]
+                if asked and line else [])
+        if is_critic:
+            when = "Every critic review: each Done() that reaches the critic gate."
+            enforced = [{"label": "NOT ENFORCED — the critic's reply is never "
+                                  "checked for its sections or re-requested; one "
+                                  "without a retrospective is recorded as a parse "
+                                  "failure"}]
+            recorded = [_cite("nodes/critic_gate.py", "CriticGateMixin._invoke_critic",
+                              "source_id critic-N"), record]
+        else:
+            when = "Every delegation report, as its last section."
+            enforced = ([
+                _cite("nodes/parsing.py", "_classify_response",
+                      "checks the report against its report_sections"),
+                _cite("nodes/tools/routing/delegation.py",
+                      "WorkerSession._invoke_with_report_retry",
+                      "one corrective retry, logged REPORT_RETRY"),
+            ] if asked else [])
+            recorded = [_cite("nodes/tools/routing/delegation.py",
+                              "WorkerSession._finish_ok",
+                              "source_id is the delegation id"), record]
+        rows.append({"role": name, "asks": asks, "when": when if asked else
+                     "Not asked: its report_sections carry no ### Retrospective.",
+                     "enforced": enforced, "recorded": recorded})
+    return {
+        "rows": rows,
+        "sink": {
+            "path": "debug/retrospectives.jsonl",
+            "fields": ["ts", "source_id", "role", "flagged", "text", "parse_failed"],
+            "flag": ("CONSISTENCY: flagged also writes a CONSISTENCY_FLAG event to "
+                     "debug/diagnostics.jsonl and notifies the strategizer."),
+            "source": record,
+        },
+    }
+
+
+#: Dated notes on what this page shows, newest first. The page's DATA is
+#: generated; this is the one place a reader learns what changed in the map
+#: itself (not in the prompts, which git history covers).
+CHANGELOG: list[dict] = [
+    dict(date="2026-09-28", text=(
+        "Reflection view added (requested by adda-boss-whopper for Elvis): per "
+        "role, the text that asks for a ### Retrospective, when it fires, what "
+        "enforces it and where it is recorded, all resolved from the code. Gates "
+        "now show the text behind a named constant instead of a placeholder: the "
+        "Exit interview gate shows the exit interview (_EXIT_INTERVIEW) and the "
+        "failure retrospective (_FAILED_RETROSPECTIVE, previously absent from the "
+        "map); Report shape retry shows the corrective prompt and its diagnoses. "
+        "Found, not changed in code: the critic's retrospective is asked on every "
+        "review but never re-requested (a reply without one is recorded as a "
+        "parse failure), and with no critic wired the strategizer is never "
+        "interviewed. Nothing on the list could not be located.")),
 ]
 
 
@@ -1567,14 +1786,33 @@ def build_gates() -> list[dict]:
         # map's own summary.
         for k in ("doc", "doc_line", "doc_line_end"):
             entry.pop(k, None)
+        # A gate can speak from more than its own function: the text it hands
+        # over may be built by a helper it calls (``also``).
+        found: list[dict] = []
+        for module, qualname in [(spec["module"], spec["symbol"])] + spec.get("also", []):
+            for m in gate_messages(module, qualname):
+                if not any((m["file"], m["line"]) == (f["file"], f["line"]) for f in found):
+                    found.append(m)
+        for module, name in spec.get("constants", []):
+            found_c = _module_str_constant(PKG / module, name)
+            if found_c and not any(f.get("constant") == name for f in found):
+                assign, value = found_c
+                found.append({"text": value, "constant": name,
+                              "file": _rel(PKG / module), "line": assign.lineno,
+                              "line_end": assign.end_lineno, "source_expr": name})
+        found.sort(key=lambda m: (m["file"], m["line"]))
+        entry.pop("also", None)
+        entry.pop("constants", None)
         entry["messages"] = [
             dict(m, edit={
-                "ok": True, "mode": "message",
+                # A named constant is edited as the whole assignment, like any
+                # other span cited from the AST; a returned expression in place.
+                "ok": True, "mode": "constant" if m.get("constant") else "message",
                 "key": "{}:{}-{}".format(m["file"].replace("/", "~"),
                                          m["line"], m["line_end"]),
                 "file": m["file"], "line": m["line"], "line_end": m["line_end"],
             })
-            for m in gate_messages(spec["module"], spec["symbol"])
+            for m in found
         ]
         out.append(entry)
     out.sort(key=lambda g: (g["done_order"] is None, g["done_order"] or 0, g["title"]))
@@ -1602,6 +1840,8 @@ def build(*, stamp: bool = False) -> dict:
                    for b in shared],
         "done_chain": done_chain(),
         "switches": _switches(),
+        "reflection": build_reflection(),
+        "changelog": CHANGELOG,
     }
     if stamp:
         try:
