@@ -241,29 +241,47 @@ class DelegationLog:
         """Retroactively flag an existing record as a falsification ATTEMPT of
         hypothesis_id (the read-time post-hoc link).
 
+        Appends a PATCH row -- ``{"id", "patch": {...}, "ts"}`` -- rather than
+        rewriting the log. A full-row rewrite (this method's original
+        implementation) reads ``_load_all()``'s collapsed view, so a
+        concurrent write racing it is a real regression, not a hypothetical:
+        if delegation D003 is still RUNNING when this method's own
+        ``_load_all()`` call loads it, and D003's real terminal DONE row
+        lands on disk before this method's rewrite completes, the rewrite
+        would silently regress D003 back to RUNNING, discarding a real
+        completion. A patch row can never regress anything -- it carries no
+        ``status`` of its own, so it is never mistaken for one (see
+        ``_load_all``'s explicit skip), and it is invisible to nothing: every
+        other id's RUNNING/OPEN_FOR_REVIEW/DONE history stays exactly as
+        appended, which the previous rewrite-in-place implementation
+        silently destroyed for every OTHER delegation in the log too, not
+        just this one (real run: 20260928T012945 -- one post-hoc link on
+        D003 erased D001's and D002's own RUNNING/OPEN_FOR_REVIEW rows).
+
         Sets is_falsification_attempt=True, adds hypothesis_id to its
-        hypothesis_ids, and stamps attempt_linked_post_hoc=True so the critic
-        scrutinises adequacy harder than a flag declared up front at delegate
-        time. Rewrites the (small) append-only log in place under the lock.
-        Returns True iff a matching record was updated.
+        hypothesis_ids (merged at read time in ``_load_all``, not here --
+        the patch carries the single ``hypothesis_id``, not a pre-merged
+        list, so it means the same thing regardless of read order relative
+        to other patches), and stamps attempt_linked_post_hoc=True so the
+        critic scrutinises adequacy harder than a flag declared up front at
+        delegate time. Returns True iff a matching record exists to patch.
         """
         with self._lock:
             records = self._load_all()
-            updated = False
-            for r in records:
-                if r.get("id") == delegation_id:
-                    r["is_falsification_attempt"] = True
-                    hids = r.get("hypothesis_ids") or []
-                    if hypothesis_id not in hids:
-                        hids = [*hids, hypothesis_id]
-                    r["hypothesis_ids"] = hids
-                    r["attempt_linked_post_hoc"] = True
-                    updated = True
-            if updated:
-                with self._path.open("w", encoding="utf-8") as f:
-                    for r in records:
-                        f.write(json.dumps(r) + "\n")
-            return updated
+            if not any(r.get("id") == delegation_id for r in records):
+                return False
+            patch_row = {
+                "id": delegation_id,
+                "patch": {
+                    "is_falsification_attempt": True,
+                    "attempt_linked_post_hoc": True,
+                    "hypothesis_id": hypothesis_id,
+                },
+                "ts": _now_iso(),
+            }
+            with self._path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(patch_row) + "\n")
+            return True
 
     def query_all(self) -> list[dict]:
         """Return every record, oldest-first."""
@@ -271,14 +289,26 @@ class DelegationLog:
             return self._load_all()
 
     def _load_all(self) -> list[dict]:
-        """Load all records, COLLAPSED to one per delegation id (last write wins).
+        """Load all records, COLLAPSED to one per delegation id (last write wins),
+        with every PATCH row for that id merged on top.
 
         A delegation is logged with a RUNNING entry at dispatch and a terminal
         (DONE/FAILED) entry at completion. Collapsing last-wins gives every
         consumer one record per id — the terminal record if it exists, else the
         RUNNING entry that keeps a cancelled/killed delegation's ledger rows
-        traceable. Ordered by the position of each id's latest write so
+        traceable. Ordered by the position of each id's latest STATUS write so
         completion order is preserved (last_completed_id stays correct).
+
+        A PATCH row (``mark_attempt``'s ``{"id", "patch": {...}, "ts"}``) never
+        counts as a status write — it carries no ``status`` of its own, so it
+        is excluded from the collapse above and instead applied on TOP of
+        whichever status row wins, regardless of the patch's own position in
+        the file relative to that row (a link that lands while a delegation is
+        still RUNNING, followed later by its real DONE, still ends up DONE
+        with the attempt flags set — the patch is never itself mistaken for
+        the delegation's current state). ``hypothesis_id`` in a patch is
+        merged into the collapsed record's ``hypothesis_ids`` list rather than
+        replacing it, since more than one patch can target the same id.
 
         Must be called under lock or in a read-only context.
         """
@@ -287,6 +317,7 @@ class DelegationLog:
         lines = self._path.read_text(encoding="utf-8").strip().splitlines()
         latest: dict[str, dict] = {}
         order: dict[str, int] = {}
+        patches: dict[str, list[dict]] = {}
         for i, line in enumerate(lines):
             line = line.strip()
             if not line:
@@ -298,6 +329,23 @@ class DelegationLog:
             rid = r.get("id")
             if rid is None:
                 continue
+            if "patch" in r:
+                patches.setdefault(rid, []).append(r["patch"])
+                continue
             latest[rid] = r
             order[rid] = i
-        return [latest[k] for k in sorted(latest, key=lambda k: order[k])]
+        out = []
+        for k in sorted(latest, key=lambda k: order[k]):
+            rec = dict(latest[k])
+            for patch in patches.get(k, ()):
+                hid = patch.get("hypothesis_id")
+                if hid is not None:
+                    hids = rec.get("hypothesis_ids") or []
+                    if hid not in hids:
+                        hids = [*hids, hid]
+                    rec["hypothesis_ids"] = hids
+                for pk, pv in patch.items():
+                    if pk != "hypothesis_id":
+                        rec[pk] = pv
+            out.append(rec)
+        return out

@@ -270,6 +270,14 @@ def _delegation_diagnostics_summary(debug: Path) -> tuple[dict, dict]:
                 r = json.loads(ln)
             except Exception:
                 continue
+            # A PATCH row (DelegationLog.mark_attempt) carries no to_node/
+            # status of its own -- reading it here the same as a real
+            # status row would overwrite this id's last known state with
+            # "None:None" whenever a patch happens to be the LAST line for
+            # that id, which a post-hoc falsification-attempt link (a
+            # normal, expected agent action) makes routine, not rare.
+            if "patch" in r:
+                continue
             delg[r.get("id")] = f"{r.get('to_node')}:{r.get('status')}"
 
     diag: dict = {}

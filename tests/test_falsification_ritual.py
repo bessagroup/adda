@@ -112,6 +112,103 @@ def test_mark_attempt_unknown_id_returns_false(tmp_path):
     assert dlog.mark_attempt("D999", "H1") is False
 
 
+def test_mark_attempt_is_append_only_other_ids_history_survives(tmp_path):
+    """mark_attempt must never rewrite the log -- a post-hoc link on ONE
+    delegation used to silently erase every OTHER delegation's own RUNNING/
+    OPEN_FOR_REVIEW/DONE history too (real run 20260928T012945: linking D003
+    erased D001's and D002's rows). Reproduces the exact shape: two prior
+    delegations each with a RUNNING row then a terminal row on disk, a third
+    linked post-hoc -- every raw line written before the link must still be
+    on disk afterward, verbatim, plus exactly one new (patch) line."""
+    path = tmp_path / "dlog.jsonl"
+    dlog = DelegationLog(path)
+    dlog.record_started(
+        id="D001", from_node="s", to_node="i", task="t1",
+        hypothesis_ids=["H1"], started_at="t0")
+    dlog.record(
+        id="D001", from_node="s", to_node="i", task="t1", deliverable="d1",
+        hypothesis_ids=["H1"], started_at="t0", completed_at="t1",
+        status="DONE")
+    dlog.record_started(
+        id="D002", from_node="s", to_node="i", task="t2",
+        hypothesis_ids=["H1"], started_at="t0")
+    dlog.record(
+        id="D002", from_node="s", to_node="i", task="t2", deliverable="d2",
+        hypothesis_ids=["H1"], started_at="t0", completed_at="t1",
+        status="DONE")
+    dlog.record_started(
+        id="D003", from_node="s", to_node="i", task="t3",
+        hypothesis_ids=[], started_at="t0")
+    dlog.record(
+        id="D003", from_node="s", to_node="i", task="t3", deliverable="d3",
+        hypothesis_ids=[], started_at="t0", completed_at="t1", status="DONE")
+
+    lines_before = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines_before) == 6  # 2 rows each for D001/D002/D003
+
+    assert dlog.mark_attempt("D003", "H2") is True
+
+    lines_after = path.read_text(encoding="utf-8").splitlines()
+    # Append-only: every line written before the link is still there,
+    # unchanged, in the same order -- nothing was rewritten.
+    assert lines_after[:6] == lines_before
+    assert len(lines_after) == 7  # exactly one new (patch) line appended
+
+    # The merged view is still correct for everyone, D003 included.
+    by_id = {r["id"]: r for r in dlog.query_all()}
+    assert by_id["D001"]["status"] == "DONE"
+    assert by_id["D002"]["status"] == "DONE"
+    assert by_id["D003"]["status"] == "DONE"
+    assert by_id["D003"]["is_falsification_attempt"] is True
+    assert "H2" in by_id["D003"]["hypothesis_ids"]
+
+
+def test_mark_attempt_race_with_a_concurrent_completion_does_not_regress_status(
+    tmp_path,
+):
+    """A link that lands while the record is still RUNNING, followed later
+    by its real DONE, must still collapse to DONE with the attempt flags
+    set -- never regress to RUNNING because the patch happened to be
+    written between the two status rows."""
+    path = tmp_path / "dlog.jsonl"
+    dlog = DelegationLog(path)
+    dlog.record_started(
+        id="D001", from_node="s", to_node="i", task="t",
+        hypothesis_ids=[], started_at="t0")
+
+    assert dlog.mark_attempt("D001", "H1") is True  # still RUNNING here
+
+    dlog.record(
+        id="D001", from_node="s", to_node="i", task="t", deliverable="d",
+        hypothesis_ids=[], started_at="t0", completed_at="t1",
+        status="DONE")
+
+    rec = dlog.query_all()[0]
+    assert rec["status"] == "DONE"
+    assert rec["is_falsification_attempt"] is True
+    assert rec["attempt_linked_post_hoc"] is True
+    assert "H1" in rec["hypothesis_ids"]
+
+
+def test_watchdog_summary_sees_the_merged_view_not_the_raw_patch_row(tmp_path):
+    """watchdog_cleanup._delegation_diagnostics_summary reads the log
+    RAW (disk-only, no DelegationLog construction, for crash-path
+    safety) -- it must not mistake a trailing patch row (no status of
+    its own) for this delegation's current state."""
+    from adda._src.infra.watchdog_cleanup import _delegation_diagnostics_summary
+
+    debug = tmp_path / "debug"
+    debug.mkdir()
+    dlog = DelegationLog(debug / "delegation_log.jsonl")
+    dlog.record(
+        id="D001", from_node="s", to_node="i", task="t", deliverable="d",
+        hypothesis_ids=[], started_at="t0", completed_at="t1", status="DONE")
+    assert dlog.mark_attempt("D001", "H1") is True  # patch is now the LAST line
+
+    delg, _diag = _delegation_diagnostics_summary(debug)
+    assert delg["D001"] == "i:DONE"
+
+
 # --------------------------------------------------------------------------
 # 2. HypothesisUpdate(falsification_attempt=True) — the post-hoc link
 # --------------------------------------------------------------------------
