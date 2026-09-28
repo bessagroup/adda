@@ -46,6 +46,8 @@ before. Until one is answered or closed, treat it as known, not news.
 - [ ] **#3** ProblemDefinerAgent pre-strategizer intake stage — *deferred*
 - [ ] **#20** Open design-space discovery (agent invents new low-D parametrizations) — *spec approved, §4 user-owned, awaiting 2D experiment* — see [`OPEN_DESIGN_SPACE_FRAMEWORK.md`](OPEN_DESIGN_SPACE_FRAMEWORK.md); branch `exp/open-design-space`
 - [ ] **#23** Rename `literature_reviewer` → `consultant` + give it live-web tools so it answers tech-stack/API/doc questions, not only academic literature — *spec, not built (user decision 2026-06-30)* — see §23 below
+- [ ] **#45** `SummarizeDelegations` — a git-timeline-derived delegation summary tool — *idea, not an approved design* — see §45 below
+- [ ] **#46** Cross-run hypothesis ledger, study-scoped by default — *idea, not an approved design* — see §46 below
 
 ---
 
@@ -606,3 +608,56 @@ no science_monitor / charter / critic-criteria / budget change. Build under the
 normal contract (headless test first: assert the renamed node + edges resolve,
 the new tools appear in the catalog, and both preamble/guidance render; e2e
 behavior-only last).
+
+## 45. `SummarizeDelegations` — a git-timeline-derived delegation summary tool
+
+**Status: idea, not an approved design.**
+
+Every delegation is already git-tracked (the workspace repo under
+`debug/delegations/`, one commit per delegation). A tool, working name
+`SummarizeDelegations`, would return a `tree`-like view of what each
+delegation/turn did — id, target, task one-liner, outcome/status, key
+result, and a pointer to its own report — capped in size.
+
+**Motivation.** Summarizing prior work, both within a run (a strategizer
+catching up mid-run) and at a warm start (a new run picking up an existing
+study's `runs/` history), currently relies on free-text notes
+(`final_results.md`, delegation reports) an agent has to read individually.
+A structural, git-timeline-derived summary would be cheaper and more
+reliable than re-deriving this from prose every time.
+
+**Not designed yet** — open questions before this becomes a spec: what
+exactly counts as "key result" per delegation (there is no single typed
+field for it today — evals, headline value, and hypothesis outcome are
+each tracked separately); how the cap is chosen (row count? char budget?
+most-recent-N?); whether it reads `delegation_log.jsonl` (already
+structured, no git needed) instead of walking git history at all, since
+the log already carries `id`/`to_node`/`task`/`status`/`evals` — git may
+only add the workspace-diff angle the log doesn't have. Needs a spec
+before implementation.
+
+## 46. Cross-run hypothesis ledger, study-scoped by default
+
+**Status: idea, not an approved design.**
+
+Make the hypothesis ledger study-scoped across runs by default, the way
+`runs/lit_reviewer_notes/` already is. `HypothesisList` keeps its current
+per-run behaviour by default, and gains an optional `previous=True` that
+also returns prior runs' hypotheses: status, posterior, run id, and the
+oracle/problem-statement version each was judged under — because an old
+verdict may be stale once the oracle or the problem statement changes.
+The answer must be capped (ranked by relevance/recency) so it can't bloat
+context.
+
+**Warm-start isolation stays manual**, consistent with every other piece of
+run-scoped state in this system: the ledger must live under `runs/`, so
+wiping `runs/` wipes it — no separate isolation mechanism for this one
+piece of state.
+
+**Not designed yet** — open questions: what "oracle/problem-statement
+version" means concretely (a hash of `PROBLEM_STATEMENT.md` + the
+evaluator entrypoint's source? something coarser?); how relevance is
+scored for the ranked cap; whether a hypothesis that was SUPPORTED under a
+now-changed oracle should be flagged distinctly from one still under the
+current oracle, or just carry its judged-under version and leave the
+distinction to the reading agent. Needs a spec before implementation.
