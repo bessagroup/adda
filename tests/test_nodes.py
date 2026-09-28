@@ -428,11 +428,28 @@ def test_strategizer_delegate_prepends_edge_preamble():
 
 
 def test_parallel_two_delegations_both_complete():
-    """Strategizer can fire two delegations concurrently; both complete and are counted."""
-    import time
+    """Strategizer can fire two delegations concurrently; both complete and are counted.
+
+    Deterministic, not sleep-and-hope: each worker blocks on a
+    threading.Event the test sets only AFTER both Delegate() calls have
+    returned, so neither worker can possibly finish (and race ahead to
+    OpenForReview under the default peer_interaction) before the second
+    Delegate() call's own open-review check runs -- the exact race that
+    lost 4 macOS CI legs on test_delegate_decodes_json_and_comma_string_
+    hypothesis_ids (commit 1012192), which a 0.05s sleep margin here
+    would eventually lose the same way under a loaded runner. This is
+    also real product behaviour, by design: two Delegate() calls issued
+    in one turn only both succeed if the first hasn't already reached
+    review.
+    """
+    import re
+    import threading
     from adda._src.nodes import Node
 
+    from .fixtures import approve_delegation
+
     call_log: list[str] = []
+    both_dispatched = threading.Event()
 
     class LoggingWorkerAdapter(StubAdapter):
         def __init__(self, name: str) -> None:
@@ -440,8 +457,9 @@ def test_parallel_two_delegations_both_complete():
             self._name = name
 
         def invoke(self, messages: list) -> str:
+            assert both_dispatched.wait(timeout=5), (
+                "both_dispatched was never set -- test setup is broken")
             call_log.append(self._name)
-            time.sleep(0.05)
             return (
                 f"## Report\n### Actions taken\nDone {self._name}.\n"
                 f"### Files touched\n(none)\n### Conclusions\n{self._name} completed successfully.\n### Numbers\nn: 1"
@@ -449,16 +467,20 @@ def test_parallel_two_delegations_both_complete():
 
     class TwoDelegateAdapter(StubAdapter):
         def invoke(self, messages):
-            self.closure_tools["Delegate"](target="worker_a", intent="Task A", expected_report="")
-            self.closure_tools["Delegate"](target="worker_b", intent="Task B", expected_report="")
-            # Let both workers finish. Each sleeps 0.05s, so this margin is a
-            # 3x safety factor under light load — not enough on a contended CI
-            # runner (observed flake: macos-latest/3.13, 2026-07-13, "assert
-            # cmd.goto == END" got 'strategizer' instead — a delegation was
-            # still pending when Done() fired). Bumped to a much wider margin;
-            # this polls a fixed sleep rather than a completion signal, so it
-            # is still probabilistic, just far less likely to flake.
-            time.sleep(1.0)
+            r_a = self.closure_tools["Delegate"](
+                target="worker_a", intent="Task A", expected_report="")
+            r_b = self.closure_tools["Delegate"](
+                target="worker_b", intent="Task B", expected_report="")
+            both_dispatched.set()
+            did_a = re.search(r"D\d{3}", r_a).group()
+            did_b = re.search(r"D\d{3}", r_b).group()
+            # Collect deterministically (block=True is the default) rather
+            # than a blind sleep -- returns the moment each worker actually
+            # finishes, however long that takes.
+            self.closure_tools["Wait"](did_a)
+            self.closure_tools["Wait"](did_b)
+            approve_delegation(self.closure_tools, did_a)
+            approve_delegation(self.closure_tools, did_b)
             result = self.closure_tools["Done"](summary="Both done.")  # first: warning
             assert "ERROR" not in result, f"Done() failed: {result}"
             self.closure_tools["Done"](summary="Both done.")  # second: accepted
