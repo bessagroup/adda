@@ -735,6 +735,147 @@ def test_supersede_replaces_stale_row_net_count_preserving(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Submitted-key fix: an evaluator-stamped kwarg must never split or hide a
+# design's identity (real bug, run 20260927T012131 -- D011's bo/datagen.py
+# stamped an override kwarg into experiment_sample._input_data as a side
+# effect of execute(); the old coord key, computed on the buffered/stored
+# sample AFTER that stamp, differed between a failed run and its corrected
+# re-evaluation, so supersede() silently left the stale row in the store
+# alongside the corrected one, and a plain retry with a different stamped
+# value was never recognised as a duplicate either).
+# ---------------------------------------------------------------------------
+
+
+class _StampingGenerator(DataGenerator):
+    """Mirrors D011's pattern: an override kwarg gets written INTO the
+    sample's _input_data as a side effect of execute(), never part of what
+    the caller originally submitted."""
+
+    def execute(self, experiment_sample, **kwargs):
+        override = kwargs.get("override")
+        if override is not None:
+            experiment_sample._input_data["override"] = override
+        experiment_sample._output_data["f"] = (
+            -999.0 if override == "K1" else 42.0)
+        experiment_sample.job_status = JobStatus.FINISHED
+        return experiment_sample
+
+
+def test_supersede_replaces_stale_row_despite_a_stamped_override_kwarg(
+    tmp_path,
+):
+    """The (a) repro: after supersede with a DIFFERENT stamped override,
+    exactly 1 row survives, carrying the corrected value -- the stale row
+    (stamped with the original, failed override) must not remain."""
+    from adda._src.evaluation.instrumented import InstrumentedDataGenerator
+
+    bad = InstrumentedDataGenerator(
+        inner=_StampingGenerator(), store_dir=tmp_path,
+        delegation_id="D001", flush_every=1)
+    bad.execute(_make_sample(0.5), override="K1")   # bad config -> f=-999.0
+
+    fixer = InstrumentedDataGenerator(
+        inner=_StampingGenerator(), store_dir=tmp_path,
+        delegation_id="D002", flush_every=1)
+    fixer.supersede(_make_sample(0.5), override="K2")  # corrected -> f=42.0
+
+    df_in, df_out = ExperimentData.from_file(project_dir=tmp_path).to_pandas()
+    assert len(df_out) == 1, (
+        f"stale row survived alongside the corrected one: "
+        f"{df_out.to_dict('records')}")
+    assert float(df_out["f"].iloc[0]) == 42.0
+
+
+def test_dedup_on_write_recognises_a_retry_with_a_different_stamped_kwarg(
+    tmp_path,
+):
+    """A plain retry (not supersede) of the same submitted design, whose
+    evaluator stamps a DIFFERENT override the second time, must still be
+    recognised as a duplicate -- the retry-duplication class ("~30h/2-
+    designs") that a naive per-row-including-stamped-columns key
+    reintroduces the moment any evaluator stamps a kwarg."""
+    from adda._src.evaluation.instrumented import InstrumentedDataGenerator
+
+    gen = InstrumentedDataGenerator(
+        inner=_StampingGenerator(), store_dir=tmp_path,
+        delegation_id="D001", flush_every=1)
+    gen.execute(_make_sample(0.5), override="K1")
+    gen.execute(_make_sample(0.5), override="K2")  # retry, different stamp
+
+    df_in, df_out = ExperimentData.from_file(project_dir=tmp_path).to_pandas()
+    assert len(df_out) == 1, (
+        f"retry was not recognised as a duplicate: "
+        f"{df_out.to_dict('records')}")
+
+
+def test_a_genuinely_submitted_extra_input_still_distinguishes_two_designs(
+    tmp_path,
+):
+    """The fix must not erase real design dimensions -- an extra column the
+    CALLER submits as part of _input_data from the start (never stamped by
+    the evaluator) still makes two designs genuinely different."""
+    from adda._src.evaluation.instrumented import InstrumentedDataGenerator
+
+    class _Plain(DataGenerator):
+        def execute(self, experiment_sample, **kwargs):
+            experiment_sample._output_data["f"] = (
+                experiment_sample._input_data.get("num_eigen", 0) * 1.0)
+            experiment_sample.job_status = JobStatus.FINISHED
+            return experiment_sample
+
+    def _sample_with_eigen(x0, num_eigen):
+        return ExperimentSample(
+            _input_data={"x0": x0, "num_eigen": num_eigen},
+            _output_data={}, job_status=JobStatus.OPEN)
+
+    gen = InstrumentedDataGenerator(
+        inner=_Plain(), store_dir=tmp_path, delegation_id="D001",
+        flush_every=1)
+    gen.execute(_sample_with_eigen(0.5, 5))
+    gen.execute(_sample_with_eigen(0.5, 10))
+
+    df_in, df_out = ExperimentData.from_file(project_dir=tmp_path).to_pandas()
+    assert len(df_out) == 2, (
+        "a genuinely submitted extra input was collapsed as a duplicate: "
+        f"{df_in.to_dict('records')}")
+    assert sorted(df_in["num_eigen"]) == [5.0, 10.0]
+
+
+def test_submitted_key_fix_never_crosses_namespaces(tmp_path):
+    """Each design namespace is its own store_dir (get_evaluator(namespace=)
+    resolves a distinct nested store) -- the subset-match fix must never
+    reach into a DIFFERENT namespace's rows just because a generator is
+    reused across them. Two separate InstrumentedDataGenerators, two
+    separate store_dirs, sharing the same stamping evaluator: a supersede
+    in one must not touch the other's stale row."""
+    from adda._src.evaluation.instrumented import InstrumentedDataGenerator
+
+    ns_a = tmp_path / "ns_a"
+    ns_b = tmp_path / "ns_b"
+
+    bad_a = InstrumentedDataGenerator(
+        inner=_StampingGenerator(), store_dir=ns_a,
+        delegation_id="D001", flush_every=1)
+    bad_a.execute(_make_sample(0.5), override="K1")
+
+    bad_b = InstrumentedDataGenerator(
+        inner=_StampingGenerator(), store_dir=ns_b,
+        delegation_id="D001", flush_every=1)
+    bad_b.execute(_make_sample(0.5), override="K1")
+
+    fixer_a = InstrumentedDataGenerator(
+        inner=_StampingGenerator(), store_dir=ns_a,
+        delegation_id="D002", flush_every=1)
+    fixer_a.supersede(_make_sample(0.5), override="K2")
+
+    _, df_out_a = ExperimentData.from_file(project_dir=ns_a).to_pandas()
+    _, df_out_b = ExperimentData.from_file(project_dir=ns_b).to_pandas()
+    assert len(df_out_a) == 1 and float(df_out_a["f"].iloc[0]) == 42.0
+    # ns_b's row is untouched by ns_a's supersede -- still the stale K1 value.
+    assert len(df_out_b) == 1 and float(df_out_b["f"].iloc[0]) == -999.0
+
+
+# ---------------------------------------------------------------------------
 # mode="parallel" host-safety hard cap
 # ---------------------------------------------------------------------------
 

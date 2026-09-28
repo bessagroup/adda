@@ -48,6 +48,37 @@ __status__ = "Experimental"
 _PROVENANCE_COLS = frozenset({"_delegation_id", "_source", "_ts", "_wall_ms"})
 
 
+def _round_coord(v):
+    """The one float-tolerance rule every coordinate-key comparison in this
+    module uses: 10dp, unchanged by the submitted-key fix below — the
+    known float-precision behavior stays exactly what it was."""
+    try:
+        return round(float(v), 10)
+    except (TypeError, ValueError):
+        return v
+
+
+def _row_matches_submitted_key(key: tuple, row: dict) -> bool:
+    """True iff ``row`` (a dict of column -> value, e.g. one canonical store
+    row) agrees with ``key`` (an ``InstrumentedDataGenerator._coord_key``-
+    shaped tuple) on every column the key names -- ignoring any OTHER
+    column ``row`` happens to carry.
+
+    This is the asymmetric half of the submitted-key fix: a canonical row
+    written when an evaluator stamped an extra column (e.g. a solver
+    config kwarg) still has that column forever, but the CALLER's
+    identity for a design was only ever what it submitted. A stored row
+    with an extra stamped column must still be found by a submitted key
+    that does not mention it -- the opposite of exact-tuple equality,
+    which is why this can't reuse ``==`` against ``_coord_key(row)``."""
+    for col, val in key:
+        if col not in row:
+            return False
+        if _round_coord(row[col]) != val:
+            return False
+    return True
+
+
 # ==========================================================================
 
 
@@ -137,6 +168,11 @@ class InstrumentedDataGenerator(DataGenerator):
         self.lock_path = Path(lock_path)
 
         self._buffer: list[ExperimentSample] = []
+        # Parallel to self._buffer: each entry's SUBMITTED coord key, captured
+        # in execute() BEFORE inner.execute runs -- never recomputed from the
+        # buffered sample afterward, which could include a column the
+        # evaluator stamped as a side effect (see _coord_key's own docstring).
+        self._buffer_keys: list[tuple] = []
         # Designs (coord keys) queued for SUPERSEDE via supersede(): their stale
         # canon rows are dropped at flush so a corrected re-eval replaces them.
         self._supersede_keys: set = set()
@@ -194,6 +230,11 @@ class InstrumentedDataGenerator(DataGenerator):
             The evaluated sample (with provenance stamped into
             ``_output_data``).
         """
+        # Captured BEFORE inner.execute runs -- an evaluator that stamps a
+        # solver-config kwarg into experiment_sample._input_data as a side
+        # effect must not make that column part of this design's identity
+        # (see _coord_key's own docstring; real bug, run 20260927T012131).
+        _submitted_key = self._coord_key(experiment_sample._input_data)
         _t0 = time.perf_counter()
         out = self.inner.execute(experiment_sample, **kwargs)
         _wall_ms = (time.perf_counter() - _t0) * 1000.0
@@ -224,6 +265,7 @@ class InstrumentedDataGenerator(DataGenerator):
         out.mark("finished")
 
         self._buffer.append(deepcopy(out))
+        self._buffer_keys.append(_submitted_key)
 
         if len(self._buffer) >= self.flush_every:
             self._flush()
@@ -331,6 +373,7 @@ class InstrumentedDataGenerator(DataGenerator):
             self._record_dedup(n_skipped)
 
         self._buffer.clear()
+        self._buffer_keys.clear()
         self._supersede_keys.clear()
 
     @staticmethod
@@ -338,23 +381,43 @@ class InstrumentedDataGenerator(DataGenerator):
         """Order-independent design key: (col, value) pairs over the
         non-provenance inputs, values rounded to 10dp — the same convention
         ``duplicate_eval_stats`` and the reproduction gate use, so dedup-on-write
-        matches duplicate DETECTION exactly."""
-        def _r(v):
-            try:
-                return round(float(v), 10)
-            except (TypeError, ValueError):
-                return v
+        matches duplicate DETECTION exactly.
+
+        MUST be called on ``input_data`` as the CALLER submitted it, before
+        ``inner.execute`` runs — never on a row already written to the
+        canonical store, and never on a buffered sample after execute() has
+        returned. An evaluator that stamps a solver-config kwarg into
+        ``experiment_sample._input_data`` as a side effect (e.g. ``if
+        "num_eigen" in kwargs: sample._input_data["num_eigen"] = ...``) makes
+        that column present ONLY after execute() -- a key computed from the
+        post-execute sample would include it, but the key that gets matched
+        against (see ``_row_matches_submitted_key``) must not, or a corrected
+        re-evaluation with a different stamped value can never match its own
+        stale row (real bug, run 20260927T012131: supersede() silently left
+        the stale row in place because its own tracked key, captured after
+        the stamp, no longer equaled the stored row's)."""
         return tuple(sorted(
-            (str(k), _r(v)) for k, v in input_data.items()
+            (str(k), _round_coord(v)) for k, v in input_data.items()
             if k not in _PROVENANCE_COLS))
 
     def _drop_duplicate_buffer(self, canon) -> int:
         """Filter ``self._buffer`` in place to designs not already present in
         ``canon`` and not repeated earlier in the buffer (keep-first). Returns
         the count dropped. Best-effort: any failure leaves the buffer intact so
-        the eval path never loses data to a dedup bug."""
+        the eval path never loses data to a dedup bug.
+
+        Matches canon rows via ``_row_matches_submitted_key`` (subset match
+        on each buffered sample's PRE-STAMP ``self._buffer_keys`` entry, not
+        a freshly-recomputed key from the possibly-stamped buffered sample)
+        for the same reason ``_drop_canon_rows`` (supersede) does: a re-
+        execute of the same submitted design with a DIFFERENT evaluator-
+        stamped kwarg must still be recognised as a duplicate of what was
+        SUBMITTED, or a retried/relaunched campaign re-appends it as a
+        "new" design every time — the retry-duplication class that burned
+        ~30h/2-designs in an earlier run, now reachable again through any
+        evaluator that stamps kwargs (run 20260927T012131)."""
         try:
-            seen: set = set()
+            canon_rows: list[dict] = []
             if canon is not None:
                 df_in, df_out = canon.to_pandas()
                 if df_in is not None and not df_in.empty:
@@ -377,17 +440,21 @@ class InstrumentedDataGenerator(DataGenerator):
                         df_in = df_in[mine]
                     cols = [c for c in df_in.columns
                             if c not in _PROVENANCE_COLS]
-                    for rec in df_in[cols].to_dict("records"):
-                        seen.add(self._coord_key(rec))
-            survivors = []
-            for s in self._buffer:
-                k = self._coord_key(s._input_data)
-                if k in seen:
+                    canon_rows = df_in[cols].to_dict("records")
+            survivors: list[ExperimentSample] = []
+            survivor_keys: list[tuple] = []
+            seen_in_batch: set = set()
+            for s, k in zip(self._buffer, self._buffer_keys, strict=True):
+                if (k in seen_in_batch
+                        or any(_row_matches_submitted_key(k, row)
+                               for row in canon_rows)):
                     continue
-                seen.add(k)
+                seen_in_batch.add(k)
                 survivors.append(s)
+                survivor_keys.append(k)
             n = len(self._buffer) - len(survivors)
             self._buffer = survivors
+            self._buffer_keys = survivor_keys
             return n
         except Exception:  # noqa: BLE001
             return 0
@@ -458,11 +525,26 @@ class InstrumentedDataGenerator(DataGenerator):
             pass
 
     def _drop_canon_rows(self, canon, keys: set):
-        """canon minus every row whose design (coord key) is in ``keys``, rebuilt
-        via the same from_data(samples, domain) idiom the flush path uses. Kept
-        rows are re-stamped FINISHED (they were) so the FINISHED-regression guard
-        passes. Best-effort: on any error returns canon unchanged (the new row
-        then merely appends — visible and safe, never lost)."""
+        """canon minus every row that MATCHES (subset match, via
+        ``_row_matches_submitted_key`` -- not exact-tuple equality) one of
+        ``keys``, rebuilt via the same from_data(samples, domain) idiom the
+        flush path uses. Kept rows are re-stamped FINISHED (they were) so
+        the FINISHED-regression guard passes. Best-effort: on any error
+        returns canon unchanged (the new row then merely appends — visible
+        and safe, never lost).
+
+        Subset match, not ``_coord_key(row) == key``: a canon row's OWN
+        recorded columns can include one an evaluator stamped as a side
+        effect (e.g. a solver config kwarg written into
+        ``experiment_sample._input_data`` during ``inner.execute``), which
+        was never part of what the caller SUBMITTED and so is never part of
+        a key in ``keys`` either (those are captured pre-stamp — see
+        ``execute``/``supersede``). Comparing on exactly the key's own
+        columns, ignoring whatever else the row carries, is what lets a
+        corrected re-evaluation with a DIFFERENT stamped value still find
+        and replace its own stale row (real bug, run 20260927T012131: the
+        old exact-tuple match never found it, so the stale row survived
+        alongside the corrected one)."""
         try:
             df_in, df_out = canon.to_pandas()
             if df_in is None or df_in.empty:
@@ -472,7 +554,8 @@ class InstrumentedDataGenerator(DataGenerator):
             samples: dict[int, ExperimentSample] = {}
             j = 0
             for i in range(len(df_out)):
-                if self._coord_key(df_in.iloc[i].to_dict()) in keys:
+                row = df_in.iloc[i].to_dict()
+                if any(_row_matches_submitted_key(k, row) for k in keys):
                     continue
                 s = ExperimentSample(
                     _input_data={c: df_in.iloc[i][c] for c in in_cols},
