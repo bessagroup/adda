@@ -110,6 +110,7 @@ def resolve_target(
 # SendMessage(wait_for_reply=True) on that delegation must wake on this too,
 # not only on a reply arriving.
 _TERMINAL_STATUSES = frozenset({"Done", "Errored", "Cancelled"})
+_NO_SESSION_REPORT: Any = object()
 
 
 def _peer_message_timeout() -> float:
@@ -436,6 +437,10 @@ class WorkerSession:
         self.phase = phase
         self.namespace = namespace
         self.started_at = started_at
+        # This delegation's OWN session id, handed back by each worker.invoke
+        # from inside the adapter's lock (see ClaudeAdapter.invoke's
+        # ``on_session_end``); _NO_SESSION_REPORT until an invoke reports one.
+        self._own_session_id: Any = _NO_SESSION_REPORT
         # Honour-system eval count, set by ReportEvals; reconciled against the
         # provenance-stamped ledger rows before it is believed.
         self.claimed_evals: int = 0
@@ -631,6 +636,27 @@ class WorkerSession:
                 node._current_notes_dir.parent / "transcripts"
                 / f"{self.delegation_id}.jsonl"))
 
+    def _capture_session_id(self, session_id: str | None) -> None:
+        self._own_session_id = session_id
+
+    def _worker_invoke(
+        self, messages: list[dict], *, first: bool = False, **kw: Any,
+    ) -> str:
+        """worker.invoke with this delegation's per-call callbacks attached.
+
+        ``on_session_end`` returns this call's session id from inside the
+        adapter's lock; ``first`` additionally attaches ``on_session_start``
+        (the queued->started patch). A worker whose invoke accepts neither
+        (an older/custom stub) falls back to a plain call.
+        """
+        cbs: dict[str, Any] = {"on_session_end": self._capture_session_id}
+        if first:
+            cbs["on_session_start"] = self._mark_session_started_if_queued
+        try:
+            return self.worker.invoke(messages, **kw, **cbs)
+        except TypeError:
+            return self.worker.invoke(messages, **kw)
+
     def _mark_session_started_if_queued(self) -> None:
         """Patch in the real session-start time, once, for a delegation that
         was dispatched QUEUED (registry/log session_started_at is None).
@@ -681,14 +707,7 @@ class WorkerSession:
         from ....prompts.agent_prompts import build_report_retry_prompt
 
         messages = [{"role": "user", "content": self.task_msg}]
-        try:
-            text = self.worker.invoke(
-                messages, on_session_start=self._mark_session_started_if_queued)
-        except TypeError:
-            # An adapter that doesn't accept on_session_start (an older or
-            # custom stub) -- fall back plainly; session_started_at then
-            # stays whatever dispatch set it to (same as before this fix).
-            text = self.worker.invoke(messages)
+        text = self._worker_invoke(messages, first=True)
 
         _req_sections = list(
             getattr(self.guard_agent, "report_sections", None) or []
@@ -712,7 +731,7 @@ class WorkerSession:
                     ),
                 },
             ]
-            text = self.worker.invoke(retry_messages)
+            text = self._worker_invoke(retry_messages)
         return text
 
     def _record_oracle_nudges(self) -> None:
@@ -893,7 +912,14 @@ class WorkerSession:
         row that supersedes it if and when approval actually happens.
         """
         node, delegation_id = self.node, self.delegation_id
-        session_id = getattr(self.worker, "last_session_id", None)
+        # This delegation's own id, captured inside the adapter's lock. NOT
+        # worker.last_session_id: that is shared adapter state a queued
+        # same-role delegation can overwrite once the lock is released.
+        session_id = (
+            self._own_session_id
+            if self._own_session_id is not _NO_SESSION_REPORT
+            else getattr(self.worker, "last_session_id", None)
+        )
         with node._registry_lock:
             entry = node._registry[delegation_id]
             entry.update({
@@ -1030,7 +1056,7 @@ class WorkerSession:
                 "no session_id was recorded for this delegation", None)
             return None
         try:
-            return self.worker.invoke(
+            return self._worker_invoke(
                 [{"role": "user", "content": wrapped_message}],
                 resume=session_id)
         except Exception as exc:  # noqa: BLE001
@@ -1057,7 +1083,7 @@ class WorkerSession:
             {"role": "ai", "content": prior_report},
             {"role": "user", "content": wrapped_message},
         ]
-        return self.worker.invoke(messages)
+        return self._worker_invoke(messages)
 
     def _finish_ok(
         self,

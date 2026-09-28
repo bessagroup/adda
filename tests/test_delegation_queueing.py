@@ -62,7 +62,7 @@ class _BlockingWorker:
         self.release = threading.Event()
         self.entered = threading.Event()
 
-    def invoke(self, messages, on_session_start=None):
+    def invoke(self, messages, on_session_start=None, on_session_end=None):
         with self._lock:
             if on_session_start is not None:
                 on_session_start()
@@ -178,3 +178,80 @@ def test_not_queued_when_no_same_role_delegation_is_running(tmp_path):
 
     out = tools["Delegate"]("implementer", "task A", "a report", wait=True)
     assert "QUEUED" not in out
+
+
+class _SessionWorker:
+    """Mirrors ClaudeAdapter's session-id mechanics: ONE shared adapter, a
+    real _lock, and last_session_id written at the END of each turn, inside
+    the lock, as shared adapter state. Each call gets its own session id
+    (S1, S2, ...) and reports it through on_session_end from inside the
+    lock, like the real backend."""
+
+    def __init__(self):
+        self.last_usage: dict = {}
+        self.closure_tools: dict = {}
+        self.last_session_id = None
+        self._lock = threading.Lock()
+        self._n = 0
+        self.by_thread: dict[int, str] = {}
+        self._first_thread: int | None = None
+        self.second_turn_done = threading.Event()
+
+    def invoke(self, messages, on_session_start=None, on_session_end=None):
+        with self._lock:
+            if on_session_start is not None:
+                on_session_start()
+            self._n += 1
+            sid = f"S{self._n}"
+            self.last_session_id = sid
+            tid = threading.get_ident()
+            self.by_thread[tid] = sid  # the LAST session this thread ran
+            if self._first_thread is None:
+                self._first_thread = tid
+            elif tid != self._first_thread:
+                self.second_turn_done.set()
+            if on_session_end is not None:
+                on_session_end(self.last_session_id)
+            return ("## Report\n### Actions taken\n"
+                    + "nothing further to do here. " * 4
+                    + "\n### Conclusions\nok\n### Numbers\nn: 0")
+
+
+def test_each_review_stores_its_own_session_id_not_the_shared_adapters(
+        tmp_path, monkeypatch):
+    """A same-role delegation queued behind another can run a WHOLE turn
+    between the first one's invoke() returning (lock released) and the
+    first one opening its review. Reading worker.last_session_id at that
+    point stored the SECOND delegation's session id on the first's review,
+    so a revision round would silently resume the wrong worker's session."""
+    from adda._src.nodes.tools.routing.delegation import WorkerSession
+
+    worker = _SessionWorker()
+    n = _node(tmp_path, worker)
+    tools = n.adapter.closure_tools
+
+    real_reconcile = WorkerSession._reconcile_evals
+
+    def _reconcile_after_d002_ran(self):
+        # D001 reaches its post-invoke bookkeeping only after D002's whole
+        # turn has completed and overwritten the shared last_session_id.
+        if self.delegation_id == "D001":
+            assert worker.second_turn_done.wait(timeout=5)
+        return real_reconcile(self)
+
+    monkeypatch.setattr(WorkerSession, "_reconcile_evals",
+                        _reconcile_after_d002_ran)
+
+    worker._lock.acquire()  # hold the adapter so D001 then D002 both queue
+    tools["Delegate"]("implementer", "task A", "a report")
+    tools["Delegate"]("implementer", "task B", "a report")
+    worker._lock.release()
+    n._threads["D001"].join(timeout=10)
+    n._threads["D002"].join(timeout=10)
+
+    own = {d: worker.by_thread[n._threads[d].ident] for d in ("D001", "D002")}
+    assert own["D001"] != own["D002"]
+    # the shared state D001 must NOT have read: it belongs to D002's turn
+    assert worker.last_session_id == own["D002"] != own["D001"]
+    for d in ("D001", "D002"):
+        assert n._registry[d]["session_id"] == own[d], (d, own)

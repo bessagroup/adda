@@ -1018,6 +1018,7 @@ class OpenAICompatibleAdapter:
         self, messages: list[dict], *,
         idle_timeout: float | None = None, retry_max: int | None = None,
         on_session_start: Any = None,
+        on_session_end: Any = None,
     ) -> str:
         """Run one full agent turn; return final assistant text.
 
@@ -1034,6 +1035,10 @@ class OpenAICompatibleAdapter:
         the instant ``_lock`` is actually acquired, so a caller queued
         behind another same-role delegation learns when its wait is really
         over. Best-effort.
+
+        ``on_session_end``: see ClaudeAdapter.invoke's docstring. This
+        backend has no resumable sessions, so it is always called with None
+        (kept for signature parity so callers treat both backends alike).
         """
         from .base import retry_on_transient
         with self._lock:
@@ -1042,8 +1047,14 @@ class OpenAICompatibleAdapter:
                     on_session_start()
                 except Exception:  # noqa: BLE001
                     pass
-            return retry_on_transient(
+            text = retry_on_transient(
                 lambda: self._invoke_once(messages), max_attempts=retry_max)
+            if on_session_end is not None:
+                try:
+                    on_session_end(self.last_session_id)
+                except Exception:  # noqa: BLE001
+                    pass
+            return text
 
     def _invoke_once(self, messages: list[dict]) -> str:
         """Core invoke logic — build agent if needed, run, return text."""

@@ -897,6 +897,7 @@ class ClaudeAdapter:
         idle_timeout: float | None = None, retry_max: int | None = None,
         resume: str | None = None,
         on_session_start: Any = None,
+        on_session_end: Any = None,
     ) -> str:
         """Synchronous wrapper around :meth:`ainvoke`.
 
@@ -921,6 +922,15 @@ class ClaudeAdapter:
         start (delegation.py's same-role queueing report depends on this).
         Best-effort: swallows any exception so a broken callback never
         breaks the real turn.
+
+        ``on_session_end``: called with THIS call's own session id (or None)
+        while ``_lock`` is still held, right after the turn finishes. The
+        session id is per-call output, but ``last_session_id`` is shared
+        adapter state: the moment the lock releases, a same-role delegation
+        queued behind this one may start (and overwrite it) before the
+        caller reads it, so a caller that needs ITS session id must take it
+        from here, never from ``last_session_id`` afterwards. Not called if
+        the turn raised. Best-effort like ``on_session_start``.
         """
         from .base import retry_on_transient
         with self._lock:
@@ -929,9 +939,15 @@ class ClaudeAdapter:
                     on_session_start()
                 except Exception:  # noqa: BLE001
                     pass
-            return retry_on_transient(
+            text = retry_on_transient(
                 lambda: _run_async_safe(
                     self.ainvoke(
                         messages, idle_timeout=idle_timeout, resume=resume)),
                 max_attempts=retry_max,
             )
+            if on_session_end is not None:
+                try:
+                    on_session_end(self.last_session_id)
+                except Exception:  # noqa: BLE001
+                    pass
+            return text
