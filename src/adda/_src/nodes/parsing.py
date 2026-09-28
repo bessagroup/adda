@@ -203,16 +203,38 @@ def _classify_response(
     # (it gave up). A valid report may legitimately say "I cannot reproduce X"
     # in its Conclusions without being a capability failure (audit O41: the
     # phrase-match used to fire on correct reports).
-    if "## report" not in low:
+    if not _has_section(text, "Report"):
         if any(p in low for p in _CAPABILITY_PHRASES):
             return REFLECT_DIAGNOSIS_CAPABILITY_LIMIT
         return REFLECT_DIAGNOSIS_NO_REPORT_HEADING
-    missing = [s for s in sections if s.lower() not in low]
+    missing = [
+        s for s in sections
+        if not _has_section(text, s.lstrip("#").strip())
+    ]
     if missing:
         return REFLECT_DIAGNOSIS_MISSING_SUBSECTIONS_TEMPLATE.format(
             missing_subsections=", ".join(f"'{s}'" for s in missing)
         )
     return None
+
+
+def _section_opener(name: str):
+    """Compiled regex matching a line that opens the section called ``name``."""
+    import re as _re
+    n = _re.escape(name)
+    return _re.compile(
+        rf"^\s*(?:(?P<hash>\#{{1,6}})\s+{n}\b(?P<hrest>.*)"
+        rf"|(?P<bold>\*\*|__){n}\b\s*:?\s*(?:\*\*|__)?\s*:?(?P<brest>.*)"
+        rf"|{n}\s*:(?P<prest>.*))$",
+        _re.IGNORECASE,
+    )
+
+
+def _has_section(text: str, name: str) -> bool:
+    """True when some line opens the section ``name`` in any accepted style
+    (see _extract_report_section), whatever its body holds."""
+    opener = _section_opener(name)
+    return any(opener.match(line) for line in text.splitlines())
 
 
 def _extract_report_section(text: str, name: str) -> str:
@@ -229,13 +251,7 @@ def _extract_report_section(text: str, name: str) -> str:
     REVISE. I found ...") is a paragraph: it runs to the first blank line.
     """
     import re as _re
-    n = _re.escape(name)
-    opener = _re.compile(
-        rf"^\s*(?:(?P<hash>\#{{1,6}})\s+{n}\b(?P<hrest>.*)"
-        rf"|(?P<bold>\*\*|__){n}\b\s*:?\s*(?:\*\*|__)?\s*:?(?P<brest>.*)"
-        rf"|{n}\s*:(?P<prest>.*))$",
-        _re.IGNORECASE,
-    )
+    opener = _section_opener(name)
     stop = _re.compile(
         r"^\s*(?:\#{1,6}\s|---\s*$|(?:\*\*|__)[^*_\n]+(?:\*\*|__)\s*:?\s*$)")
     lines = text.splitlines()

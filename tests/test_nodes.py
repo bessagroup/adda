@@ -4412,3 +4412,38 @@ def test_entry_node_turn_records_stream_ended_without_result_diagnostic(tmp_path
     assert len(hits) == 1
     assert hits[0]["last_tool_in_flight"] == "Bash"
     assert hits[0]["node"] == "strategizer-turn-001"
+
+
+_PROSE_BODY = "Substantive content padding the report past the length floor. " * 3
+
+
+@pytest.mark.parametrize("style", [
+    "## Report\n\n### Alpha\n{b}\n\n### Beta\n{b}\n",
+    "## Report\n\n**Alpha**\n{b}\n\n**Beta**\n{b}\n",
+    "**Report**\n\n**Alpha:**\n{b}\n\n**Beta:**\n{b}\n",
+    "Report:\n\nAlpha:\n{b}\n\n## Beta\n{b}\n",
+])
+def test_classify_response_accepts_every_heading_style(style):
+    from adda._src.nodes import _classify_response
+
+    text = style.format(b=_PROSE_BODY)
+    assert _classify_response(text, required_sections=["### Alpha", "### Beta"]) is None
+
+
+@pytest.mark.parametrize("style", [
+    "## Report\n\n**Alpha**\n{b}\n",
+    "**Report**\n\nAlpha:\n{b}\n",
+    "## Report\n\n### Alpha\n{b}\n\nThe Beta section is not written.\n",
+])
+def test_classify_response_still_retries_a_missing_section(style):
+    from adda._src.nodes import _classify_response
+
+    text = style.format(b=_PROSE_BODY)
+    assert _classify_response(text, required_sections=["### Alpha", "### Beta"]) is not None
+
+
+def test_classify_response_still_flags_a_missing_report_heading():
+    from adda._src.nodes import _classify_response
+
+    text = "### Alpha\n" + _PROSE_BODY + "\n### Beta\n" + _PROSE_BODY
+    assert _classify_response(text, required_sections=["### Alpha", "### Beta"]) is not None
