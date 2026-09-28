@@ -37,6 +37,7 @@ before. Until one is answered or closed, treat it as known, not news.
 - [ ] **#6** Detect a delegation running but making zero ledger progress — *open*
 - [ ] **#22** Stall watchdog: liveness = "file written", not "progress made" — *open, medium (a backstop, not a primary control)*. `seconds_since_last_activity()` (`infra/watchdog_cleanup.py`) is implemented exactly as this item describes and its docstring defends the choice; whether a busy-but-unproductive run should be caught is still unanswered — see §22 below. Note: `python -m adda.watchdog` (#41, resolved — see `internal/BACKLOG_RESOLVED.md`) is a flat 2×-budget hard deadline and deliberately does NOT consult this liveness signal, so this item is still genuinely open and independent of #41's fix.
 - [ ] **#16** ABAQUS subprocess can't import workspace modules (PYTHONPATH) — *open, abaqus2py-owned* (recommendation only; not an f3dasm fix)
+- [ ] **#43** promptmap.html citations are file:line, so any unrelated src edit that shifts lines makes it stale — *open, design smell in a working safety net* — see §43 below
 
 ## Parked — deferred on purpose
 
@@ -409,6 +410,45 @@ this repo. **Recommended fix (in abaqus2py):** inject the workspace dir into the
 ABAQUS subprocess environment (`PYTHONPATH`) or emit `sys.path.insert(0, WORKSPACE)`
 into the generated `preprocess.py`, so worker-authored param modules resolve without
 relying on the parent process's cwd/sys.path.
+
+## 43. promptmap.html citations are file:line, not symbol -- any unrelated line shift makes it stale
+
+**Status: open — design smell in a working safety net, not a bug.**
+`internal/tools/promptmap.py` cites where every prompt section, tool
+docstring, and gate lives as an exact `{"file": ..., "line": N, "line_end":
+M}` span, and `check_promptmap` (CI) regenerates the map and diffs it
+against the committed copy on every push that could have moved one. This
+is correct and caught a real staleness on its own (CI run for 96b90f7,
+2026-09-28): a QueryStore fix (`store.py`) inserted code above an existing
+function, shifting every line number below it, which changed nothing
+about what the prompt or tools actually say but still failed the diff.
+
+The safety net did its job — nothing was silently wrong — but the cost is
+real: ANY edit to a cited file that adds or removes a line, anywhere
+above the cited span, however unrelated to prompts/tools, forces a
+regenerate-and-recommit cycle and burns a CI cycle if missed locally.
+
+**Recommended fix:** cite by symbol (module path + qualified function/class
+name — the AST node's own identity) instead of by line number, resolving
+to a line only at render time (already how `resolve_symbol`/`_class_line`
+find things in the source — the citation payload just needs to stop
+freezing the resolved line into the committed artifact). The map would
+then only go stale when a cited prompt/tool/gate's own TEXT changes, or
+when a symbol is renamed/moved/deleted — signal worth a CI failure —
+never when an unrelated edit elsewhere in the same file shifts everything
+below it.
+
+**Interim mitigation (in effect until this lands):** run promptmap's own
+freshness diff locally before any push that touches `src/`:
+```
+python internal/tools/promptmap.py -o /tmp/promptmap.html
+diff -q internal/promptmap.html /tmp/promptmap.html
+```
+Regenerate and commit `internal/promptmap.html` in the same commit if it
+differs, rather than relying on `pytest -m promptmap` alone (its own test
+suite checks the map's internal consistency and provenance — it does not
+re-run this specific stale-vs-committed diff check, which is a
+shell-script step in `check_promptmap`'s CI job, not a pytest test).
 
 ## 2. Richer delegator↔worker comms — typed blocker/escalation
 **Status:** deferred (prefer benchmarking the current system first). Design explored 2026-06-15.
