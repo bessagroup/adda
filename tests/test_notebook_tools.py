@@ -549,3 +549,50 @@ def test_run_scratch_never_reverts_a_pure_append_even_with_no_delegation_running
     assert rewrite_target.read_text() == "job,status\n1,FINISHED\n"
     assert "Reverted" in out
     assert str(rewrite_target) in out
+
+
+# ── Every mutating WriteCell result reports cells + any missing pillar ───────
+# Regression: run 20260928T141126 -- the delete path reported only "Pillars
+# present: [...]" (no "Still missing", unlike the add path), so deleting the
+# last remaining pillar cell dropped it from the notebook with NOTHING in the
+# tool's own response saying so. Critic call_001's only MAJOR finding was
+# exactly this silently-missing pillar.
+
+def test_delete_a_pillar_states_it_is_now_missing(tmp_path):
+    n = _node(tmp_path)
+    _tool(n, "WriteCell")("doe", why="sampler", code="x = 1")
+    out = _tool(n, "WriteCell")(
+        "doe", delete=True, expected_rev=_rev(tmp_path, "doe"))
+    assert "Deleted doe" in out
+    assert "MISSING required pillar(s):" in out
+    assert "'doe'" in out
+    # The full cell list is reported, not just the pillars.
+    assert "Cells:" in out
+
+
+def test_delete_a_non_pillar_reports_full_cell_list_no_missing_claim(tmp_path):
+    n = _node(tmp_path)
+    _tool(n, "WriteCell")("problem", content="p")
+    _tool(n, "WriteCell")("caveats", content="a caveat")
+    out = _tool(n, "WriteCell")(
+        "caveats", delete=True, expected_rev=_rev(tmp_path, "caveats"))
+    assert "Deleted caveats" in out
+    assert "Cells: problem" in out
+    assert "caveats" not in out.split("Cells:")[1]
+    # Deleting a non-pillar custom cell never itself creates a missing
+    # pillar -- none of the five were ever present in this notebook, so this
+    # asserts the WORDING doesn't wrongly claim the delete caused it.
+    assert "MISSING required pillar(s): ['doe', 'data_generation', 'ml', 'optimization', 'analysis']" in out
+
+
+def test_add_and_edit_report_the_full_ordered_cell_list(tmp_path):
+    n = _node(tmp_path)
+    out_add = _tool(n, "WriteCell")("problem", content="p1")
+    assert "Cells: problem." in out_add
+    assert "All pillars present" not in out_add  # none of the 5 exist yet
+    assert "MISSING required pillar(s):" in out_add
+
+    _tool(n, "WriteCell")("hypotheses", content="h")
+    out_edit = _tool(n, "WriteCell")(
+        "problem", content="p2", expected_rev=_rev(tmp_path, "problem"))
+    assert "Cells: problem, hypotheses." in out_edit

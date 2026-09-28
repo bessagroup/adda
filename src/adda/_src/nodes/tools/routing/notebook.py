@@ -61,6 +61,30 @@ def _canonical_cell_order() -> list[str]:
 
 _NB_ORDER = _canonical_cell_order()
 
+
+def _notebook_state_line(by: dict) -> str:
+    """One compact line, appended to EVERY notebook-mutating WriteCell result
+    (add/edit/delete alike): the full ordered list of the notebook's cells
+    by name -- not only the pillars, since a custom cell matters too -- and
+    any REQUIRED pillar now missing, stated as a problem, not a neutral
+    "present" list the reader must diff against the required five.
+
+    The delete path previously reported NEITHER (only "Pillars present:
+    [...]", no "Still missing:" the way the add path had) -- deleting the
+    last pillar dropped it silently from the agent's own view of the
+    notebook, which became critic call_001's only MAJOR finding in run
+    20260928T141126 (the optimization pillar had been deleted and never
+    re-added, with nothing in any WriteCell response ever saying so)."""
+    ordered_names = (
+        [k for k in _NB_ORDER if k in by] + [k for k in by if k not in _NB_ORDER]
+    )
+    cells_part = f"Cells: {', '.join(ordered_names) if ordered_names else '(none)'}."
+    missing = [p for p in _PILLARS if p not in by]
+    if missing:
+        return f"{cells_part} MISSING required pillar(s): {missing}."
+    return f"{cells_part} All pillars present."
+
+
 # The standalone narrative (markdown-only) cells + their heading. "verdict"
 # is <deliverable_format>'s step 7 ('## Verdict & result', immediately
 # ahead of the analysis pillar) — without an entry here, the markdown tool
@@ -717,11 +741,14 @@ class NotebookTools:
             by[name]["source"] = _refresh_ledger_block(
                 by[name]["source"], self.node._read_ledger())
         self._emit_notebook(by, nb, nb_path)
+        state = _notebook_state_line(by)
         if _custom_name:
             return (f"Added custom {name!r} markdown cell (rev "
                     f"{_rev(cell['source'])}) to pipeline.ipynb, after the "
-                    "standard cells. Edit or delete it any time with WriteCell.")
-        return f"Added {name} cell (rev {_rev(cell['source'])}) to pipeline.ipynb."
+                    f"standard cells. Edit or delete it any time with WriteCell. "
+                    f"{state}")
+        return (f"Added {name} cell (rev {_rev(cell['source'])}) to "
+                f"pipeline.ipynb. {state}")
 
     def _add_code_cell(self, phase: str, why: str, code: str) -> str:
         """WriteCell's code CREATE path: one cell plus its WHY-explainer. A
@@ -765,18 +792,17 @@ class NotebookTools:
         cc.metadata["tags"] = [phase]
         by[f"{phase}__why"], by[phase] = wc, cc
         self._emit_notebook(by, nb, nb_path)
+        state = _notebook_state_line(by)
         if _custom_phase:
             return (f"Added custom '{phase}' cell (rev {_rev(code)}) to "
                     f"pipeline.ipynb, after the standard pillars. '{phase}' isn't "
                     f"one of the usual pillars {_PILLARS} — fine for a custom "
                     "design/analysis section; edit or delete it any time with "
-                    "WriteCell.")
-        present = [p for p in _PILLARS if p in by]
-        missing = [p for p in _PILLARS if p not in by]
-        return (f"Added {phase} cell (rev {_rev(code)}) to "
-                f"pipeline.ipynb. Pillars present: {present}."
-                + (f" Still missing: {missing}." if missing else
-                   " All pillars present — verify with RunNotebook(gate=True)."))
+                    f"WriteCell. {state}")
+        tip = (
+            " Verify with RunNotebook(gate=True)."
+            if "MISSING" not in state else "")
+        return f"Added {phase} cell (rev {_rev(code)}) to pipeline.ipynb. {state}{tip}"
 
     def _edit_cell(self, name: str, why: str = None, code: str = None,
                    content: str = None, old: str = None, new: str = None,
@@ -821,7 +847,8 @@ class NotebookTools:
                 by[name]["source"], node._read_ledger())
         self._emit_notebook(by, nb, nb_path)
         new_rev = _rev(by[name].get("source", ""))
-        return f"Edited {name} in pipeline.ipynb (rev {cur_rev} → {new_rev})."
+        return (f"Edited {name} in pipeline.ipynb (rev {cur_rev} → {new_rev}). "
+                f"{_notebook_state_line(by)}")
 
     def _apply_surgical_edit(
         self, by: dict, name: str, old: str | None, new: str | None, cur_rev: str
@@ -932,9 +959,8 @@ class NotebookTools:
         nb.cells = [c for c in nb.cells
                     if (c.get("metadata", {}) or {}).get("name") not in targets]
         nbformat.write(nb, str(nb_path))
-        present = [p for p in _PILLARS if p in _by_name(nb)]
         return (f"Deleted {name} from pipeline.ipynb. "
-                f"Pillars present: {present}.")
+                f"{_notebook_state_line(_by_name(nb))}")
 
     @tool_examples("ShowNotebook()", "ShowNotebook('analysis')")
     def ShowNotebook(self, name: str = None) -> str:
