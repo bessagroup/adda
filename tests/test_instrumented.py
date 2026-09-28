@@ -912,3 +912,64 @@ def test_call_mode_sequential_still_delegates_normally(tmp_path):
     result = gen.call(data, mode="sequential")
     _, df_out = result.to_pandas()
     assert sorted(float(v) for v in df_out["f"]) == [0.1, 0.2]
+
+
+# ---------------------------------------------------------------------------
+# A dedup-on-write skip must never pass silently (real bug, run
+# 20260927T012131: the only trace of a discarded, already-computed
+# evaluation was a DEDUP_SKIPPED diagnostics.jsonl line the calling agent
+# never reads; the agent's own script only sees its stdout).
+# ---------------------------------------------------------------------------
+
+
+def test_dedup_skip_of_a_differing_retry_notifies_and_flags_the_difference(
+    tmp_path, capsys,
+):
+    """A retry with a DIFFERENT stamped override (so its computed output
+    genuinely differs from the stored row's) must: emit an in-band stdout
+    notice naming the design, NOT store a second row, and explicitly show
+    both the new and stored output values."""
+    from adda._src.evaluation.instrumented import InstrumentedDataGenerator
+
+    gen = InstrumentedDataGenerator(
+        inner=_StampingGenerator(), store_dir=tmp_path,
+        delegation_id="D001", flush_every=1)
+    gen.execute(_make_sample(0.5), override="K1")  # f=-999.0, stored
+    capsys.readouterr()  # discard the first flush's output
+    gen.execute(_make_sample(0.5), override="K2")  # f=42.0, would differ
+
+    out = capsys.readouterr().out
+    assert "EVAL NOT STORED" in out
+    assert "D001" in out
+    assert "x0=0.5" in out
+    assert "supersede" in out
+    assert "differs from the STORED row" in out
+    assert "-999.0" in out and "42.0" in out
+
+    df_in, df_out = ExperimentData.from_file(project_dir=tmp_path).to_pandas()
+    assert len(df_out) == 1
+    assert float(df_out["f"].iloc[0]) == -999.0
+
+
+def test_dedup_skip_of_an_identical_retry_notifies_without_differs_flag(
+    tmp_path, capsys,
+):
+    """An exact retry (same stamped override, same computed output) must
+    still notify -- compute was spent either way -- but must NOT claim the
+    outputs differ, since they don't."""
+    from adda._src.evaluation.instrumented import InstrumentedDataGenerator
+
+    gen = InstrumentedDataGenerator(
+        inner=_StampingGenerator(), store_dir=tmp_path,
+        delegation_id="D001", flush_every=1)
+    gen.execute(_make_sample(0.5), override="K1")  # f=-999.0, stored
+    capsys.readouterr()
+    gen.execute(_make_sample(0.5), override="K1")  # identical retry
+
+    out = capsys.readouterr().out
+    assert "EVAL NOT STORED" in out
+    assert "x0=0.5" in out
+    assert "differs from the STORED row" not in out
+
+    df_in, df_out = ExperimentData.from_file(project_dir=tmp_path).to_pandas()
+    assert len(df_out) == 1

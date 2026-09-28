@@ -151,6 +151,14 @@ class InstrumentedDataGenerator(DataGenerator):
         # (flush_every defaults to 1 → per-row → uncapped would spam).
         self.eval_budget = eval_budget
         self._nudge_bands_hit: set[int] = set()
+        # Cumulative count of dedup-on-write skips across this delegation's
+        # lifetime. Real compute was spent on each one even though no row
+        # landed, so the SOFT budget nudge (which exists to protect against
+        # burning real compute) must count it alongside store rows -- the
+        # canonical evals_used tally stays store-row-based on purpose
+        # (delegation.py's _reconcile_evals: "believe the store, not the
+        # worker's self-report"), this only feeds the soft nudge.
+        self._dedup_skipped_total = 0
         self.fidelity_column = fidelity_column  # unused Phase 1
         self.flush_every = flush_every
         # Extensible, oracle-stamped provenance: arbitrary {column: value}
@@ -367,8 +375,10 @@ class InstrumentedDataGenerator(DataGenerator):
         # SOFT eval-budget nudge (lock released): fire MID-delegation at the eval
         # boundary, to THE OFFENDER (this campaign's own stdout → the implementer's
         # delegation report). Never stops the campaign; capped at one per band.
-        if _n_total:
-            self._maybe_nudge_budget(_n_total)
+        if n_skipped:
+            self._dedup_skipped_total += n_skipped
+        if _n_total or self._dedup_skipped_total:
+            self._maybe_nudge_budget(_n_total + self._dedup_skipped_total)
         if n_skipped:
             self._record_dedup(n_skipped)
 
@@ -418,6 +428,7 @@ class InstrumentedDataGenerator(DataGenerator):
         evaluator that stamps kwargs (run 20260927T012131)."""
         try:
             canon_rows: list[dict] = []
+            canon_outputs: list[dict] = []
             if canon is not None:
                 df_in, df_out = canon.to_pandas()
                 if df_in is not None and not df_in.empty:
@@ -438,18 +449,32 @@ class InstrumentedDataGenerator(DataGenerator):
                         mine = (df_out["_delegation_id"].astype(str)
                                 == str(self.delegation_id)).to_numpy()
                         df_in = df_in[mine]
+                        df_out = df_out[mine]
                     cols = [c for c in df_in.columns
                             if c not in _PROVENANCE_COLS]
                     canon_rows = df_in[cols].to_dict("records")
+                    out_cols = [c for c in df_out.columns
+                                if c not in _PROVENANCE_COLS]
+                    canon_outputs = df_out[out_cols].to_dict("records")
             survivors: list[ExperimentSample] = []
             survivor_keys: list[tuple] = []
             seen_in_batch: set = set()
+            seen_in_batch_outputs: dict[tuple, dict] = {}
             for s, k in zip(self._buffer, self._buffer_keys, strict=True):
-                if (k in seen_in_batch
-                        or any(_row_matches_submitted_key(k, row)
-                               for row in canon_rows)):
+                stored_outputs = seen_in_batch_outputs.get(k)
+                if stored_outputs is None:
+                    for row, out_row in zip(
+                            canon_rows, canon_outputs, strict=True):
+                        if _row_matches_submitted_key(k, row):
+                            stored_outputs = out_row
+                            break
+                if k in seen_in_batch or stored_outputs is not None:
+                    self._notify_dedup_skip(k, s._output_data, stored_outputs)
                     continue
                 seen_in_batch.add(k)
+                seen_in_batch_outputs[k] = {
+                    c: v for c, v in s._output_data.items()
+                    if c not in _PROVENANCE_COLS}
                 survivors.append(s)
                 survivor_keys.append(k)
             n = len(self._buffer) - len(survivors)
@@ -458,6 +483,44 @@ class InstrumentedDataGenerator(DataGenerator):
             return n
         except Exception:  # noqa: BLE001
             return 0
+
+    def _notify_dedup_skip(
+            self, key: tuple, new_outputs: dict,
+            stored_outputs: dict | None) -> None:
+        """Never let a computed-but-discarded evaluation pass silently: tell
+        the calling agent's own script, via the same stdout channel
+        ``_maybe_nudge_budget`` uses (Channel 1 — the campaign's OWN stdout,
+        captured into the offender's delegation report). Best-effort: a
+        notice must never break the eval path."""
+        try:
+            design = ", ".join(f"{c}={v}" for c, v in key)
+            new_clean = {
+                c: v for c, v in new_outputs.items()
+                if c not in _PROVENANCE_COLS}
+            msg = (
+                f"[EVAL NOT STORED — {self.delegation_id}] design ({design}) "
+                "already has a row in the canonical store; this evaluation "
+                "was NOT written (dedup-on-write keeps the first row for a "
+                "design and never mutates it). The compute for this run "
+                "still counts as spent against this delegation's SOFT eval-"
+                "budget, but it does NOT add a row to the canonical store, "
+                "so it is not reflected in the store's evals_used count. "
+                "If this was a deliberate correction, call supersede(...) "
+                "instead of execute() to REPLACE the stored row."
+            )
+            if stored_outputs is not None:
+                differs = any(
+                    _round_coord(new_clean.get(c)) != _round_coord(v)
+                    for c, v in stored_outputs.items()
+                ) or set(new_clean) != set(stored_outputs)
+                if differs:
+                    msg += (
+                        f" NEW output differs from the STORED row: "
+                        f"new={new_clean!r}, stored={stored_outputs!r}."
+                    )
+            print(msg, flush=True)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _record_dedup(self, n_skipped: int) -> None:
         """Best-effort DEDUP_SKIPPED audit line (never breaks the eval path)."""
