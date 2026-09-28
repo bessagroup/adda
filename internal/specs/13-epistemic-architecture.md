@@ -171,8 +171,14 @@ Each component is listed with its status in the discussion.
   position that survived: capable agents' assertions carry information, and
   the empirical concern is non-use of evidence, which argues for enforcement
   at tool boundaries rather than against assertion. The 95.7% human–LLM
-  agreement figure from Ríos-García et al. was briefly cited as support; per
-  the Zotero note that figure is not a sound basis.
+  agreement figure from Ríos-García et al. was cited as support, then
+  retracted on the strength of the Zotero note (κ ≈ 0.067), then re-checked
+  against App. H.5: experts judged the large majority of LLM-drawn edges
+  correct (87–99.8% by reviewer), and the near-zero κ reflects disagreement on
+  which rare items are wrong. The evidence moderately supports reliability of
+  edges drawn by a third-party annotator on 25 traces; it says nothing about
+  edges an acting agent asserts about its own hypotheses. Zotero notes are
+  treated as priors to verify, not as ground truth for the paper's content.
 - The statement that e-value guarantees "hold" was an overstatement: they hold
   under the paper's assumptions, which its own implementation is argued (in
   the Zotero note) to violate.
