@@ -1157,6 +1157,34 @@ def annotate_edits(roles: list[dict]) -> None:
                             "as a verbatim span of any file.")}
 
 
+def _routing_tool_names(graph, out_edges: dict, name: str, agent) -> list[str]:
+    """This role's ACTUAL granted routing-closure tool names: Delegate/Wait
+    (outgoing edges), SendMessage/RecallHistory/Confer/Reply/FollowUp (the
+    peer_interaction knob), Done/WriteNote/ReadNote/notebook/ledger tools
+    (declared in ``agent.tools``, feature-gated) — everything
+    ``nodes/tools/routing/__init__.py::build_routing_tools`` grants.
+
+    Derived by constructing this role's real ``Node`` under TODAY'S
+    resolved feature settings (whatever ``adda._src.runtime.settings``
+    currently holds -- unconfigured means the shipped defaults, so a
+    committed regeneration reflects the default arm) and reading what it
+    actually received, rather than a hand-maintained mirror of the wiring:
+    such a mirror already drifted from it twice (missing ConsultHandbook,
+    then missing SendMessage entirely).
+    """
+    from adda._src.nodes import Node
+
+    class _Stub:
+        def __init__(self) -> None:
+            self.closure_tools: dict = {}
+
+    node = Node(
+        _Stub(), name=name, outgoing=out_edges.get(name, []), spec=graph,
+        agent_tools=agent.tools,
+    )
+    return list(node.adapter.closure_tools)
+
+
 def _self_built_tools(agent) -> dict:
     """The closures ``agent.build_closure_tools`` binds, by registered name,
     built in a throwaway study directory. Empty if the agent builds none, or
@@ -1330,27 +1358,51 @@ def build_roles(shared: list[dict]) -> list[dict]:
                     spec, prefer=[PKG / "prompts" / "deliverable_format.py"]),
             })
 
-        # Layer 4 — the <tools> catalog, generated from the live closure set.
-        tools = [getattr(t, "__name__", str(t)) for t in (getattr(agent, "tools", ()) or ())]
-        # Universally injected tools are not in agent.tools -- they are bound
-        # onto every adapter at construction. The agent sees them; so must the
-        # map. (ConsultHandbook was absent from this view until this line.)
+        # Layer 4 — the <tools> catalog. The routing-wired subset (Delegate/
+        # Wait/SendMessage/RecallHistory/Confer/Reply/FollowUp/Done/
+        # WriteNote/... — everything build_routing_tools grants) is DERIVED
+        # by constructing this role's real Node under today's resolved
+        # feature settings and reading what it actually got
+        # (_routing_tool_names) -- not hand-mirrored. A hand-maintained
+        # list already drifted from the wiring twice (missing
+        # ConsultHandbook, then missing SendMessage entirely); a topology-
+        # or knob-gated tool can only be wrong here if the wiring itself is.
+        tools = _routing_tool_names(graph, out_edges, name, agent)
+        # Native backend tools (Read, Bash, Edit, Write, Grep, Glob,
+        # BashOutput, KillShell, ...) are declared in agent.tools but pass
+        # straight to the backend's native executor -- they are never
+        # Python closures, so a real Node's closure_tools can never show
+        # them, unlike every closure tool above. Excluded here by name are
+        # the OLD-contract closures (Confer/Reply/FollowUp/ReportProgress)
+        # this same static declaration also carries for the peer_interaction
+        # -off ablation arm (strategizer.tools still lists Confer/FollowUp
+        # so that arm keeps working) -- adding them back from the static set
+        # would silently undo the knob-gating _routing_tool_names exists for.
+        _OLD_CONTRACT = ("Confer", "Reply", "FollowUp", "ReportProgress")
+        tools += [t for t in (agent.tools or ())
+                  if t not in tools and t not in _OLD_CONTRACT]
+        # Universally injected tools are not part of a node's own routing
+        # closures -- they are bound onto every adapter at a different
+        # construction site entirely (agent_runtime._make_adapter).
         tools += [t for t in universal_tool_names() if t not in tools]
         # Tools an agent builds for itself (the f3dasm lookup, the literature
-        # corpus) are not in agent.tools either -- build_closure_tools binds
-        # them per adapter. They were missing from every role's view, so their
-        # descriptions could not be reviewed here at all.
+        # corpus) are not part of routing closures either -- build_closure_tools
+        # binds them per adapter. They were missing from every role's view, so
+        # their descriptions could not be reviewed here at all.
         built = _self_built_tools(agent)
         tools += [t for t in built if t not in tools]
-        # FollowUp is written twice because it is two tools: the entry node's
-        # asks the operator, a worker's asks whoever delegated to it. Which
-        # one a role holds is a fact of the graph, so the map can say.
-        from adda._src.nodes.tools.routing.delegation import (
-            DelegationTools,
-            WorkerSession,
-        )
-        built = {"FollowUp": (DelegationTools.FollowUp if is_entry
-                              else WorkerSession.FollowUp), **built}
+        # FollowUp is two different methods sharing one name (the entry
+        # node's asks the operator, a worker's asks whoever delegated to
+        # it), so a plain "def FollowUp" source scan cannot choose between
+        # them -- resolved here, only when the tools list above (real,
+        # knob-gated) actually holds it (peer_interaction off).
+        if "FollowUp" in tools:
+            from adda._src.nodes.tools.routing.delegation import (
+                DelegationTools,
+                WorkerSession,
+            )
+            built = {"FollowUp": (DelegationTools.FollowUp if is_entry
+                                  else WorkerSession.FollowUp), **built}
         layers.append({
             "kind": "catalog",
             "label": "<tools> catalog",

@@ -664,7 +664,7 @@ def test_the_two_hashes_see_different_halves_of_the_page(tmp_path):
         sync.content_hash(data_of(html))
 
 
-def test_every_tool_written_in_this_repository_is_editable():
+def test_every_tool_written_in_this_repository_is_editable(promptmap):
     """A tool whose description lives in this repository can be edited from
     the map -- whole, or as the pieces it is assembled from.
 
@@ -672,7 +672,12 @@ def test_every_tool_written_in_this_repository_is_editable():
     down: a closure registered under a name its function does not have, a
     name defined twice. Adding the tools agents build for themselves to the
     map turned a dozen entries into "not editable from this page" at once.
-    Only tools the backend SDK supplies have no source here to edit.
+    Only tools the backend SDK supplies have no source here to edit --
+    and the two whose docstring is legitimately rebuilt PER NODE at
+    dispatch (``_PER_NODE_DOC``: Delegate, AskForFeedback), which name the
+    exact builder to edit instead. Delegate started actually appearing in a
+    role's tools only once the catalog stopped hand-mirroring the routing
+    wiring (it used to be silently absent, so this exception was dormant).
     """
     import json
 
@@ -684,6 +689,8 @@ def test_every_tool_written_in_this_repository_is_editable():
             if layer["kind"] != "catalog":
                 continue
             for sec in layer["sections"]:
+                if sec.get("label") in promptmap._PER_NODE_DOC:
+                    continue
                 ok = (sec.get("edit") or {}).get("ok")
                 pieces_ok = sec.get("pieces") and all(
                     p["edit"]["ok"] for p in sec["pieces"])
@@ -691,3 +698,74 @@ def test_every_tool_written_in_this_repository_is_editable():
                     refused.append((role["id"], sec.get("label"),
                                     (sec.get("edit") or {}).get("why", "")[:80]))
     assert not refused, refused
+
+
+
+def _real_routing_tools(graph, out_edges: dict, name: str, agent, keep: set) -> set:
+    """Independently re-derive a role's granted routing tool names via a
+    real Node -- NOT by calling promptmap.py's own ``_routing_tool_names``,
+    so this can catch a future drift inside that function too, not only in
+    whatever still hand-mirrors the wiring around it."""
+    from adda._src.nodes import Node
+
+    class _Stub:
+        def __init__(self) -> None:
+            self.closure_tools: dict = {}
+
+    node = Node(
+        _Stub(), name=name, outgoing=out_edges.get(name, []), spec=graph,
+        agent_tools=agent.tools,
+    )
+    return set(node.adapter.closure_tools) & keep
+
+
+def test_the_maps_tools_match_the_real_wiring_under_both_knob_values(promptmap, data):
+    """The <tools> catalog's routing-wired subset (Delegate/Wait/SendMessage/
+    RecallHistory/Confer/Reply/FollowUp) must equal what a real Node
+    actually grants, under BOTH ``peer_interaction`` values -- the guard
+    against a third drift (a hand-maintained mirror already missed
+    ConsultHandbook once and SendMessage entirely a second time)."""
+    from adda._src.runtime import settings
+
+    routing_tool_names = {
+        "Delegate", "Wait", "SendMessage", "RecallHistory", "Confer",
+        "Reply", "FollowUp",
+    }
+    graph = promptmap._map_graph()
+    out_edges: dict[str, list[str]] = {}
+    for edge in graph.edges:
+        out_edges.setdefault(edge.source, []).append(edge.target)
+
+    # The default arm: `data` (session-scoped, already built under today's
+    # ambient/unconfigured settings -- the shipped default) is the map's
+    # OWN output, checked as-is rather than rebuilt.
+    for role in data["roles"]:
+        name, agent = role["id"], graph.nodes[role["id"]]
+        mapped = set(role["tools"]) & routing_tool_names
+        real = _real_routing_tools(graph, out_edges, name, agent, routing_tool_names)
+        assert mapped == real, (
+            f"{name} (default arm): map shows {mapped}, real wiring grants {real}"
+        )
+
+    # The off arm: peer_interaction is the one Feature whose OFF state
+    # changes this list, so rebuild the map under it explicitly -- a fresh
+    # `data` isn't cheap (~170s), but this module already pays that once
+    # per CI run for the default arm's own build. The comparison itself
+    # must ALSO run under the override (``_real_routing_tools`` constructs
+    # a real Node, which reads the ambient setting at construction time),
+    # so the reset stays in `finally` around the whole block, not just the
+    # build.
+    settings.configure({"peer_interaction": False})
+    try:
+        off_roles = promptmap.build_roles(promptmap.shared_blocks())
+        for role in off_roles:
+            name, agent = role["id"], graph.nodes[role["id"]]
+            mapped = set(role["tools"]) & routing_tool_names
+            real = _real_routing_tools(
+                graph, out_edges, name, agent, routing_tool_names)
+            assert mapped == real, (
+                f"{name} (peer_interaction=False): map shows {mapped}, "
+                f"real wiring grants {real}"
+            )
+    finally:
+        settings.configure(None)
