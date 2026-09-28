@@ -896,6 +896,7 @@ class ClaudeAdapter:
         self, messages: list[dict], *,
         idle_timeout: float | None = None, retry_max: int | None = None,
         resume: str | None = None,
+        on_session_start: Any = None,
     ) -> str:
         """Synchronous wrapper around :meth:`ainvoke`.
 
@@ -910,9 +911,24 @@ class ClaudeAdapter:
         5×600s budget (which once froze a whole run for ~89 min).
 
         ``resume``: see :meth:`ainvoke`.
+
+        ``on_session_start``: called with no arguments the instant ``_lock``
+        is actually acquired -- i.e. when this call's real work begins, not
+        when it was merely requested. A caller queued behind another
+        delegation to this same shared adapter can be blocked here for as
+        long as that other call takes; this is the one point that tells the
+        caller its wait is actually over, distinct from when it was asked to
+        start (delegation.py's same-role queueing report depends on this).
+        Best-effort: swallows any exception so a broken callback never
+        breaks the real turn.
         """
         from .base import retry_on_transient
         with self._lock:
+            if on_session_start is not None:
+                try:
+                    on_session_start()
+                except Exception:  # noqa: BLE001
+                    pass
             return retry_on_transient(
                 lambda: _run_async_safe(
                     self.ainvoke(

@@ -149,6 +149,7 @@ class DelegationLog:
         is_falsification_attempt: bool = False,
         phase: str | None = None,
         constraints: dict | None = None,
+        session_started_at: str | None = "__unset__",
     ) -> None:
         """Append a RUNNING entry at DISPATCH, before the worker runs.
 
@@ -161,7 +162,16 @@ class DelegationLog:
         delegation is traceable; the terminal record (same id) supersedes it via
         the last-wins collapse in _load_all. ``constraints`` is the
         ConstraintSnapshot.as_dict() at DISPATCH time (see constraint_snapshot.py).
+
+        ``session_started_at``: pass explicit ``None`` for a delegation
+        dispatched QUEUED (a same-role delegation already holds the shared
+        adapter's serializing lock) -- its real start is unknown until
+        ``mark_session_started`` patches it in. Left unset (the sentinel
+        default), it is the same as ``started_at`` -- the ordinary, not-
+        queued case every caller that doesn't track queueing gets for free.
         """
+        if session_started_at == "__unset__":
+            session_started_at = started_at
         record: dict[str, Any] = {
             "id": id,
             "from_node": from_node,
@@ -170,6 +180,11 @@ class DelegationLog:
             "deliverable": "",
             "hypothesis_ids": hypothesis_ids,
             "started_at": started_at,
+            # None means this delegation was QUEUED at dispatch (a same-role
+            # delegation already held the shared adapter's serializing lock)
+            # -- its real session start is unknown until mark_session_started
+            # patches it in. Not queued: same as started_at (no wait).
+            "session_started_at": session_started_at,
             "completed_at": None,
             "status": "RUNNING",
             "tokens_in": 0,
@@ -183,6 +198,29 @@ class DelegationLog:
         with self._lock:
             with self._path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(record) + "\n")
+
+    def mark_session_started(
+        self, delegation_id: str, session_started_at: str
+    ) -> bool:
+        """Patch in the REAL session-start time for a delegation dispatched
+        while QUEUED (record_started's session_started_at was None).
+
+        Same append-only PATCH pattern as mark_attempt -- see its docstring
+        for why a rewrite-in-place is unsafe. Returns True iff a matching
+        record exists to patch.
+        """
+        with self._lock:
+            records = self._load_all()
+            if not any(r.get("id") == delegation_id for r in records):
+                return False
+            patch_row = {
+                "id": delegation_id,
+                "patch": {"session_started_at": session_started_at},
+                "ts": _now_iso(),
+            }
+            with self._path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(patch_row) + "\n")
+            return True
 
     def query_received(
         self,

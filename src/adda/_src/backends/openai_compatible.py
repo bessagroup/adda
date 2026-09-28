@@ -1017,6 +1017,7 @@ class OpenAICompatibleAdapter:
     def invoke(
         self, messages: list[dict], *,
         idle_timeout: float | None = None, retry_max: int | None = None,
+        on_session_start: Any = None,
     ) -> str:
         """Run one full agent turn; return final assistant text.
 
@@ -1028,9 +1029,19 @@ class OpenAICompatibleAdapter:
         budget. ``idle_timeout`` is accepted for signature parity with the
         Claude backend (HTTP requests carry their own socket timeout, so it is
         not separately applied here); ``retry_max`` caps retries for this call.
+
+        ``on_session_start``: see ClaudeAdapter.invoke's docstring -- called
+        the instant ``_lock`` is actually acquired, so a caller queued
+        behind another same-role delegation learns when its wait is really
+        over. Best-effort.
         """
         from .base import retry_on_transient
         with self._lock:
+            if on_session_start is not None:
+                try:
+                    on_session_start()
+                except Exception:  # noqa: BLE001
+                    pass
             return retry_on_transient(
                 lambda: self._invoke_once(messages), max_attempts=retry_max)
 

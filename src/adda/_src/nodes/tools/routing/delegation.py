@@ -631,6 +631,34 @@ class WorkerSession:
                 node._current_notes_dir.parent / "transcripts"
                 / f"{self.delegation_id}.jsonl"))
 
+    def _mark_session_started_if_queued(self) -> None:
+        """Patch in the real session-start time, once, for a delegation that
+        was dispatched QUEUED (registry/log session_started_at is None).
+
+        Passed to worker.invoke() as ``on_session_start`` -- the backend
+        calls it the INSTANT its serializing lock is actually acquired, so
+        this fires exactly when this delegation's real work begins, not
+        when it merely asked to start. A worker whose adapter doesn't accept
+        ``on_session_start`` (an older/custom stub) never calls this at all,
+        which is safe: session_started_at then simply stays whatever
+        dispatch set it to. No-op if this delegation wasn't queued
+        (session_started_at already set at dispatch) -- never fires a
+        redundant patch.
+        """
+        node = self.node
+        with node._registry_lock:
+            entry = node._registry.get(self.delegation_id)
+            already_started = (
+                entry is None
+                or "session_started_at" not in entry
+                or entry["session_started_at"] is not None
+            )
+            if not already_started:
+                _now = datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
+                entry["session_started_at"] = _now
+        if not already_started and node._delegation_log is not None:
+            node._delegation_log.mark_session_started(self.delegation_id, _now)
+
     def _invoke_with_report_retry(self) -> str:
         """Invoke the worker; one corrective retry if its report is malformed.
 
@@ -653,7 +681,14 @@ class WorkerSession:
         from ....prompts.agent_prompts import build_report_retry_prompt
 
         messages = [{"role": "user", "content": self.task_msg}]
-        text = self.worker.invoke(messages)
+        try:
+            text = self.worker.invoke(
+                messages, on_session_start=self._mark_session_started_if_queued)
+        except TypeError:
+            # An adapter that doesn't accept on_session_start (an older or
+            # custom stub) -- fall back plainly; session_started_at then
+            # stays whatever dispatch set it to (same as before this fix).
+            text = self.worker.invoke(messages)
 
         _req_sections = list(
             getattr(self.guard_agent, "report_sections", None) or []
@@ -1580,9 +1615,21 @@ class DelegationTools:
 
         delegation_id = self._allocate_delegation_id()
         started_at = datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
+        # ClaudeAdapter/OpenAICompatibleAdapter.copy() returns self -- every
+        # delegation to the SAME role shares the literal same adapter object,
+        # serialized by that adapter's own _lock (invoke() acquires it for
+        # the whole turn). A same-role delegation already Working WILL block
+        # this one behind it the moment its thread calls worker.invoke(); this
+        # is real serialization, not a race — surface it truthfully instead
+        # of the prior "Delegation started" implying it runs right away (run
+        # 20260928T141126: D003 dispatched at 14:14:38 while D002 -- same
+        # role -- was still running; D003's session only began a second
+        # after D002's ended, though Delegate()'s own reply and the RUNNING
+        # log row both said D003 started at 14:14:38).
+        queued_behind = self._same_role_running(target)
         self._register_dispatch(
             delegation_id, target, h_ids, is_falsification_attempt,
-            _phase, namespace, started_at,
+            _phase, namespace, started_at, queued_behind,
         )
 
         # Constraint snapshot NOW, at dispatch — single source of truth (see
@@ -1609,6 +1656,7 @@ class DelegationTools:
                 is_falsification_attempt=bool(is_falsification_attempt),
                 phase=_phase,
                 constraints=_snapshot.as_dict(),
+                session_started_at=None if queued_behind else started_at,
             )
 
         task_msg = self._compose_task_message(
@@ -1677,6 +1725,15 @@ class DelegationTools:
                 )
             return f"Errored:\n{entry.get('result', '(no details)')}"
 
+        if queued_behind:
+            return (
+                f"Delegation {delegation_id!r} QUEUED behind "
+                f"{', '.join(queued_behind)} ({target!r} already has a "
+                "delegation running — same-role delegations run one at a "
+                "time, never in parallel). It will actually start once "
+                f"that finishes. Collect it with Wait('{delegation_id}'), "
+                f"or check on it with Wait('{delegation_id}', block=False)."
+            )
         return (
             f"Delegation started. ID: {delegation_id!r}. "
             f"Collect it with Wait('{delegation_id}'), or check on it with "
@@ -1888,6 +1945,17 @@ class DelegationTools:
                 pass
         return delegation_id
 
+    def _same_role_running(self, target: str) -> list[str]:
+        """IDs of this node's OWN OTHER delegations to ``target`` that are
+        still Working -- i.e. delegations a NEW dispatch to the same role
+        will be serialized behind (see Delegate()'s call site for why)."""
+        node = self.node
+        with node._registry_lock:
+            return [
+                d_id for d_id, e in node._registry.items()
+                if e.get("target") == target and e.get("status") == "Working"
+            ]
+
     def _register_dispatch(
         self,
         delegation_id: str,
@@ -1897,6 +1965,7 @@ class DelegationTools:
         phase: str | None,
         namespace: str | None,
         started_at: str,
+        queued_behind: list[str] | None = None,
     ) -> None:
         """Open this delegation's registry entry."""
         from ....backends.base import get_delegation_id
@@ -1920,6 +1989,12 @@ class DelegationTools:
                 "is_falsification_attempt": bool(is_falsification_attempt),
                 "phase": phase,
                 "started_at": started_at,
+                # None while genuinely QUEUED (see Delegate()'s call site);
+                # set once this delegation's thread actually calls
+                # worker.invoke() (_invoke_with_report_retry). Not queued at
+                # dispatch: same as started_at, no wait to record.
+                "session_started_at": None if queued_behind else started_at,
+                "queued_behind": list(queued_behind or []),
                 "target": target,
                 "namespace": (namespace or None),
                 "followup_question": None,
@@ -2096,6 +2171,13 @@ class DelegationTools:
             ) + _tail
         if status not in ("Working", "FollowUp"):
             return f"Errored:\n{entry['result']}" + _tail
+        if "session_started_at" in entry and entry["session_started_at"] is None:
+            _behind = entry.get("queued_behind") or []
+            return (
+                f"QUEUED behind {', '.join(_behind) or 'another delegation'} "
+                f"-- {entry.get('target')!r} runs one same-role delegation "
+                "at a time; it has not actually started yet."
+            ) + _tail
         return self._working_report(delegation_id, poll) + _tail
 
     def _status_from_log(self, delegation_id: str, prefix: str) -> str:
