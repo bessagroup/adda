@@ -174,16 +174,29 @@ def test_delegate_to_implementer_milestone_is_two_shot_nudge(tmp_path):
 
 def test_milestone_nudge_recurs_per_namespace(tmp_path):
     """The nudge fires once PER namespace — opening a new design re-prompts the
-    setup milestones for that design rather than silently inheriting the ack."""
+    setup milestones for that design rather than silently inheriting the ack.
+
+    Runs under the default (peer_interaction on): each collected delegation
+    is approved (SendMessage(..., approve=True), see approve_delegation) so
+    it finalizes and does not block the next Delegate() as an open review
+    (spec 12 item 1/6)."""
+    import re
+
+    from .fixtures import approve_delegation
+
     n = _node(tmp_path)
     hid = n.adapter.closure_tools["HypothesisPropose"](
         "stmt", "crit", "pred", 0.5)
-    # Confirm the default namespace.
+    # First call: process-backlog nudge, no delegation created yet.
     n.adapter.closure_tools["Delegate"](
         "implementer", "run", "report", hypothesis_ids=[hid], wait=True)
-    n.adapter.closure_tools["Delegate"](
+    # Second call (same target): confirms it -- a real delegation opens for
+    # review now, and must be approved so it doesn't block the next Delegate.
+    out = n.adapter.closure_tools["Delegate"](
         "implementer", "run", "report", hypothesis_ids=[hid], wait=True)
-    # A NEW namespace nudges again (its own setup).
+    did = re.search(r"\[(D\d+)\]", out).group(1)
+    approve_delegation(n.adapter.closure_tools, did)
+    # A NEW namespace nudges again (its own setup) -- no delegation created.
     out_ns = n.adapter.closure_tools["Delegate"](
         "implementer", "run", "report", hypothesis_ids=[hid],
         namespace="elliptical_rings", wait=True)

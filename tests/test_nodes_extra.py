@@ -15,6 +15,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.graph import END
 
 from adda._src.backends.base import Agent, Edge, Graph
+from adda._src.runtime import settings
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +76,12 @@ def _make_state(study_dir=None, **kwargs):
 
 
 def test_reply_unknown_delegation_returns_error():
-    """Reply() for an unknown delegation ID returns an ERROR string."""
+    """Reply() for an unknown delegation ID returns an ERROR string.
+
+    Reply is the old-contract surface, withheld by default since the spec-12
+    migration sweep (SendMessage(..., approve=True/feedback) replaces it) --
+    forced off here to keep exercising it directly.
+    """
     from adda._src.nodes import Node
 
     replies: list[str] = []
@@ -88,13 +94,18 @@ def test_reply_unknown_delegation_returns_error():
             self.closure_tools["Done"](summary="closing")
             return "done"
 
-    adapter = ReplyCallingAdapter()
-    spec = _minimal_spec()
-    node = Node(adapter, name="strategizer", outgoing=["implementer"], spec=spec)
-    node(_make_state())
+    try:
+        settings.configure({"peer_interaction": False})
+        adapter = ReplyCallingAdapter()
+        spec = _minimal_spec()
+        node = Node(
+            adapter, name="strategizer", outgoing=["implementer"], spec=spec)
+        node(_make_state())
 
-    assert replies and "ERROR" in replies[0]
-    assert "NONEXISTENT_ID" in replies[0]
+        assert replies and "ERROR" in replies[0]
+        assert "NONEXISTENT_ID" in replies[0]
+    finally:
+        settings.configure(None)
 
 
 # ---------------------------------------------------------------------------
@@ -103,9 +114,15 @@ def test_reply_unknown_delegation_returns_error():
 
 
 def test_followup_reply_roundtrip():
-    """Worker FollowUp blocks until Reply is called; returns the answer."""
+    """Worker FollowUp blocks until Reply is called; returns the answer.
+
+    Both are the old-contract surface, withheld by default since the
+    spec-12 migration sweep (SendMessage(wait_for_reply=True) replaces
+    this round-trip) -- forced off here to keep exercising it directly.
+    """
     from adda._src.nodes import Node
 
+    settings.configure({"peer_interaction": False})
     followup_answers: list[str] = []
     delegation_id_box: list[str] = []
     worker_ready = threading.Event()
@@ -141,17 +158,20 @@ def test_followup_reply_roundtrip():
             self.closure_tools["Done"](summary="completed")
             return "done"
 
-    adapter = OrchestratorAdapter()
-    spec = _minimal_spec()
-    worker = FollowUpWorkerAdapter()
-    node = Node(
-        adapter, name="strategizer", outgoing=["implementer"], spec=spec,
-        worker_adapters={"implementer": worker},
-    )
-    node(_make_state())
+    try:
+        adapter = OrchestratorAdapter()
+        spec = _minimal_spec()
+        worker = FollowUpWorkerAdapter()
+        node = Node(
+            adapter, name="strategizer", outgoing=["implementer"], spec=spec,
+            worker_adapters={"implementer": worker},
+        )
+        node(_make_state())
 
-    assert followup_answers, "Worker FollowUp was never resolved"
-    assert "Shape is (100, 3)." in followup_answers[0]
+        assert followup_answers, "Worker FollowUp was never resolved"
+        assert "Shape is (100, 3)." in followup_answers[0]
+    finally:
+        settings.configure(None)
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +317,12 @@ def test_getstatus_includes_budget_warning_when_over_80_pct():
 
 
 def test_delegate_wait_true_returns_report_directly():
-    """Delegate(wait=True) blocks and returns Done\\n\\n<report> without polling."""
+    """Delegate(wait=True) blocks and returns the report without polling.
+
+    peer_interaction on (the default since the spec-12 migration sweep): a
+    successful synchronous Delegate() does not auto-finalize -- the report
+    comes back OPEN FOR REVIEW, with an explicit SendMessage(..., approve=
+    True) required to close it (spec 12 item 3)."""
     from adda._src.nodes import Node
 
     delegate_results: list[str] = []
@@ -333,7 +358,8 @@ def test_delegate_wait_true_returns_report_directly():
 
     assert delegate_results, "Delegate(wait=True) never returned"
     result = delegate_results[0]
-    assert result.startswith("Done"), f"Expected result starting with 'Done', got: {result!r}"
+    assert "OPEN FOR REVIEW" in result, (
+        f"Expected an open-for-review report, got: {result!r}")
     assert "Computed result." in result or "42" in result
 
 

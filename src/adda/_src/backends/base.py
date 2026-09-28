@@ -191,9 +191,10 @@ class Agent:
 
     3. **Topology-injected tools** — ``"Delegate"``, ``"Parallel"``,
        ``"Debate"``, ``"Retry"`` (outgoing edges), ``"Ask"`` (entry node),
-       and ``"FollowUp"`` (incoming edges).  **Never declare these in**
-       ``Agent.tools``.  The runtime injects them automatically from the
-       graph topology; any declaration here is ignored.
+       and ``"SendMessage"`` (every node, regardless of edges).  **Never
+       declare these in** ``Agent.tools``.  The runtime injects them
+       automatically from the graph topology; any declaration here is
+       ignored.
 
     4. **External MCP server tools** — names declared in
        ``extra_allowed_tools`` (e.g.

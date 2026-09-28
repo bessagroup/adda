@@ -197,11 +197,11 @@ run.
 
 It used to be the entry node's delegation targets alone. Workers were told
 nothing about the team -- their preamble named "the Strategizer" by hand, and
-every worker holds Confer, which takes an agent's name -- so a worker could
-only address names that happened to appear in its brief, and a graph whose
-entry node is named otherwise contradicted the preamble outright. Now every
-agent reads one generated roster, and which of those names it can hand work
-to is in its own Delegate tool.
+every worker holds SendMessage, which takes an agent's name -- so a worker
+could only address names that happened to appear in its brief, and a graph
+whose entry node is named otherwise contradicted the preamble outright. Now
+every agent reads one generated roster, and which of those names it can hand
+work to is in its own Delegate tool.
 
 The static prompt describes a full cast — an implementer, a literature
 reviewer, a datagenerator — because that is the shape of the graph it was

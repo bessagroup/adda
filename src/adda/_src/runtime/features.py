@@ -188,21 +188,17 @@ FEATURES: tuple[Feature, ...] = (
     ),
     Feature(
         key="peer_interaction",
-        # DEFAULT FALSE — an intentional, TEMPORARY exception to every other
-        # feature's default-True/"off makes a normal run worse" posture.
-        # This one is being built INCREMENTALLY across several commits
-        # (internal/specs/12-peer-interaction.md), each required to leave
-        # main self-consistent: while it is off, a run sees exactly today's
-        # Confer/FollowUp/Reply surface (unaffected by anything landing
-        # under this flag); flipping it on exposes the new SendMessage tool
-        # and prompt sections instead, for testing the new contract in
-        # isolation before it becomes the only surface. The final commit of
-        # the series flips this default to True and performs the migration
-        # sweep (retiring Confer/FollowUp/Reply/ReportProgress) in one step
-        # — at which point this becomes an ordinary ablation arm like every
-        # other Feature here, and this comment should be trimmed down to
-        # match their style.
-        default=False,
+        # Migration-sweep commit (internal/specs/12-peer-interaction.md):
+        # default is now True, matching every other feature. On (the
+        # default): SendMessage is the only peer/human messaging surface —
+        # Confer, Reply, the peer-facing FollowUp and ReportProgress are
+        # withheld (nodes/tools/routing/__init__.py and
+        # WorkerSession.install_worker_tools gate them on this same knob;
+        # the entry node's to="human" channel is unaffected — it is
+        # SendMessage's own implementation, not a retired tool). Off is
+        # still a real ablation arm, kept for comparison against the old
+        # contract: it restores exactly the pre-spec-12 surface.
+        default=True,
         tools=frozenset({"SendMessage"}),
     ),
 )

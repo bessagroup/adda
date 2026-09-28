@@ -93,9 +93,12 @@ _BODY_FONT = (
 # these (routing.py's _build_routing_closures is only invoked for
 # orchestrating nodes) — NOT every name the Agent docstring lists (its
 # "Parallel"/"Debate"/"Retry"/"Ask" are aspirational; only Delegate/Wait/
-# Reply/FollowUp/RecallHistory are actually wired up as of this writing).
+# SendMessage/RecallHistory are actually wired up as of this writing).
+# SendMessage itself is granted regardless of outgoing edges (see
+# nodes/tools/routing/__init__.py) but is listed here for the diagram
+# alongside the tools that genuinely do depend on them.
 _TOPOLOGY_TOOLS_IF_OUTGOING = (
-    "Delegate", "Wait", "Reply", "FollowUp", "RecallHistory",
+    "Delegate", "Wait", "SendMessage", "RecallHistory",
 )
 
 _CARD_W = 400

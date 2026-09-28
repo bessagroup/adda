@@ -1,6 +1,7 @@
 # Spec 12 — Peer-interaction contract: Delegate / SendMessage / Wait
 
-**Status:** ratified 2026-09-27 — build starting. **Priority:** high (touches the delegation
+**Status:** shipped 2026-09-27 — migration sweep landed, `peer_interaction`
+defaults True. **Priority:** high (touches the delegation
 record format and every worker/delegator tool surface; sequencing with other
 in-flight work matters). **Depends on:** nothing structurally, but see
 Migration — it retires spec 02's design entirely (Confer/FollowUp/Reply are

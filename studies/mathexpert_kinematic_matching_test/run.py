@@ -5,7 +5,8 @@ No DataGenerator/Implementer -- see PROBLEM_STATEMENT.md. Graph:
                          -> math_expert
                          -> critic
     math_expert          -> literature_reviewer   (its one outgoing edge,
-                                                    grants Delegate/Wait/Reply)
+                                                    grants Delegate/Wait/
+                                                    SendMessage)
 
 The critic is present so Done() faces a real acceptance gate. Without it
 the run 20260905T162233 closed GATED having produced nothing at all.

@@ -514,13 +514,22 @@ class WorkerSession:
             record=lambda n: setattr(self, "claimed_evals", n),
             drain=self._drain_pending_msgs,
         )  # never errors
-        worker.closure_tools["ReportProgress"] = self.ReportProgress
-        worker.closure_tools["FollowUp"] = node._wrap_closure(
-            self.FollowUp, target)
-        # Confer: async messaging to the orchestrator (or any woken peer).
-        # The worker drains its OWN inbox collect-on-send (see ConferTools).
-        worker.closure_tools["Confer"] = node._wrap_closure(
-            ConferTools(node, target).Confer, target)
+        # ReportProgress/FollowUp(peer-facing)/Confer: the pre-spec-12
+        # surface, retired in favour of SendMessage (already on the
+        # worker's copied adapter from its own routing tools, see
+        # build_routing_tools) whenever peer_interaction is on -- its
+        # default now. Off is the old-contract ablation arm: install these
+        # exactly as before so that arm stays byte-identical.
+        from ....runtime import features as _features
+        if not _features.enabled("peer_interaction"):
+            worker.closure_tools["ReportProgress"] = self.ReportProgress
+            worker.closure_tools["FollowUp"] = node._wrap_closure(
+                self.FollowUp, target)
+            # Confer: async messaging to the orchestrator (or any woken
+            # peer). The worker drains its OWN inbox collect-on-send (see
+            # ConferTools).
+            worker.closure_tools["Confer"] = node._wrap_closure(
+                ConferTools(node, target).Confer, target)
         # ConsultHandbook is injected universally at adapter construction
         # (agent_runtime._make_adapter) — every node gets it equally there.
 

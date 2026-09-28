@@ -1153,7 +1153,12 @@ def test_delegate_injects_workspace_subfolder_in_task(tmp_path):
 
 
 def test_delegate_writes_delegation_jsonl_on_done(tmp_path):
-    """delegation_log.jsonl is written when a delegation completes."""
+    """delegation_log.jsonl is written when a delegation completes.
+
+    Runs under the default (peer_interaction on): the report opens for
+    review, so the scripted adapter collects it (Wait) and approves it
+    (SendMessage(..., approve=True)) before closing, the same as a real
+    delegator -- the DONE row is written at approval (spec 12 item 8)."""
     from adda._src.infra.delegation_log import DelegationLog
 
     class DelegateAdapter(StubAdapter):
@@ -1170,11 +1175,13 @@ def test_delegate_writes_delegation_jsonl_on_done(tmp_path):
                 prediction="none found 2",
                 prior=0.5,
             )
-            self.closure_tools["Delegate"](
+            did = self.closure_tools["Delegate"](
                 target="implementer", intent="do analysis", expected_report="",
                 hypothesis_ids=["H1", "H2"],
-            )
+            ).split("ID: ")[1].split(".")[0].strip("'\" ")
             _time.sleep(0.3)
+            self.closure_tools["Wait"](did)
+            self.closure_tools["SendMessage"](did, "Approved.", approve=True)
             self.closure_tools["Done"](summary="done")
             return "Done."
 
@@ -1463,9 +1470,19 @@ def test_worker_report_evals_credits_the_right_delegation(tmp_path):
     ``tools.routing.delegation.build_report_evals``, but the SCOPE (which
     delegation's ``claimed_evals`` gets written) must stay per-delegation.
     Two delegations, run one after another with distinct counts, must each
-    log their OWN count — not the other's or a stale one."""
+    log their OWN count — not the other's or a stale one.
+
+    Runs under the default (peer_interaction on): each delegation's report
+    opens for review, so the scripted adapter approves the first (Delegate
+    (wait=True) itself marks a collected report as read, so no extra Wait()
+    is needed) before dispatching the second -- a real delegator must do
+    the same, since Delegate refuses a new dispatch while ANY of its own
+    delegations is still open for review (spec 12 item 1/6).
+    """
     from adda._src.infra.delegation_log import DelegationLog
     from adda._src.nodes import Node
+
+    from .fixtures import approve_delegation
 
     class DelegateAdapter(StubAdapter):
         def invoke(self, messages):
@@ -1475,9 +1492,11 @@ def test_worker_report_evals_credits_the_right_delegation(tmp_path):
             self.closure_tools["Delegate"](
                 target="implementer", intent="first", expected_report="",
                 hypothesis_ids=["H1"], wait=True)
+            approve_delegation(self.closure_tools, "D001")
             self.closure_tools["Delegate"](
                 target="implementer", intent="second", expected_report="",
                 hypothesis_ids=["H1"], wait=True)
+            approve_delegation(self.closure_tools, "D002")
             self.closure_tools["Done"](summary="done")
             return "Done."
 
@@ -2950,8 +2969,8 @@ def test_delegate_and_wait_absent_with_no_outgoing_edges():
     task B's roster review (Elvis, via adda-boss-whopper) caught the
     prompt-vs-tool contradiction of Delegate existing unconditionally:
     calling it on a leaf always errored ('ERROR: unknown target ... Valid
-    targets: []'). Reply/FollowUp stay universal (retired together, once
-    SendMessage exists to replace both)."""
+    targets: []'). SendMessage stays universal regardless of outgoing
+    edges (it replaced Reply/FollowUp, which had the same posture)."""
     from adda._src.nodes import Node
 
     node = Node(
@@ -2963,8 +2982,7 @@ def test_delegate_and_wait_absent_with_no_outgoing_edges():
     )
     assert "Delegate" not in node.adapter.closure_tools
     assert "Wait" not in node.adapter.closure_tools
-    assert "Reply" in node.adapter.closure_tools
-    assert "FollowUp" in node.adapter.closure_tools
+    assert "SendMessage" in node.adapter.closure_tools
 
 
 def test_delegate_and_wait_present_with_an_outgoing_edge():

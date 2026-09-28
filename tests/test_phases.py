@@ -49,13 +49,17 @@ def _node(tmp_path):
 
 
 def test_delegate_stamps_resolved_phase_on_registry(tmp_path):
+    """Runs under the default (peer_interaction on): the phase tag is
+    stamped on the registry the instant the delegation is dispatched,
+    independent of whether its report later finalizes or opens for
+    review."""
     n = _node(tmp_path)
     out = n.adapter.closure_tools["Delegate"](
         "implementer", "run a sweep", "a report", wait=True, phase="DoE")
     # wait=True returns the (stub) result; the registry carries the phase
     did = next(iter(n._registry))
     assert n._registry[did]["phase"] == "doe"   # canonical value, resolved
-    assert out.lstrip().startswith(("Done", "Errored"))
+    assert out.lstrip().startswith(("Done", "Errored", "[D"))
 
 
 def test_delegate_unknown_phase_is_soft_none(tmp_path):

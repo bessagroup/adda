@@ -700,12 +700,12 @@ class OrchestrationMixin:
                     # Spec 12 design item 10(a): a pending-for-you notice
                     # on every tool result, scoped to THIS CALL's own
                     # delegator identity (never a sibling's or a nested
-                    # child's). Gated behind peer_interaction, same as
-                    # every other spec 12 surface -- OpenForReview cannot
-                    # exist with the feature off, and the un-collected/
-                    # FollowUp buckets staying silent too keeps today's
-                    # shipped behavior (Confer/FollowUp/Reply) undisturbed
-                    # until the migration-sweep commit flips the default.
+                    # child's). Gated behind peer_interaction (on by
+                    # default since the migration-sweep commit) -- with the
+                    # feature off (the old-contract ablation arm),
+                    # OpenForReview cannot exist and this stays silent,
+                    # matching the pre-spec-12 Confer/FollowUp/Reply surface
+                    # that arm restores.
                     from ..runtime import features as _features
                     if _features.enabled("peer_interaction"):
                         from ..backends.base import get_delegation_id

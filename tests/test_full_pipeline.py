@@ -1,4 +1,13 @@
-"""End-to-end integration test: AgenticRun.execute() with mock adapters."""
+"""End-to-end integration test: AgenticRun.execute() with mock adapters.
+
+Runs under the default (peer_interaction on): ScriptedStrategistAdapter
+(tests/fixtures.py) collects each delegation via Wait(block=False) polling,
+then Wait(id) + approve_delegation (SendMessage(..., approve=True)) before
+using its result -- exactly what a real delegator must do now that a report
+opens for review instead of auto-finalizing (spec 12 item 8). This exercises
+workspace/VCS wiring, the hypothesis ledger and the delegation log WITH the
+review gate in the loop, not around it.
+"""
 
 from __future__ import annotations
 
@@ -73,6 +82,96 @@ def pipeline_run(tmp_path):
 # ---------------------------------------------------------------------------
 # Output directory structure
 # ---------------------------------------------------------------------------
+
+
+def test_default_arm_reaches_gated_via_delegate_wait_approve(pipeline_run, tmp_path):
+    """The headless proof that the default (peer_interaction on) actually
+    works end to end: Delegate -> Wait(block=False) polling -> Wait(id) ->
+    approve (SendMessage(..., approve=True)) -> Done()'s reproduction gate
+    check -> a clean terminal close. Every other test in this file exercises
+    this same path (ScriptedStrategistAdapter approves both its
+    delegations); this one checks the terminal outcome explicitly rather
+    than only the side effects along the way.
+
+    UNGATED (not GATED) is the correct outcome here, unrelated to
+    peer_interaction: GATED requires a connected critic whose gate PASSES
+    (nodes/tools/routing/feedback.py::_close/_critic_gate) -- this graph
+    has no critic node, so Done() closes UNGATED directly. See
+    test_default_arm_reaches_gated_via_critic_pass below for the arm that
+    DOES have one and reaches GATED -- confirmed unchanged with the
+    feature OFF too."""
+    _, study = pipeline_run
+    run_dir = next((study / "runs").iterdir())
+    status = json.loads((run_dir / "debug" / "run_status.json").read_text())
+    assert status["termination"] == "done", status
+    assert status["status"] in ("GATED", "UNGATED"), status
+    assert (study / "pipeline.ipynb").exists()
+
+
+class _CriticSpec(Agent):
+    role = "critic"
+    description = "Test critic."
+
+
+class _CriticPassAdapter:
+    """A critic that always PASSes -- the one path that earns GATED
+    (nodes/tools/routing/feedback.py::_critic_gate)."""
+
+    def __init__(self) -> None:
+        self.closure_tools: dict = {}
+        self.last_usage: dict = {}
+
+    def invoke(self, messages):
+        return "### Verdict\nPASS\n\nThe conclusion is grounded in the run's evidence."
+
+    def copy(self):
+        return self
+
+
+def _graph_spec_with_critic() -> Graph:
+    return Graph(
+        nodes={
+            "strategizer": _StrategistSpec(), "implementer": _WorkerSpec(),
+            "critic": _CriticSpec(),
+        },
+        edges=(Edge("strategizer", "implementer"), Edge("strategizer", "critic")),
+        entry="strategizer",
+    )
+
+
+@pytest.fixture
+def pipeline_run_with_critic(tmp_path):
+    """Same scripted flow as ``pipeline_run``, plus a critic that always
+    PASSes -- the arm that reaches GATED (not just a clean UNGATED close)."""
+    study = _make_study(tmp_path)
+    run = AgenticRun(study_dir=study, graph=_graph_spec_with_critic())
+    strat = ScriptedStrategistAdapter(run=run)
+    worker = MockWorkerAdapter()
+    critic = _CriticPassAdapter()
+
+    def _mock_make_adapter(name, agent):
+        return {"strategizer": strat, "critic": critic}.get(name, worker)
+
+    run._make_adapter = _mock_make_adapter
+    run.execute()
+    return run, study
+
+
+def test_default_arm_reaches_gated_via_critic_pass(pipeline_run_with_critic):
+    """The headless proof that GATED itself composes with the default
+    (peer_interaction on): the same Delegate -> Wait -> approve flow as
+    test_default_arm_reaches_gated_via_delegate_wait_approve above, but with
+    a critic connected that PASSes -- the one path that earns GATED
+    (nodes/tools/routing/feedback.py::_critic_gate). No headless test
+    exercised this exact composition before (grep across tests/*.py for
+    ``outcome.*GATED`` before this commit finds only direct unit calls into
+    _finalize_run/terminal.resolve, never a scripted run reaching it through
+    Delegate/Wait/approve for real)."""
+    _, study = pipeline_run_with_critic
+    run_dir = next((study / "runs").iterdir())
+    status = json.loads((run_dir / "debug" / "run_status.json").read_text())
+    assert status["status"] == "GATED", status
+    assert status["reviewed"] is True, status
 
 
 def test_run_dir_created(pipeline_run, tmp_path):

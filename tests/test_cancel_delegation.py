@@ -7,6 +7,7 @@ import pytest
 
 from adda._src.backends.base import Agent, Edge, Graph
 from adda._src.nodes import Node
+from adda._src.runtime import settings
 
 
 class _Stub:
@@ -154,17 +155,27 @@ def test_followup_headless_proceeds_without_eoferror():
 
     Regression: a background run hit EOFError at `return input()`. The strategizer
     should instead be told no operator is present and proceed autonomously.
+
+    The standalone "FollowUp" tool is the old-contract surface, withheld by
+    default since the spec-12 migration sweep (SendMessage(to="human") calls
+    the SAME underlying method now) -- forced off here to keep exercising it
+    directly under its original name.
     """
-    n = _node()
-    # Default node is non-interactive → autonomous notice, no crash.
-    out = n.adapter.closure_tools["FollowUp"]("Which units?")
-    assert "no operator" in out.lower()
-    # Even if flagged interactive, a non-TTY stdin (as under pytest) must NOT
-    # crash — the isatty guard falls through to the same autonomous notice.
-    n._interactive = True
-    n._ask_count = 0
-    out2 = n.adapter.closure_tools["FollowUp"]("Again?")
-    assert "no operator" in out2.lower()
+    try:
+        settings.configure({"peer_interaction": False})
+        n = _node()
+        # Default node is non-interactive → autonomous notice, no crash.
+        out = n.adapter.closure_tools["FollowUp"]("Which units?")
+        assert "no operator" in out.lower()
+        # Even if flagged interactive, a non-TTY stdin (as under pytest) must
+        # NOT crash — the isatty guard falls through to the same autonomous
+        # notice.
+        n._interactive = True
+        n._ask_count = 0
+        out2 = n.adapter.closure_tools["FollowUp"]("Again?")
+        assert "no operator" in out2.lower()
+    finally:
+        settings.configure(None)
 
 
 def test_done_bounces_on_broken_pipeline_before_critic(tmp_path):

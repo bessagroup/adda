@@ -3,10 +3,18 @@
 When a delegation to a node with role=="datagenerator" completes and left a
 registration.json manifest in its workspace, the runtime points the canonical
 evaluator entrypoint at the authored generator (best-effort).
+
+The hook fires from ``_finish_ok`` (delegation.py), which under the default
+(peer_interaction on) only runs on approval, not on collection (spec 12 item
+8 -- the workspace commit and every side effect that rides with it move to
+AFTER approval). Every test here collects via Delegate(wait=True) and then
+approves (see ``approve_delegation``) before checking the registration
+side effect, matching how a real delegator reaches it.
 """
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -14,6 +22,20 @@ from adda._src.backends.base import Agent, Edge, Graph
 from adda._src.nodes import Node
 
 from tests.test_evaluator_resolution import _write_run_config
+
+from .fixtures import approve_delegation
+
+
+def _delegate_and_approve(closures, **kw):
+    """Delegate(wait=True) then approve the resulting open review, the way
+    a real delegator would -- returns the APPROVE call's own result, since
+    that is what carries any notice a finalize-time hook (like the
+    registration handoff) appends."""
+    out = closures["Delegate"](wait=True, **kw)
+    did = re.search(r"\[(D\d+)\]", out)
+    if did:
+        return approve_delegation(closures, did.group(1))
+    return out
 
 
 class _Strat(Agent):
@@ -92,9 +114,9 @@ def test_datagenerator_manifest_triggers_registration(tmp_path):
         tmp_path, "datagen", _DataGen()
     )
     _drop_manifest(run_dir, "D001")  # first Delegate id is D001
-    closures["Delegate"](
-        target="datagen", intent="build oracle",
-        expected_report="", wait=True,
+    _delegate_and_approve(
+        closures, target="datagen", intent="build oracle",
+        expected_report="",
     )
     cfg = json.loads(cfg_path.read_text())
     assert cfg["evaluator_entrypoint"].endswith(
@@ -108,8 +130,8 @@ def test_non_datagenerator_target_does_not_register(tmp_path):
     node, closures, run_dir, cfg_path = _build(tmp_path, "impl", _Impl())
     _drop_manifest(run_dir, "D001")  # manifest present but target is implementer
     before = cfg_path.read_text()
-    closures["Delegate"](
-        target="impl", intent="run", expected_report="", wait=True,
+    _delegate_and_approve(
+        closures, target="impl", intent="run", expected_report="",
     )
     assert cfg_path.read_text() == before  # unchanged
 
@@ -119,11 +141,11 @@ def test_missing_manifest_no_crash(tmp_path):
         tmp_path, "datagen", _DataGen()
     )
     before = cfg_path.read_text()
-    result = closures["Delegate"](
-        target="datagen", intent="no manifest",
-        expected_report="", wait=True,
+    result = _delegate_and_approve(
+        closures, target="datagen", intent="no manifest",
+        expected_report="",
     )
-    assert "Done" in result  # delegation still completed
+    assert "Errored" not in result  # delegation still completed, no crash
     assert cfg_path.read_text() == before  # config untouched
 
 
@@ -163,9 +185,9 @@ def test_extends_canonical_does_not_repoint_the_entrypoint(tmp_path):
     _drop_in_place_manifest(run_dir, tmp_path / "study", "D001")
     before = cfg_path.read_text()
 
-    closures["Delegate"](
-        target="datagen", intent="extend the canonical generator",
-        expected_report="", wait=True,
+    _delegate_and_approve(
+        closures, target="datagen", intent="extend the canonical generator",
+        expected_report="",
     )
 
     assert cfg_path.read_text() == before, (
@@ -182,11 +204,13 @@ def test_extends_canonical_still_records_who_touched_the_oracle(tmp_path):
     )
     _drop_in_place_manifest(run_dir, tmp_path / "study", "D001")
 
-    # The notice reaches the agent with the delegation's own result: every
-    # tool call delivers what is queued, via the dispatch wrapper.
-    out = closures["Delegate"](
-        target="datagen", intent="extend the canonical generator",
-        expected_report="", wait=True,
+    # The notice reaches the agent through the approve call's own result:
+    # every tool call delivers what is queued, via the dispatch wrapper --
+    # and the registration hook itself only fires at approval (spec 12
+    # item 8), not at collection.
+    out = _delegate_and_approve(
+        closures, target="datagen", intent="extend the canonical generator",
+        expected_report="",
     )
 
     with node._notifications_lock:
@@ -204,11 +228,12 @@ def test_a_normal_manifest_still_repoints_and_names_its_author(tmp_path):
     )
     _drop_manifest(run_dir, "D001")
 
-    # The notice reaches the agent with the delegation's own result: every
-    # tool call delivers what is queued, via the dispatch wrapper.
-    out = closures["Delegate"](
-        target="datagen", intent="build oracle",
-        expected_report="", wait=True,
+    # The notice reaches the agent through the approve call's own result --
+    # the registration hook fires at approval (spec 12 item 8), not at
+    # collection.
+    out = _delegate_and_approve(
+        closures, target="datagen", intent="build oracle",
+        expected_report="",
     )
 
     cfg = json.loads(cfg_path.read_text())

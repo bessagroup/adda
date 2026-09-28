@@ -2,13 +2,29 @@
 
 Confer replaces GetStatus/Reply/worker-FollowUp. It is async (never blocks),
 targets nodes by name, and requires the target to have been woken at least once.
+
+Confer/Reply/worker-FollowUp are themselves retired by SendMessage as of the
+spec-12 migration-sweep commit (internal/specs/12-peer-interaction.md) --
+``peer_interaction`` now defaults True. This file exercises the OLD-contract
+ablation arm (the feature explicitly off), which restores this exact surface
+byte-for-byte -- see test_send_message.py for the SendMessage replacement.
 """
 from __future__ import annotations
 
 import threading
 
+import pytest
+
 from adda._src.backends.base import Agent, Edge, Graph
 from adda._src.nodes import Node
+from adda._src.runtime import settings
+
+
+@pytest.fixture(autouse=True)
+def _peer_interaction_off():
+    settings.configure({"peer_interaction": False})
+    yield
+    settings.configure(None)
 
 
 class _Stub:
@@ -434,3 +450,17 @@ def test_a_note_for_a_finished_delegation_is_not_dropped(tmp_path):
     assert "not" in text.lower()
     with n._pending_worker_msgs_lock:
         assert not n._pending_worker_msgs.get("D004")
+
+
+def test_confer_absent_and_sendmessage_present_when_peer_interaction_is_on():
+    """Migration-sweep mutual exclusion, checked on a real Node's granted
+    tools (not the OLD-contract fixture's forced-off default above): with
+    peer_interaction on, Confer is withheld and SendMessage is granted --
+    the reverse of every other test in this file."""
+    settings.configure({"peer_interaction": True})
+    try:
+        n = _node()
+        assert "Confer" not in n.adapter.closure_tools
+        assert "SendMessage" in n.adapter.closure_tools
+    finally:
+        settings.configure({"peer_interaction": False})

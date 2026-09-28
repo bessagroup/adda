@@ -14,6 +14,8 @@ from adda._src.backends.base import Agent, Edge, Graph
 from adda._src.nodes import Node
 from adda._src.runtime import settings
 
+from .fixtures import approve_delegation
+
 _WORKER_REPORT = (
     "### Actions taken\nran a thing\n"
     "### Conclusions\nit worked\n"
@@ -101,7 +103,11 @@ def test_past_cutoff_refuses_and_fires_no_delegation():
 
 def test_past_cutoff_wait_and_done_still_work():
     """The run must still be able to close: Wait() on an in-flight
-    delegation, and Done(), stay reachable past the cutoff."""
+    delegation, and approving/Done(), stay reachable past the cutoff.
+
+    Runs under the default (peer_interaction on): the in-flight delegation
+    opens for review rather than auto-finalizing, and approving it -- not a
+    NEW Delegate -- must not itself be refused by the cutoff."""
     n = _node()
     n._budget_seconds = 100.0
     n._run_start = time.time() - 10.0  # start well below the cutoff
@@ -117,14 +123,23 @@ def test_past_cutoff_wait_and_done_still_work():
     assert refused.startswith("ERROR"), refused
 
     # ...but Wait() on the one already in flight is untouched and returns
-    # its real report — the run can still close.
+    # its real report, open for review — the run can still close.
     wait_out = n.adapter.closure_tools["Wait"](delegation_id=did)
     assert "refused" not in wait_out
     assert "it worked" in wait_out
-    assert "Done" in wait_out
+    assert "OpenForReview" in wait_out
+
+    # Approving it (not a new Delegate) must work past the cutoff too.
+    approve_out = approve_delegation(n.adapter.closure_tools, did)
+    assert "refused" not in approve_out.lower()
+    with n._registry_lock:
+        assert n._registry[did]["status"] == "Done"
 
 
 def test_in_flight_delegation_untouched_by_cutoff():
+    """Runs under the default: an in-flight delegation crossing the cutoff
+    still opens for review normally, and approving it past the cutoff
+    still reaches Done."""
     n = _node()
     n._budget_seconds = 100.0
     n._run_start = time.time() - 10.0
@@ -137,8 +152,16 @@ def test_in_flight_delegation_untouched_by_cutoff():
     n._threads[did].join(timeout=5)
     with n._registry_lock:
         entry = n._registry[did]
-        assert entry["status"] == "Done"
+        assert entry["status"] == "OpenForReview"
         assert "it worked" in entry["result"]
+
+    # The report must be READ (Wait/Delegate(wait=True)) before it can be
+    # approved -- the "read" enforcement (spec 12 item 4) -- not bypassable
+    # by reaching into the registry directly, as this test does above.
+    n.adapter.closure_tools["Wait"](delegation_id=did)
+    approve_delegation(n.adapter.closure_tools, did)
+    with n._registry_lock:
+        assert n._registry[did]["status"] == "Done"
 
 
 def test_cutoff_disabled_restores_today_behaviour():

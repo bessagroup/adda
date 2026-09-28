@@ -124,11 +124,15 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
 
 ### Delegation + inter-agent messaging
 - **What:** the strategizer delegates work to specialist agents and they report back;
-  agents can ask one clarifying question, send async messages, and report progress.
+  agents ask/answer/approve through one peer-and-human messaging tool (see
+  `SendMessage` below).
 - **Where:** `nodes/tools/routing/`, `nodes/orchestration.py`.
-- **Tools:** `Delegate`*, `Wait`, `FollowUp`, `Confer`, `ReportEvals`.
+- **Tools:** `Delegate`*, `Wait`, `SendMessage`, `ReportEvals`.
   (`Wait(id, block=False)` is the status poll that used to be `GetStatus`.)
   (*Delegate is injected dynamically, not in a static `tools` set.)
+  `Confer`/`Reply`/the peer-facing `FollowUp`/`ReportProgress` are the
+  pre-spec-12 surface `SendMessage` replaced — withheld by default, restored
+  only by the `peer_interaction` ablation arm off (see below).
 - **Fan-out harvesting:** `Wait()` takes an OPTIONAL delegation id. Bare
   `Wait()` blocks until whichever delegation finishes first and returns that
   one's report (labelled with its ID), marking it read so N in flight are
@@ -199,12 +203,11 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   (`seed_defaults(include_reproduction_gate=...)`, `ORACLE_GOLD_STATE`).
   **Status:** core — ablation only; does not change WHAT the gate checks.
 
-### `SendMessage` — the peer/human messaging tool (spec 12, in progress)
+### `SendMessage` — the peer/human messaging tool (spec 12, migration complete)
 - **What:** one tool for all peer and human messaging —
   `SendMessage(to, message, wait_for_reply=False, approve=False)` —
-  eventually replacing `Confer`/`FollowUp`/`Reply` (`internal/specs/
-  12-peer-interaction.md`, not yet built in full). This first commit adds
-  the tool itself: a shared, node-level closure (used by every thread
+  replacing `Confer`/`FollowUp`/`Reply`/`ReportProgress` (`internal/specs/
+  12-peer-interaction.md`). A shared, node-level closure (used by every thread
   regardless of role, exactly like `Delegate`/`Wait` — the calling
   thread's own thread-local delegation id resolves "who am I" per call,
   since one Node object is shared across concurrent same-role
@@ -221,14 +224,15 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   deadlock case, a delegator blocked in `Wait()` waking on a worker's
   question mid-fan-out, and a nested worker-delegator only ever seeing
   its OWN children's messages, never a sibling delegation's.
-- **Ablation, temporarily inverted:** gated behind `peer_interaction`
-  (`runtime/features.py`), the one Feature in this codebase that
-  currently defaults **False** rather than True — a deliberate, TEMPORARY
-  exception while spec 12 is built across several commits without
-  disturbing `Confer`/`FollowUp`/`Reply`, which stay the live surface
-  until the final migration-sweep commit flips this default and retires
-  them. `Wait` was also re-tightened to outgoing-edges-only in this same
-  series (a separate commit, `1d7e14c`) — see BACKLOG's spec 12 entry.
+- **Ablation:** gated behind `peer_interaction` (`runtime/features.py`),
+  default **True** like every other Feature since the migration-sweep
+  commit. On: `Confer`/`Reply`/the peer-facing `FollowUp`/`ReportProgress`
+  are withheld (`nodes/tools/routing/__init__.py`'s `build_routing_tools`,
+  `WorkerSession.install_worker_tools`) and `SendMessage` is granted
+  instead. Off: restores that exact pre-spec-12 surface byte-for-byte, a
+  real ablation arm kept for comparison, not a testing shortcut. `Wait` was
+  also re-tightened to outgoing-edges-only in this same series (a separate
+  commit, `1d7e14c`) — see BACKLOG's spec 12 entry.
 - **The review gate (spec 12 item 3).** With `peer_interaction` on, a
   worker's non-error report NEVER finalizes on its own: `WorkerSession.
   run()` calls `_open_for_review` instead of `_finish_ok`, moving the
@@ -340,11 +344,11 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   `_check_open_reviews`/`_wait_for_any`/`_status`, `_open_for_review`'s
   `"waited"` reset and unread-message notice), `backends/claude.py`
   (`ainvoke`/`invoke`'s `resume` parameter).
-  **Status:** in progress — see `internal/specs/12-peer-interaction.md`
-  for what remains (the migration sweep that retires
-  `Confer`/`FollowUp`/`Reply`, and the eventual default-True flip). The
-  corrective retry-on-malformed cycle NOT repeating for a revised report
-  is a deliberate, accepted tradeoff (every revision is reviewed by the
+  **Status:** done — migration sweep landed (`peer_interaction` defaults
+  True; `Confer`/`FollowUp`/`Reply`/`ReportProgress` withheld by default,
+  see `internal/specs/12-peer-interaction.md`). The corrective
+  retry-on-malformed cycle NOT repeating for a revised report is a
+  deliberate, accepted tradeoff (every revision is reviewed by the
   delegator anyway), not an open gap.
 
 ### Per-cell notebook debugger (#13)

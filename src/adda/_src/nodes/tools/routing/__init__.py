@@ -72,28 +72,26 @@ def build_routing_tools(node) -> dict:
     # delegations, including fan-out. This is a deliberate UN-shipping of
     # that widening, not an oversight -- see spec 12's own Risk note on it.
     #
-    # Reply/FollowUp stay for now (retired together in a later commit, once
-    # SendMessage exists to replace both): FollowUp routes to whoever
+    # Reply/FollowUp (peer-facing) vs SendMessage: mutually exclusive on the
+    # peer_interaction knob, not stacked. FollowUp routes to whoever
     # delegated to THIS node (or a human, for the entry node) regardless of
     # this node's own outgoing edges, and Reply answers a FollowUp this
-    # node received as a delegator.
-    closures: dict = {
-        "Reply": _dele["Reply"],
-        "FollowUp": _dele["FollowUp"],
-    }
+    # node received as a delegator -- both retired in favour of SendMessage
+    # when the feature is on (its default now; see runtime/features.py).
+    # Off is the old-contract ablation arm, restoring exactly this surface.
+    from ....runtime import features as _features
+    closures: dict = {}
+    if not _features.enabled("peer_interaction"):
+        closures["Reply"] = _dele["Reply"]
+        closures["FollowUp"] = _dele["FollowUp"]
     if node._outgoing:
         closures["Delegate"] = _dele["Delegate"]
         closures["Wait"] = _dele["Wait"]
 
-    # SendMessage (spec 12): behind its own feature, default OFF until the
-    # migration-sweep commit that retires Reply/FollowUp/Confer in favour
-    # of it -- see runtime/features.py's own comment on why this one
-    # Feature is a temporary exception to "every feature defaults True".
-    # Granted unconditionally otherwise (like Reply/FollowUp above): a node
-    # with no edges at all is never dispatched, so the tool being present
-    # but practically unreachable there is harmless, matching Reply/
-    # FollowUp's own existing posture.
-    from ....runtime import features as _features
+    # SendMessage (spec 12): granted unconditionally when the feature is on
+    # (like Reply/FollowUp were, above) -- a node with no edges at all is
+    # never dispatched, so the tool being present but practically
+    # unreachable there is harmless.
     if _features.enabled("peer_interaction"):
         closures["SendMessage"] = _dele["SendMessage"]
 
@@ -118,7 +116,6 @@ def build_routing_tools(node) -> dict:
     # saw a toolset saturated with pipeline.ipynb capability regardless of what
     # the study's own PROBLEM_STATEMENT.md said, and used it. Done is never
     # owned by a feature -- a run must always be able to close.
-    from ....runtime import features as _features
     _agent_tools = _agent_tools - _features.disabled_tool_names()
 
     _fb = build_feedback_closures(node)
@@ -135,7 +132,7 @@ def build_routing_tools(node) -> dict:
         closures["WriteNote"] = _notes["WriteNote"]
     if "ReadNote" in _agent_tools:
         closures["ReadNote"] = _notes["ReadNote"]
-    if "Confer" in _agent_tools:
+    if "Confer" in _agent_tools and not _features.enabled("peer_interaction"):
         closures["Confer"] = _dele["Confer"]
     # CancelDelegation is OPT-IN (plug-and-play), not always-on: its def is
     # intact but it is granted only to an agent that lists it in its `tools`.

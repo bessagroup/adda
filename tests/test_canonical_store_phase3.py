@@ -669,10 +669,17 @@ class TestNodesDelegationLogEvalsWiring:
     """Test that _run epilogue passes resolved evals into delegation_log.record."""
 
     def test_delegation_log_record_has_evals(self, tmp_path):
-        """After a delegation completes, the log record should have evals set."""
+        """After a delegation completes, the log record should have evals set.
+
+        Runs under the default (peer_interaction on): the DONE row is
+        written at approval (SendMessage(..., approve=True), see
+        approve_delegation), not at collection -- spec 12 item 8.
+        """
         from adda._src.backends.base import Agent, Edge, Graph
         from adda._src.infra.delegation_log import DelegationLog
         from adda._src.nodes import Node
+
+        from .fixtures import approve_delegation
 
         class CountingAdapter:
             """Calls ReportEvals(7) and then returns a report."""
@@ -726,7 +733,7 @@ class TestNodesDelegationLogEvalsWiring:
         # Manually trigger a delegation and wait
         # Build the Delegate closure tool
         closures = node._build_routing_closures()
-        # Call Delegate(wait=True)
+        # Call Delegate(wait=True), then approve like a real delegator would
         result = closures["Delegate"](
             target="w",
             intent="do something",
@@ -734,6 +741,8 @@ class TestNodesDelegationLogEvalsWiring:
             hypothesis_ids=None,
             wait=True,
         )
+        did = next(iter(node._registry))
+        approve_delegation(closures, did)
         # Now check the delegation log
         records = dlog.query_all()
         done_records = [r for r in records if r.get("status") == "DONE"]

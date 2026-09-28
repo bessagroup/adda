@@ -6,6 +6,22 @@ import re
 import time
 
 
+def approve_delegation(tools: dict, delegation_id: str,
+                        message: str = "Approved.") -> str | None:
+    """Approve an OPEN-FOR-REVIEW delegation the way a real delegator would,
+    via ``SendMessage(id, ..., approve=True)`` -- finalizes it (runs
+    ``_finish_ok``, commits the workspace, logs DONE), the same close a
+    collected report needs under the spec-12 review gate (default on since
+    the migration sweep). A no-op (returns ``None``) when ``SendMessage``
+    isn't in this node's closures -- the peer_interaction-off ablation arm,
+    where a collected delegation is already terminal on its own -- so
+    callers can use this unconditionally in a test meant to run under
+    either arm."""
+    if "SendMessage" not in tools:
+        return None
+    return tools["SendMessage"](delegation_id, message, approve=True)
+
+
 class MockWorkerAdapter:
     """Stub adapter that returns a valid canned Report and exposes last_usage."""
 
@@ -105,6 +121,13 @@ class ScriptedStrategistAdapter:
             if not status.strip().startswith("Working"):
                 break
             time.sleep(0.05)
+        # Collect and approve the report like a real delegator would --
+        # under peer_interaction (on by default) it opens for review
+        # rather than auto-finalizing, and HypothesisUpdate's provenance
+        # link (DelegationLog.last_completed_id()) needs the terminal DONE
+        # row, which only exists once approved (spec 12 item 8).
+        tools["Wait"](d1_id)
+        approve_delegation(tools, d1_id)
 
         # Step 4: falsify H1 based on report
         tools["HypothesisUpdate"](
@@ -130,6 +153,8 @@ class ScriptedStrategistAdapter:
             if not status.strip().startswith("Working"):
                 break
             time.sleep(0.05)
+        tools["Wait"](d2_id)
+        approve_delegation(tools, d2_id)
 
         tools["HypothesisUpdate"](
             hypothesis_id=h2,
@@ -169,6 +194,15 @@ class ScriptedStrategistAdapter:
                     job_status=JobStatus.OPEN))
                 _gen.flush()
 
-        tools["Done"](summary="H1 falsified. H2 supported. Optimal design confirmed.")  # first: warning
-        tools["Done"](summary="H1 falsified. H2 supported. Optimal design confirmed.")  # second: accepted
+        # Two-shot without a critic (warn, then accept); a THIRD call is
+        # needed when a critic is connected and PASSes -- its own exit
+        # interview round (feedback.py::_capture_retrospective) is what
+        # actually sets node._route["kind"]="done". Looping rather than
+        # hardcoding a call count keeps this script correct for either
+        # graph shape.
+        summary = "H1 falsified. H2 supported. Optimal design confirmed."
+        for _ in range(4):
+            out = tools["Done"](summary=summary)
+            if "Run complete." in out:
+                break
         return "Done."
