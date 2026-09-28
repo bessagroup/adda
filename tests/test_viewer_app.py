@@ -419,7 +419,7 @@ def test_a_result_is_nested_under_the_call_it_answers(tmp_path):
         "/api/runs/20260904T120000/transcript/D007/fragment?after=0").text
     # Same indent wrapper as a tool call, flagged as the continuation row
     # so it stays tucked against its call instead of opening a new unit.
-    assert "<div class='turn turn-cont turn-res'>" in body
+    assert "<div class='turn turn-cont turn-res'><div class='turn-body'>" in body
     assert "class='tool-result" in body
     # And nothing renders at the old detached top level any more.
     assert "tool-result-row" not in body

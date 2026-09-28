@@ -358,14 +358,14 @@ def _tool_result_html(event: dict, names: list[str]) -> str:
             f"{_preview_block(text, 'result-pre')}" if text.strip() else ""
         )
         html += (
-            "<div class='turn turn-cont turn-res'>"
+            "<div class='turn turn-cont turn-res'><div class='turn-body'>"
             f"{notices_html}"
             f"<div class='tool-result{' is-error' if is_error else ''}'>"
             "<span class='result-glyph' "
             f"title='{_esc(_display_tool_name(name))}'>&#9151;</span>"
             "<div class='result-body'>"
             f"{body_html}"
-            "</div></div></div>"
+            "</div></div></div></div>"
         )
     return html
 

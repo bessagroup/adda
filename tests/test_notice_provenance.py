@@ -85,6 +85,15 @@ def test_viewer_renders_a_notice_outside_the_result_block():
     assert NOTICE_OPEN not in html and NOTICE_CLOSE not in html, html
 
 
+def test_notice_and_result_stack_in_one_column_not_side_by_side():
+    # .turn is a flex ROW; a notice and a result as its direct children
+    # rendered side by side. Both must sit inside one .turn-body column.
+    html = _render(wrap_notice("[NUDGE] x") + "out")
+    body = html.split("<div class='turn-body'>", 1)[1]
+    assert body.index("class='notice") < body.index("class='tool-result")
+    assert html.count("<div class='turn-body'>") == 1, html
+
+
 def test_viewer_result_without_a_notice_is_unchanged_in_shape():
     html = _render("PASSED 3 tests")
     assert "notice" not in html, html
