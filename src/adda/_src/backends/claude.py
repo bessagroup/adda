@@ -762,6 +762,7 @@ class ClaudeAdapter:
             if isinstance(msg, ResultMessage):
                 return {"type": "result",
                         "usage": getattr(msg, "usage", None),
+                        "model_usage": getattr(msg, "model_usage", None),
                         "cost_usd": getattr(msg, "total_cost_usd", None)}
             if isinstance(msg, SystemMessage):
                 # SystemMessage used to be invisible here entirely (this

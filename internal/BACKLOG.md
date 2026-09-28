@@ -39,6 +39,7 @@ before. Until one is answered or closed, treat it as known, not news.
 - [ ] **#16** ABAQUS subprocess can't import workspace modules (PYTHONPATH) — *open, abaqus2py-owned* (recommendation only; not an f3dasm fix)
 - [ ] **#43** promptmap.html citations are file:line, so any unrelated src edit that shifts lines makes it stale — *open, design smell in a working safety net* — see §43 below
 - [ ] **#44** `pip install` inside an "activated" uv venv can silently target the wrong Python — *open, local-dev-only, not a fix, a documented gotcha* — see §44 below
+- [ ] **#47** Computed cost sits 0-8% below the SDK's `total_cost_usd` on validator/critic calls — *open, low (telemetry column, not correctness)* — see §47 below
 
 ## Parked — deferred on purpose
 
@@ -661,3 +662,22 @@ scored for the ranked cap; whether a hypothesis that was SUPPORTED under a
 now-changed oracle should be flagged distinctly from one still under the
 current oracle, or just carry its judged-under version and leave the
 distinction to the reading agent. Needs a spec before implementation.
+
+## 47. Computed cost undershoots the SDK cost by 0-8% on validator/critic calls
+
+`cost_usd_computed` (from `infra/model_prices.yaml`) matches the SDK's
+`total_cost_usd` exactly in every live probe, but sits below it on real
+validator/critic calls of run 20260928T141126 (per-call extra SDK cost:
+validators ~$0.0034-0.0037, critic-1 $0.0047, critic-2/3 $0.0058, D001-D003
+~$0.001).
+
+Ruled out: cache TTL and per-TTL rates (every call was all-1h, one iteration,
+no server tools); a per-token rate mismatch (linear fit fails); a plain call, a
+call with an MCP tool, and a reviewer-like call (26k-token system prompt, no
+tools) all reproduce the SDK cost to the cent, with a single model in
+`model_usage`.
+
+Unexplained: what the extra SDK spend is. The transcripts of that run have no
+`model_usage`; the transcript `result` record now records it, so the next real
+run shows whether a second model entry (a CLI auxiliary call) carries the gap.
+Read it from a `result` record's `model_usage` vs `usage`.
