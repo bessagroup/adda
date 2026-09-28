@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+    # internal/ is dev docs, not part of the published MkDocs site -- a push
+    # touching ONLY the promptmap publish-metadata record has no effect on
+    # this build. See pull_request.yml's matching paths-ignore for why.
+    paths-ignore:
+      - "internal/promptmap.published.json"
 
 # Deploy the MkDocs site to GitHub Pages.
 permissions:

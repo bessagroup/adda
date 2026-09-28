@@ -5,6 +5,13 @@ on:
   push:
     branches:
       - main
+    # promptmap.published.json is a publish-metadata record, not the map
+    # itself -- a push that touches ONLY this file has nothing for
+    # check_promptmap (or any test) to check. Still runs normally whenever
+    # this file changes ALONGSIDE promptmap.html/promptmap.py (paths-ignore
+    # only skips a push whose changed files are ALL in this list).
+    paths-ignore:
+      - "internal/promptmap.published.json"
   schedule:
     # Full OS x version matrix nightly, independent of push/PR activity, so
     # version-specific regressions (e.g. the py3.10 cf.TimeoutError bug,
