@@ -38,6 +38,7 @@ before. Until one is answered or closed, treat it as known, not news.
 - [ ] **#22** Stall watchdog: liveness = "file written", not "progress made" — *open, medium (a backstop, not a primary control)*. `seconds_since_last_activity()` (`infra/watchdog_cleanup.py`) is implemented exactly as this item describes and its docstring defends the choice; whether a busy-but-unproductive run should be caught is still unanswered — see §22 below. Note: `python -m adda.watchdog` (#41, resolved — see `internal/BACKLOG_RESOLVED.md`) is a flat 2×-budget hard deadline and deliberately does NOT consult this liveness signal, so this item is still genuinely open and independent of #41's fix.
 - [ ] **#16** ABAQUS subprocess can't import workspace modules (PYTHONPATH) — *open, abaqus2py-owned* (recommendation only; not an f3dasm fix)
 - [ ] **#43** promptmap.html citations are file:line, so any unrelated src edit that shifts lines makes it stale — *open, design smell in a working safety net* — see §43 below
+- [ ] **#44** `pip install` inside an "activated" uv venv can silently target the wrong Python — *open, local-dev-only, not a fix, a documented gotcha* — see §44 below
 
 ## Parked — deferred on purpose
 
@@ -449,6 +450,35 @@ differs, rather than relying on `pytest -m promptmap` alone (its own test
 suite checks the map's internal consistency and provenance — it does not
 re-run this specific stale-vs-committed diff check, which is a
 shell-script step in `check_promptmap`'s CI job, not a pytest test).
+
+## 44. `pip install` inside an "activated" uv venv can silently target the wrong Python
+
+**Status: open — a documented local-dev gotcha, not something to fix in
+code.** `pip` in an activated `.venv` runs whichever `pip` binary is FIRST on
+`PATH` — that is not guaranteed to be the venv's own `pip`, and `uv`-managed
+venvs frequently have none on `PATH` at all (uv's own workflow is `uv add`/
+`uv pip install`, not bare `pip`). A shell where a system or Conda Python's
+`pip` shadows the venv's own silently installs into that OTHER environment,
+leaving the project's actual `.venv` unchanged and package-less, with no
+error — `pip` reports success because it did succeed, just not where the
+caller believed.
+
+**Evidence.** Run `20260927T012131` (Oscar, accidental 24h run): a
+retrospective blamed a `sklearn` import failure on "NumPy incompatibility."
+Verified false — the raw Bash transcript for that delegation showed
+`sklearn` was never actually importable in the running venv because an
+earlier `pip install scikit-learn` in that shell had targeted a different
+Anaconda environment's `pip`, not the project's `.venv`. The NumPy story was
+the agent's own plausible-sounding but wrong self-diagnosis (see CLAUDE.md
+§1's retrospective-mechanism caveat — this is the same class of finding it
+warns about).
+
+**Not fixing this in code**: this is a local/Oscar shell-environment
+property, not an adda behavior — there is no adda code path that shells out
+to bare `pip`. Mitigation is procedural: prefer `uv add`/`uv pip install`
+(never bare `pip`) inside this repo's venv, and if a package "installed"
+without error still fails to import, check `which pip` / `python -c "import
+sys; print(sys.executable)"` before assuming the package itself is broken.
 
 ## 2. Richer delegator↔worker comms — typed blocker/escalation
 **Status:** deferred (prefer benchmarking the current system first). Design explored 2026-06-15.
