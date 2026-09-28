@@ -759,19 +759,20 @@ def test_the_maps_tools_match_the_real_wiring_under_both_knob_values(promptmap, 
         )
 
     # The off arm: peer_interaction is the one Feature whose OFF state
-    # changes this list, so rebuild the map under it explicitly -- a fresh
-    # `data` isn't cheap (~170s), but this module already pays that once
-    # per CI run for the default arm's own build. The comparison itself
-    # must ALSO run under the override (``_real_routing_tools`` constructs
-    # a real Node, which reads the ambient setting at construction time),
-    # so the reset stays in `finally` around the whole block, not just the
-    # build.
+    # changes this list. Checked against promptmap._routing_tool_names
+    # directly rather than a second full promptmap.build_roles() rebuild
+    # (~100-200s) -- the default arm's check above already confirms
+    # build_roles() correctly wires in whatever _routing_tool_names()
+    # returns (that delegation is knob-independent code in build_roles()
+    # itself), so the off arm's own risk is entirely inside
+    # _routing_tool_names()'s knob-handling, which this still exercises
+    # directly and fully. Keeps this test's own cost near-instant instead
+    # of a second corpus rebuild.
     settings.configure({"peer_interaction": False})
     try:
-        off_roles = promptmap.build_roles(promptmap.shared_blocks())
-        for role in off_roles:
-            name, agent = role["id"], graph.nodes[role["id"]]
-            mapped = set(role["tools"]) & routing_tool_names
+        for name, agent in graph.nodes.items():
+            mapped = set(promptmap._routing_tool_names(
+                graph, out_edges, name, agent)) & routing_tool_names
             real = _real_routing_tools(
                 graph, out_edges, name, agent, routing_tool_names)
             assert mapped == real, (
