@@ -507,7 +507,10 @@ def test_route_watcher_break_sums_every_api_call_of_the_stream():
         return _Ev({"type": "message_start", "message": {
             "id": mid, "usage": {
                 "input_tokens": inp, "cache_read_input_tokens": cr,
-                "cache_creation_input_tokens": cc, "output_tokens": 1}}})
+                "cache_creation_input_tokens": cc, "output_tokens": 1,
+                "cache_creation": {
+                    "ephemeral_1h_input_tokens": cc * 3 // 4,
+                    "ephemeral_5m_input_tokens": cc - cc * 3 // 4}}}})
 
     def _delta(out):
         return _Ev({"type": "message_delta", "usage": {"output_tokens": out}})
@@ -534,6 +537,8 @@ def test_route_watcher_break_sums_every_api_call_of_the_stream():
     assert u["cache_read_input_tokens"] == 2500
     assert u["cache_creation_input_tokens"] == 200
     assert u["output_tokens"] == 301  # m1 final 300 + m2's start snapshot 1
+    assert u["cache_creation_1h_tokens"] == 150
+    assert u["cache_creation_5m_tokens"] == 50
     assert u["total_cost_usd"] is None
 
 

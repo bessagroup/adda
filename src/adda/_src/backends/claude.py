@@ -200,12 +200,25 @@ def _usage_fields(event: Any) -> dict:
     return {}
 
 
+def _cache_split(usage: dict) -> dict:
+    """Flat cache-write TTL split from the SDK's nested ``cache_creation``;
+    empty when the usage carries none (never a guessed zero split)."""
+    cc = usage.get("cache_creation")
+    if not isinstance(cc, dict):
+        return {}
+    return {"cache_creation_1h_tokens": cc.get("ephemeral_1h_input_tokens") or 0,
+            "cache_creation_5m_tokens": cc.get("ephemeral_5m_input_tokens") or 0}
+
+
 def _sum_message_usage(usages: Any) -> dict:
     total = dict.fromkeys(_USAGE_KEYS, 0)
+    split: dict[str, int] = {}
     for u in usages:
         for k in _USAGE_KEYS:
             total[k] += (u.get(k) or 0)
-    return total
+        for k, v in _cache_split(u).items():
+            split[k] = split.get(k, 0) + v
+    return {**total, **split}
 
 
 async def _anext_or_done(ait: Any) -> Any:
@@ -914,6 +927,7 @@ class ClaudeAdapter:
         if last_result is not None:
             self.last_usage = {
                 **(last_result.usage or {}),
+                **_cache_split(last_result.usage or {}),
                 "total_cost_usd": last_result.total_cost_usd,
             }
         elif _msg_usage:

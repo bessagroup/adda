@@ -59,12 +59,22 @@ def compute_cost_usd(model: Optional[str], usage: dict) -> Optional[float]:
                 "telemetry: no price for model %r in %s; cost_usd_computed "
                 "is None for its calls", model, _PRICES_PATH.name)
         return None
+    cc_total = usage.get("cache_creation_input_tokens") or 0
+    cc_1h = usage.get("cache_creation_1h_tokens")
+    cc_5m = usage.get("cache_creation_5m_tokens")
+    if cc_1h is None and cc_5m is None:
+        cc_1h, cc_5m = cc_total, 0
+    else:
+        cc_1h, cc_5m = cc_1h or 0, cc_5m or 0
+        cc_1h += max(cc_total - cc_1h - cc_5m, 0)
     return (
         (usage.get("input_tokens") or 0) * entry["input"]
         + (usage.get("output_tokens") or 0) * entry["output"]
         + (usage.get("cache_read_input_tokens") or 0) * entry["cache_read"]
-        + (usage.get("cache_creation_input_tokens") or 0) * entry["cache_write"]
+        + cc_1h * entry["cache_write_1h"]
+        + cc_5m * entry["cache_write_5m"]
     ) / 1e6
+
 
 # Token fields copied verbatim from adapter.last_usage.
 _TOKEN_FIELDS = (
@@ -72,6 +82,9 @@ _TOKEN_FIELDS = (
     "output_tokens",
     "cache_read_input_tokens",
     "cache_creation_input_tokens",
+    # The SDK's cache-write TTL split (0 when a backend reports none).
+    "cache_creation_1h_tokens",
+    "cache_creation_5m_tokens",
 )
 
 
@@ -167,6 +180,8 @@ class Telemetry:
                 "output_tokens": 0,
                 "cache_read_input_tokens": 0,
                 "cache_creation_input_tokens": 0,
+                "cache_creation_1h_tokens": 0,
+                "cache_creation_5m_tokens": 0,
                 "total_cost_usd": 0.0,
                 "computed_cost_calls": 0,
                 "cost_usd_computed": 0.0,

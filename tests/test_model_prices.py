@@ -82,3 +82,22 @@ def test_rows_and_summary_carry_computed_next_to_the_sdk_cost(tmp_path):
     assert tot["cost_usd_computed"] == pytest.approx(
         rows[0]["cost_usd_computed"] + rows[1]["cost_usd_computed"])
     assert tot["computed_cost_calls"] == 2
+
+
+def test_cache_writes_are_priced_per_ttl_from_the_sdk_split():
+    m = 1_000_000
+    one_h = compute_cost_usd("claude-haiku-4-5", {
+        "cache_creation_input_tokens": m, "cache_creation_1h_tokens": m,
+        "cache_creation_5m_tokens": 0})
+    five_m = compute_cost_usd("claude-haiku-4-5", {
+        "cache_creation_input_tokens": m, "cache_creation_1h_tokens": 0,
+        "cache_creation_5m_tokens": m})
+    assert one_h == pytest.approx(2.00) and five_m == pytest.approx(1.25)
+    # no split reported: the combined count is priced at the 1-hour rate
+    assert compute_cost_usd(
+        "claude-haiku-4-5", {"cache_creation_input_tokens": m}
+    ) == pytest.approx(2.00)
+    # a split that under-accounts the combined count prices the rest at 1h
+    assert compute_cost_usd("claude-haiku-4-5", {
+        "cache_creation_input_tokens": m, "cache_creation_5m_tokens": m // 2}
+    ) == pytest.approx(0.5 * 1.25 + 0.5 * 2.00)
