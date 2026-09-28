@@ -721,6 +721,19 @@ def test_critic_checklist_judges_conclusion_against_problem_statement():
     assert "criteria 1–5" not in ADVERSARIAL_CRITIQUE_SYSTEM_PROMPT
 
 
+def test_critic_reports_every_establishable_finding_in_one_pass():
+    """Real friction, run 20260928T141126: call_001 missed the stale
+    Hypotheses cell (a real, establishable finding at review time) and only
+    call_002 caught it, costing the run a full gate round it didn't need to
+    spend. The critic's operating principles must state, generally, that
+    every finding it can establish THIS review is reported THIS review —
+    none held back for a later round."""
+    from adda._src.agents.critic import ADVERSARIAL_CRITIQUE_SYSTEM_PROMPT
+
+    assert "REPORT EVERYTHING THIS REVIEW CAN ESTABLISH" in ADVERSARIAL_CRITIQUE_SYSTEM_PROMPT
+    assert "never held back" in ADVERSARIAL_CRITIQUE_SYSTEM_PROMPT
+
+
 def test_shared_tool_docstrings_have_no_domain_specific_leakage():
     """A tool docstring is rendered into EVERY agent's generated <tools>
     catalog that declares it (tool_catalog.render_tool_catalog) — so a study-
