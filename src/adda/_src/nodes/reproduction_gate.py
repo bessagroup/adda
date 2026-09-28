@@ -150,6 +150,15 @@ class ReproductionGateMixin:
         )
         if deliverable is None:
             return None  # absence is handled by _missing_deliverables
+        if deliverable.suffix == ".ipynb":
+            # NOTEBOOK-LEDGER SYNC, by construction: refresh the hypotheses
+            # cell's ledger-status block before anything else runs. This one
+            # hook covers BOTH call sites that reach here — RunNotebook
+            # (gate=True) and Done()'s pre-critic check — so a stale status
+            # is impossible the moment either reads the notebook, rather
+            # than merely detected once it's already been read.
+            from .tools.routing.notebook import refresh_hypotheses_ledger_block
+            refresh_hypotheses_ledger_block(study_dir, self._read_ledger())
         # One resolver for "where is this run", shared with the store tools:
         # they used to compute it separately and could disagree.
         if self._current_notes_dir is None:

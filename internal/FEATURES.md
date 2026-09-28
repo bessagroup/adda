@@ -167,6 +167,26 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   dry run), and `WriteDeliverable` for the study's declared extra files only.
 - **Status:** core (the live deliverable).
 
+### Hypotheses-cell status table is generated, not hand-maintained (NOTEBOOK-LEDGER SYNC, by construction)
+- **What:** the hypotheses cell owns one delimited block (`<!-- adda:ledger-
+  status:begin -->` … `end -->`) — an ID/status/posterior/one-line-statement
+  table rendered straight from `hypotheses.json` — so a stale per-hypothesis
+  status can never reach a gate check or the critic. The agent's own
+  narrative around the block is free-form and untouched; the block itself is
+  never hand-edited. Removes an error class rather than detecting it: 2 of 3
+  `example_study` Haiku runs lost a gate round to a hand-maintained status
+  cell drifting from the ledger (`20260928T024626` call_001 REVISE,
+  `20260928T141126` call_002 REJECT CRITICAL).
+- **Where:** `nodes/tools/routing/notebook.py` (`refresh_hypotheses_ledger_block`,
+  `_refresh_ledger_block`, `_render_ledger_status_block`), wired into
+  `WriteCell`'s hypotheses-cell create/edit paths and into
+  `nodes/reproduction_gate.py`'s `_reproduction_gate` (one hook covers both
+  `RunNotebook(gate=True)` and `Done()`'s pre-critic check, since both funnel
+  through it). Stated to every role in `prompts/deliverable_format.py`'s
+  `DELIVERABLE_FORMAT` (shared verbatim by the strategizer, implementer, and
+  critic).
+- **Status:** core (part of the deliverable contract).
+
 ### The reproduction gate is its own ablatable feature, independent of `pipeline_deliverable`
 - **What:** the gate's mechanical enforcement, its agent-facing description,
   and the milestone that exists only because of it are now owned by a

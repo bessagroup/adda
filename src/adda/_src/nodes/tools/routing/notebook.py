@@ -75,6 +75,90 @@ _NARRATIVE = {
     "verdict": "## Verdict & result",
 }
 
+# NOTEBOOK-LEDGER SYNC, by construction rather than by detection: the
+# hypotheses cell owns one delimited block, generated straight from
+# hypotheses.json, that no agent hand-edits. A stale per-hypothesis status
+# is therefore impossible at the moment anyone reads the cell -- the
+# author's own narrative around the block stays free-form and untouched.
+# (2 of 3 example_study Haiku runs lost a gate round to a stale status here:
+# 20260928T024626 call_001 REVISE, 20260928T141126 call_002 REJECT CRITICAL;
+# the deliverable contract asks the agent to keep this in sync by hand, and
+# in both cases it didn't, before the critic ever saw the notebook.)
+_LEDGER_BLOCK_BEGIN = "<!-- adda:ledger-status:begin -->"
+_LEDGER_BLOCK_END = "<!-- adda:ledger-status:end -->"
+
+
+def _render_ledger_status_block(ledger) -> str:
+    """The delimited status table's exact text, generated fresh from the
+    hypothesis ledger: id, current status, posterior belief, and its
+    statement truncated to one line (a multi-line statement's first line
+    only) so the table stays a scannable summary, not a second writeup."""
+    items = ledger.list_all() if ledger is not None else []
+    if not items:
+        body = ["(no hypotheses)"]
+    else:
+        body = ["| ID | Status | Posterior | Statement |", "|---|---|---|---|"]
+        for h in items:
+            statement = (h.get("statement") or "").splitlines()[0:1]
+            statement = statement[0] if statement else ""
+            body.append(
+                f"| {h.get('id', '?')} | {h.get('current_status', '?')} | "
+                f"{h.get('belief', '?')} | {statement} |"
+            )
+    return "\n".join([_LEDGER_BLOCK_BEGIN, *body, _LEDGER_BLOCK_END])
+
+
+def _refresh_ledger_block(source: str, ledger) -> str:
+    """Splice a fresh ledger-status block into a hypotheses cell's markdown
+    `source`: replace a well-formed existing block in place, or insert one
+    right after the heading line if absent. Everything outside the block
+    (the author's own narrative, including the heading) is preserved
+    byte-for-byte — this is a surgical splice, never a full-cell rewrite."""
+    block = _render_ledger_status_block(ledger)
+    if source.count(_LEDGER_BLOCK_BEGIN) == 1 and source.count(_LEDGER_BLOCK_END) == 1:
+        i = source.index(_LEDGER_BLOCK_BEGIN)
+        j = source.index(_LEDGER_BLOCK_END) + len(_LEDGER_BLOCK_END)
+        if i < j:
+            return source[:i] + block + source[j:]
+    heading, _sep, rest = source.partition("\n")
+    rest = rest.lstrip("\n")
+    return heading + "\n\n" + block + ("\n\n" + rest if rest.strip() else "")
+
+
+def refresh_hypotheses_ledger_block(study_dir, ledger) -> None:
+    """Best-effort: refresh pipeline.ipynb's hypotheses cell's ledger-status
+    block in place. No-op if there is no notebook yet, or no hypotheses
+    cell yet (WriteCell inserts a fresh block the first time the cell is
+    authored) -- never raises, since this is a governance nicety, not part
+    of the eval path.
+
+    Called from two places: ``_reproduction_gate`` (one hook covers BOTH
+    ``RunNotebook(gate=True)`` and ``Done()``'s pre-critic check, since both
+    funnel through it), and WriteCell's own hypotheses-cell create/edit
+    paths (so a fresh call sees the current table immediately, not only at
+    the next gate check).
+    """
+    import nbformat
+
+    nb_path = Path(study_dir) / "pipeline.ipynb"
+    if not nb_path.exists():
+        return
+    try:
+        nb = nbformat.read(str(nb_path), as_version=4)
+    except Exception:  # noqa: BLE001
+        return
+    for cell in nb.cells:
+        if (cell.get("metadata", {}) or {}).get("name") == "hypotheses":
+            old_source = cell.get("source", "")
+            new_source = _refresh_ledger_block(old_source, ledger)
+            if new_source != old_source:
+                cell["source"] = new_source
+                try:
+                    nbformat.write(nb, str(nb_path))
+                except Exception:  # noqa: BLE001
+                    pass
+            return
+
 
 def _strip_leading_md_header(text: str) -> str:
     """Drop a single leading markdown header line from author-supplied cell text.
@@ -606,6 +690,9 @@ class NotebookTools:
         cell = nbformat.v4.new_markdown_cell(source)
         cell.metadata["name"] = name
         by[name] = cell
+        if name == "hypotheses":
+            by[name]["source"] = _refresh_ledger_block(
+                by[name]["source"], self.node._read_ledger())
         self._emit_notebook(by, nb, nb_path)
         if _custom_name:
             return (f"Added custom {name!r} markdown cell (rev "
@@ -706,6 +793,9 @@ class NotebookTools:
                 by, name, why, code, content, expected_rev, cur_rev)
         if problem is not None:
             return problem
+        if name == "hypotheses":
+            by[name]["source"] = _refresh_ledger_block(
+                by[name]["source"], node._read_ledger())
         self._emit_notebook(by, nb, nb_path)
         new_rev = _rev(by[name].get("source", ""))
         return f"Edited {name} in pipeline.ipynb (rev {cur_rev} → {new_rev})."

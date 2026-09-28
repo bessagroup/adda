@@ -454,6 +454,47 @@ def test_repro_gate_executes_notebook_lazily(tmp_path):
 
 
 @pytest.mark.xdist_group(name="jupyter_kernel")
+def test_repro_gate_refreshes_the_hypotheses_ledger_block_before_running(tmp_path):
+    """NOTEBOOK-LEDGER SYNC, by construction: _reproduction_gate refreshes the
+    hypotheses cell's ledger-status block on-disk, in place, BEFORE the gate
+    ever runs the notebook -- so a stale status can't reach RunNotebook
+    (gate=True) or Done()'s pre-critic check, since both funnel through this
+    one function (real friction: 20260928T024626 call_001 REVISE, 20260928
+    T141126 call_002 REJECT CRITICAL, both a stale hand-written table)."""
+    from adda._src.epistemics.hypothesis_ledger import HypothesisLedger
+    from adda._src.nodes.tools.routing.notebook import (
+        _LEDGER_BLOCK_BEGIN, _LEDGER_BLOCK_END,
+    )
+
+    node, study_dir = _setup(tmp_path)
+    led = HypothesisLedger(node._current_notes_dir)
+    hid = led.propose("The oracle is correct", "criterion", "prediction",
+                       0.5, "strategizer")
+    out = led.update(hid, "SUPPORTED", "evidence",
+                      evidence={"delegation": "D001"}, posterior=0.95,
+                      triggered_by=None)
+    assert not out.startswith("ERROR"), out
+
+    _write_nb(study_dir, [
+        {"type": "markdown", "name": "hypotheses",
+         "source": "## Hypotheses\n\n" + _LEDGER_BLOCK_BEGIN
+         + "\n(stale table, still OPEN)\n" + _LEDGER_BLOCK_END
+         + "\n\nMy narrative."},
+        {"type": "code", "name": "analyze", "source": "print('REPRODUCED: 1.0')"},
+    ])
+
+    assert node._reproduction_gate({"study_dir": str(study_dir)}) is None
+
+    nb = nbformat.read(str(study_dir / "pipeline.ipynb"), as_version=4)
+    hyp_cell = next(
+        c for c in nb.cells if c.get("metadata", {}).get("name") == "hypotheses")
+    assert hid in hyp_cell["source"]
+    assert "SUPPORTED" in hyp_cell["source"]
+    assert "stale table" not in hyp_cell["source"]
+    assert "My narrative." in hyp_cell["source"]
+
+
+@pytest.mark.xdist_group(name="jupyter_kernel")
 def test_repro_gate_fails_when_notebook_adds_evals(tmp_path):
     """A NON-lazy notebook that stamps a new eval → caught as not-lazy."""
     node, study_dir = _setup(tmp_path)
