@@ -158,7 +158,10 @@ class ReproductionGateMixin:
             # is impossible the moment either reads the notebook, rather
             # than merely detected once it's already been read.
             from .tools.routing.notebook import refresh_hypotheses_ledger_block
-            refresh_hypotheses_ledger_block(study_dir, self._read_ledger())
+            # Reassigned every call (None on a no-op refresh) so a stale
+            # rev from an EARLIER call is never re-surfaced by _gate_check.
+            self._hypotheses_rev_after_refresh = refresh_hypotheses_ledger_block(
+                study_dir, self._read_ledger())
         # One resolver for "where is this run", shared with the store tools:
         # they used to compute it separately and could disagree.
         if self._current_notes_dir is None:

@@ -495,6 +495,79 @@ def test_repro_gate_refreshes_the_hypotheses_ledger_block_before_running(tmp_pat
 
 
 @pytest.mark.xdist_group(name="jupyter_kernel")
+def test_gate_true_surfaces_the_refreshed_hypotheses_rev_in_band(tmp_path):
+    """When the gate's own refresh changes the hypotheses cell (a status
+    changed since the agent last wrote/read it), RunNotebook(gate=True)'s
+    response must say so with the NEW rev -- otherwise the agent's very next
+    WriteCell('hypotheses', expected_rev=<stale>) hits a stale-rev ERROR it
+    had no way to anticipate (boss's review of 60c5c16). A second, unchanged
+    gate check must NOT repeat a stale note."""
+    from adda._src.epistemics.hypothesis_ledger import HypothesisLedger
+    from adda._src.nodes.tools.routing.notebook import (
+        _LEDGER_BLOCK_BEGIN, _LEDGER_BLOCK_END, _rev,
+    )
+
+    class A(Agent):
+        role = "strategizer"
+        tools = frozenset({"Done", "WriteCell", "RunNotebook"})
+        description = "s"
+
+    class B(Agent):
+        description = "i"
+
+    spec = Graph(
+        nodes={"strategizer": A(), "implementer": B()},
+        edges=(Edge("strategizer", "implementer"),), entry="strategizer")
+
+    study_dir = tmp_path / "study"
+    study_dir.mkdir()
+    run_dir = tmp_path / "runs" / "T0"
+    (run_dir / "debug" / "strategizer_notes").mkdir(parents=True)
+    _seed_store(run_dir / "experiment_data", n=2)
+    node = Node(
+        _StubAdapter(), name="strategizer", outgoing=["implementer"],
+        spec=spec, study_dir=study_dir)
+    node._current_notes_dir = run_dir / "debug" / "strategizer_notes"
+
+    led = HypothesisLedger(node._current_notes_dir)
+    hid = led.propose("The oracle is correct", "criterion", "prediction",
+                       0.5, "strategizer")
+    out = led.update(hid, "SUPPORTED", "evidence",
+                      evidence={"delegation": "D001"}, posterior=0.95,
+                      triggered_by=None)
+    assert not out.startswith("ERROR"), out
+
+    _write_nb(study_dir, [
+        {"type": "markdown", "name": "hypotheses",
+         "source": "## Hypotheses\n\n" + _LEDGER_BLOCK_BEGIN
+         + "\n(stale table, still OPEN)\n" + _LEDGER_BLOCK_END},
+        {"type": "code", "name": "analyze", "source": "print('REPRODUCED: 1.0')"},
+    ])
+
+    tools = node._build_routing_closures()
+    out1 = tools["RunNotebook"](gate=True)
+    assert out1.startswith("PASS")
+    assert "ledger-status table was just refreshed" in out1
+    m = __import__("re").search(r"new rev ([0-9a-f]{8})", out1)
+    assert m is not None, out1
+    new_rev = m.group(1)
+
+    nb = nbformat.read(str(study_dir / "pipeline.ipynb"), as_version=4)
+    hyp_cell = next(
+        c for c in nb.cells if c.get("metadata", {}).get("name") == "hypotheses")
+    assert new_rev == _rev(hyp_cell["source"])
+
+    # The surfaced rev is genuinely usable -- no stale-rev bounce.
+    edit_out = tools["WriteCell"](
+        "hypotheses", content="My updated narrative.", expected_rev=new_rev)
+    assert edit_out.startswith("Edited hypotheses"), edit_out
+
+    # A second, unchanged gate check must not repeat a (now stale) rev note.
+    out2 = tools["RunNotebook"](gate=True)
+    assert "ledger-status table was just refreshed" not in out2
+
+
+@pytest.mark.xdist_group(name="jupyter_kernel")
 def test_repro_gate_fails_when_notebook_adds_evals(tmp_path):
     """A NON-lazy notebook that stamps a new eval → caught as not-lazy."""
     node, study_dir = _setup(tmp_path)

@@ -17,6 +17,7 @@ from adda._src.nodes.tools.routing.notebook import (
     _LEDGER_BLOCK_END,
     _refresh_ledger_block,
     _render_ledger_status_block,
+    _rev,
     refresh_hypotheses_ledger_block,
 )
 
@@ -127,3 +128,41 @@ def test_refresh_hypotheses_ledger_block_end_to_end_on_disk(tmp_path):
     assert "0.9" in src
     assert "My own narrative stays here." in src
     assert "(no hypotheses)" not in src
+
+
+def test_refresh_hypotheses_ledger_block_returns_new_rev_only_on_real_change(tmp_path):
+    """A rev-safety contract for the caller (_reproduction_gate): the return
+    value must be the cell's NEW rev iff the on-disk source actually
+    changed, and None on a genuine no-op — a stale rev must never be
+    silently invalidated when nothing changed, and a real change must be
+    reported so the caller can surface it (boss's review of 60c5c16:
+    "when it does change, does the agent learn the new rev in-band")."""
+    from adda._src.evaluation.notebook_exec import build_notebook
+
+    led = _ledger(tmp_path)
+    nb_path = tmp_path / "pipeline.ipynb"
+    nbformat.write(
+        build_notebook([{
+            "type": "markdown", "name": "hypotheses",
+            "source": "## Hypotheses\n\n" + _LEDGER_BLOCK_BEGIN
+            + "\n(no hypotheses)\n" + _LEDGER_BLOCK_END,
+        }]),
+        str(nb_path))
+
+    # No-op: ledger is still empty, block is already correct.
+    assert refresh_hypotheses_ledger_block(tmp_path, led) is None
+
+    # Real change: propose + close a hypothesis, refresh again.
+    hid = led.propose("H", "criterion", "prediction", 0.5, "strategizer")
+    led.update(hid, "SUPPORTED", "evidence",
+               evidence={"delegation": "D001"}, posterior=0.9,
+               triggered_by=None)
+    new_rev = refresh_hypotheses_ledger_block(tmp_path, led)
+    assert new_rev is not None
+    nb = nbformat.read(str(nb_path), as_version=4)
+    hyp_cell = next(
+        c for c in nb.cells if c.get("metadata", {}).get("name") == "hypotheses")
+    assert new_rev == _rev(hyp_cell["source"])
+
+    # Now stable again: a second refresh with nothing changed is a no-op.
+    assert refresh_hypotheses_ledger_block(tmp_path, led) is None

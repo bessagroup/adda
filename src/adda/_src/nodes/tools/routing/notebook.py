@@ -125,12 +125,21 @@ def _refresh_ledger_block(source: str, ledger) -> str:
     return heading + "\n\n" + block + ("\n\n" + rest if rest.strip() else "")
 
 
-def refresh_hypotheses_ledger_block(study_dir, ledger) -> None:
+def refresh_hypotheses_ledger_block(study_dir, ledger) -> str | None:
     """Best-effort: refresh pipeline.ipynb's hypotheses cell's ledger-status
     block in place. No-op if there is no notebook yet, or no hypotheses
     cell yet (WriteCell inserts a fresh block the first time the cell is
     authored) -- never raises, since this is a governance nicety, not part
     of the eval path.
+
+    Returns the cell's NEW rev (``_rev``'s short content hash) iff the write
+    actually changed the on-disk source, else None -- a no-op (unchanged
+    table) never touches the file, so an unrelated WriteCell('hypotheses',
+    expected_rev=...) call right after is never invalidated by a refresh
+    that changed nothing. The caller (``_reproduction_gate``) surfaces a
+    non-None return in-band (RunNotebook(gate=True)'s own response) so an
+    agent whose next move is editing this cell learns the new rev instead
+    of hitting a stale-rev ERROR it has no way to have anticipated.
 
     Called from two places: ``_reproduction_gate`` (one hook covers BOTH
     ``RunNotebook(gate=True)`` and ``Done()``'s pre-critic check, since both
@@ -142,22 +151,24 @@ def refresh_hypotheses_ledger_block(study_dir, ledger) -> None:
 
     nb_path = Path(study_dir) / "pipeline.ipynb"
     if not nb_path.exists():
-        return
+        return None
     try:
         nb = nbformat.read(str(nb_path), as_version=4)
     except Exception:  # noqa: BLE001
-        return
+        return None
     for cell in nb.cells:
         if (cell.get("metadata", {}) or {}).get("name") == "hypotheses":
             old_source = cell.get("source", "")
             new_source = _refresh_ledger_block(old_source, ledger)
-            if new_source != old_source:
-                cell["source"] = new_source
-                try:
-                    nbformat.write(nb, str(nb_path))
-                except Exception:  # noqa: BLE001
-                    pass
-            return
+            if new_source == old_source:
+                return None
+            cell["source"] = new_source
+            try:
+                nbformat.write(nb, str(nb_path))
+            except Exception:  # noqa: BLE001
+                return None
+            return _rev(new_source)
+    return None
 
 
 def _strip_leading_md_header(text: str) -> str:
@@ -542,6 +553,18 @@ class NotebookTools:
             f"{'s' if left != 1 else ''} left before you must close with "
             "Done().]")
         problem = node._reproduction_gate()
+        new_rev = getattr(node, "_hypotheses_rev_after_refresh", None)
+        if new_rev is not None:
+            # The gate just rewrote the hypotheses cell's ledger-status
+            # table on disk (a status changed since it was last written) —
+            # say so with its NEW rev, or the agent's next WriteCell
+            # ('hypotheses', expected_rev=...) hits a stale-rev ERROR it
+            # had no way to anticipate.
+            footer += (
+                "\n[hypotheses cell's ledger-status table was just "
+                f"refreshed to match the current ledger — new rev {new_rev}. "
+                "ShowNotebook('hypotheses') before editing it, or use its "
+                f"expected_rev={new_rev!r}.]")
         if problem is None:
             ok = getattr(node, "_repro_ok_detail", "reproduces cleanly")
             return ("PASS — pipeline.ipynb " + ok
