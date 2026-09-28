@@ -106,15 +106,19 @@ class FeedbackTools:
         falsification outcome + remaining uncertainty + (if closing with budget
         left) why the remaining budget cannot settle any unmet criterion.
 
-        First call: issues a WARNING and lists any open delegations or
-        unmet conditions; does NOT close.
-        Second call: closes the run.
+        The VERY FIRST Done() call of the run issues a one-time WARNING and
+        does NOT close; call it again to confirm. That confirm is once per
+        RUN, not once per attempt — a later call (e.g. after a critic
+        REVISE/REJECT, or a retry after fixing something) proceeds straight
+        to the real gates below, no repeat warning. Any open hypotheses or
+        dangling falsification attempts are reported on EVERY call where
+        they are still true, independent of that one-time warning.
 
         Refused if any delegation is still Working — collect every
         pending delegation with Wait first. (A delegation you launched
         wait=True would already be collected here, with no pending poll.)
         """
-        prefix = self.node._drain_notifications()
+        prefix = self.node._drain_notifications() + self._open_hypotheses_notice()
         for gate in (
             self._pending_refusal,
             self._capture_retrospective,
@@ -166,7 +170,6 @@ class FeedbackTools:
             return None
         node._awaiting_retro = False
         node._record_retrospective("strategizer", "DONE", summary)
-        node._done_warned = False
         node._route["kind"] = "done"
         node._route["summary"] = node._final_summary
         # Carry the outcome recorded by whichever branch sent us here (critic
@@ -219,41 +222,64 @@ class FeedbackTools:
         return None
 
     def _first_call_warning(self, summary: str, prefix: str) -> str | None:
-        """The two-shot gate: first call warns, second call closes."""
+        """The two-shot gate: first call warns, second call closes.
+
+        Fires AT MOST ONCE per run (node._done_warned, once True, is never
+        reset again — see the module docstring's note on this). It used to
+        be reset after every non-PASS critic verdict, which re-triggered
+        this exact warning once per gate round (3 times in run
+        20260928T141126: REVISE, REJECT, then the eventual PASS) instead of
+        the single "are you sure" it is meant to be. Open-hypotheses /
+        dangling-falsification-attempt content moved to
+        ``_open_hypotheses_notice`` (computed fresh on EVERY call, not
+        gated behind this one-time flag), so that information stays
+        visible on a later close attempt too, without needing this warning
+        to repeat.
+        """
         node = self.node
         if node._done_warned:
             return None
         node._done_warned = True
-        open_hypotheses: list[str] = []
-        if node._ledger is not None:
-            open_hypotheses = [
-                h["id"]
-                for h in node._ledger.list_all()
-                if h.get("current_status") == "OPEN"
-            ]
-        warn_parts = [
-            "WARNING: first Done() call — confirm you are ready to close.",
-            "Call Done() again to confirm and end the run.",
-        ]
-        if open_hypotheses:
-            warn_parts.append(
-                f"Open hypotheses still in OPEN state: "
-                f"{open_hypotheses}. "
-                "Consider updating their status before closing."
-            )
-            dangling = self._dangling_falsification_attempts(open_hypotheses)
-            if dangling:
-                warn_parts.append(
-                    "Falsification attempts whose hypotheses are still "
-                    f"OPEN (record their verdict first): {dangling}. "
-                    "Use HypothesisUpdate against each one's pre-registered "
-                    "prediction."
-                )
         # (Pending milestones are a HARD close-gate handled above — by the time
         # we reach this two-shot warn, all milestones are resolved.)
-        # WARNING goes first; then any pending notifications.
-        return "  ".join(warn_parts) + (
-            ("\n\n" + prefix.rstrip()) if prefix.strip() else "")
+        # WARNING goes first; then any pending notifications/advisories.
+        return (
+            "WARNING: first Done() call — confirm you are ready to close.  "
+            "Call Done() again to confirm and end the run."
+        ) + (("\n\n" + prefix.rstrip()) if prefix.strip() else "")
+
+    def _open_hypotheses_notice(self) -> str:
+        """Open-hypotheses / dangling-falsification-attempt advisory,
+        computed fresh on EVERY Done() call and folded into the shared
+        `prefix` every gate already threads through its response --
+        independent of ``_first_call_warning``'s one-time flag, so it stays
+        visible on a SECOND or THIRD close attempt if hypotheses are still
+        open then, without requiring the now-single-fire two-shot warning
+        to repeat just to carry this content. Advisory only: it never
+        blocks closing, matching the original "Consider updating... before
+        closing" phrasing."""
+        node = self.node
+        if node._ledger is None:
+            return ""
+        open_hypotheses = [
+            h["id"] for h in node._ledger.list_all()
+            if h.get("current_status") == "OPEN"
+        ]
+        if not open_hypotheses:
+            return ""
+        parts = [
+            f"Open hypotheses still in OPEN state: {open_hypotheses}. "
+            "Consider updating their status before closing."
+        ]
+        dangling = self._dangling_falsification_attempts(open_hypotheses)
+        if dangling:
+            parts.append(
+                "Falsification attempts whose hypotheses are still OPEN "
+                f"(record their verdict first): {dangling}. Use "
+                "HypothesisUpdate against each one's pre-registered "
+                "prediction."
+            )
+        return "  ".join(parts) + "\n\n"
 
     def _dangling_falsification_attempts(
         self, open_hypotheses: list[str]
@@ -346,7 +372,6 @@ class FeedbackTools:
         node = self.node
         node._awaiting_retro = True
         node._final_summary = final_summary
-        node._done_warned = False
         return _FAILED_RETROSPECTIVE
 
     # ── The critic gate ──────────────────────────────────────────────────────
@@ -359,7 +384,6 @@ class FeedbackTools:
         # No critic — no review stage, so no exit interview; close
         # directly (the interview is "your work was reviewed, now a
         # question", which only applies when a critic gate ran).
-        node._done_warned = False
         node._route["kind"] = "done"
         node._route["summary"] = summary
         # Closed deliberately, but nothing reviewed it: there was no gate to
@@ -392,7 +416,6 @@ class FeedbackTools:
         if verdict == "PASS":
             # Conclusion accepted + recorded. Now — and only now —
             # ask the exit interview as a separate turn.
-            node._done_warned = False
             node._revise_count = 0
             node._awaiting_retro = True
             node._final_summary = summary
@@ -401,15 +424,18 @@ class FeedbackTools:
                 "outcome": terminal.GATED, "reviewed": True}
             return prefix + _EXIT_INTERVIEW
 
-        # Non-PASS: reset the two-shot and count the revision internally.
-        # After a bounded number of unsatisfiable verdicts, close GRACEFULLY
-        # UNGATED rather than looping to recursion-limit. Policy (user): disclose
-        # the SUBSTANCE — the critic's standing objections and that leaving them
-        # unresolved closes the run UNGATED — but NOT the numeric attempt count
+        # Non-PASS: count the revision internally (the two-shot itself is
+        # NOT reset here -- it already fired at most once for this run;
+        # re-arming it after every REVISE/REJECT used to re-trigger the
+        # "first Done() call" warning once per gate round instead of once
+        # per run, see this commit). After a bounded number of unsatisfiable
+        # verdicts, close GRACEFULLY UNGATED rather than looping to
+        # recursion-limit. Policy (user): disclose the SUBSTANCE — the
+        # critic's standing objections and that leaving them unresolved
+        # closes the run UNGATED — but NOT the numeric attempt count
         # (advertising "call Done() N times to close" teaches the agent to
         # exhaust the critic instead of earning a PASS). So the agent is never
         # blindsided by an unexplained ending, and the limit stays un-gameable.
-        node._done_warned = False
         node._revise_count = getattr(node, "_revise_count", 0) + 1
         if node._revise_count >= _REVISE_MAX:
             banner = (

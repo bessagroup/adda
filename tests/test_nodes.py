@@ -2493,8 +2493,100 @@ def test_done_second_call_with_critic_revise():
     assert "REVISE" in second_results[0], (
         f"Expected REVISE in second Done() result, got: {second_results[0]!r}"
     )
-    # _done_warned should have been reset after REVISE response
-    assert not node._done_warned, "_done_warned should reset to False after REVISE"
+    # The one-time two-shot warning is NOT re-armed by a REVISE/REJECT
+    # verdict -- it fired once (the very first Done() call) and stays fired
+    # for the rest of the run, so a later Done() attempt goes straight to
+    # the real gates instead of re-warning (see feedback.py's fix commit:
+    # this used to reset to False here, re-triggering the warning once per
+    # gate round).
+    assert node._done_warned, (
+        "_done_warned must stay True after a REVISE — it is a once-per-run "
+        "flag, not once-per-attempt")
+
+
+def test_done_warning_does_not_repeat_across_multiple_revise_rounds():
+    """Real bug, run 20260928T141126: the "WARNING: first Done() call"
+    message fired 3 times in one run (once per REVISE/REJECT/PASS gate
+    round) because _done_warned was reset to False after every non-PASS
+    critic verdict. It must fire exactly ONCE for the whole run, however
+    many REVISE rounds follow."""
+    from adda._src.nodes import Node
+
+    results: list[str] = []
+
+    class ThreeRoundReviseAdapter(StubAdapter):
+        def invoke(self, messages):
+            for i in range(4):
+                r = self.closure_tools["Done"](summary=f"attempt {i}")
+                results.append(r)
+            return "Done."
+
+    node = Node(
+        ThreeRoundReviseAdapter(), name="strategizer",
+        outgoing=["implementer", "critic"],
+        spec=_spec_with_critic(),
+        worker_adapters={
+            "implementer": StubAdapter(),
+            "critic": MockCriticAdapter(verdict="REVISE"),
+        },
+    )
+    node(make_state())
+
+    warnings = [r for r in results if r.startswith("WARNING")]
+    assert len(warnings) == 1, (
+        f"expected exactly ONE 'WARNING: first Done()' across the whole "
+        f"run, got {len(warnings)}: {results}")
+    assert results[0].startswith("WARNING")
+    for later in results[1:]:
+        assert not later.startswith("WARNING"), (
+            f"a later Done() call re-triggered the first-call warning: "
+            f"{later!r}")
+
+
+def test_open_hypotheses_notice_surfaces_on_a_later_done_call_too(tmp_path):
+    """The open-hypotheses/dangling-attempt content used to live INSIDE the
+    one-time warning, so it was only ever shown on the very first Done()
+    call. It must now surface on every call where hypotheses are still
+    OPEN, independent of the one-time warning having already fired."""
+    from adda._src.nodes import Node
+
+    results: list[str] = []
+
+    class OpenHypothesisAdapter(StubAdapter):
+        def invoke(self, messages):
+            out = self.closure_tools["HypothesisPropose"](
+                statement="A claim that stays open",
+                falsification_criterion="any counter",
+                prediction="none found",
+                prior=0.5,
+            )
+            assert not out.startswith("ERROR"), out
+            for i in range(3):
+                r = self.closure_tools["Done"](summary=f"attempt {i}")
+                results.append(r)
+            return "Done."
+
+    node = Node(
+        OpenHypothesisAdapter(), name="strategizer",
+        outgoing=["implementer", "critic"],
+        spec=_spec_with_critic(),
+        worker_adapters={
+            "implementer": StubAdapter(),
+            "critic": MockCriticAdapter(verdict="REVISE"),
+        },
+        notes_dir=tmp_path,
+    )
+    node(make_state())
+
+    assert results[0].startswith("WARNING")
+    assert "Open hypotheses still in OPEN state" in results[0]
+    # Second and third calls no longer warn, but STILL carry the open-
+    # hypotheses notice, since H1 is still OPEN each time.
+    for later in results[1:]:
+        assert not later.startswith("WARNING")
+        assert "Open hypotheses still in OPEN state" in later, (
+            f"open-hypotheses notice must survive past the one-time "
+            f"warning: {later!r}")
 
 
 def test_done_closes_gracefully_ungated_after_three_revisions():
