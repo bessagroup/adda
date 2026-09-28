@@ -424,3 +424,20 @@ class TestRetrospectiveTextCap:
         rec = json.loads(line)
         assert len(rec["text"]) > 2000  # pre-fix this was capped at exactly 2000
         assert rec["text"].rstrip().endswith("x")  # the tail survived, not cut off
+
+
+class TestProseRetrospective:
+    """Models sometimes write the exit interview without a ``###`` heading."""
+
+    def test_bold_heading(self):
+        text = "Done.\n\n**Retrospective**\n- CONSISTENCY: ok\n- DECISION: d\n"
+        body = _extract_report_section(text, "Retrospective")
+        assert "CONSISTENCY: ok" in body and "DECISION: d" in body
+
+    def test_colon_line(self):
+        text = "Done.\n\nRetrospective:\n- CONSISTENCY: flagged. x\n- FRICTION: y\n"
+        body = _extract_report_section(text, "Retrospective")
+        assert "CONSISTENCY: flagged" in body and "FRICTION: y" in body
+
+    def test_prose_with_no_retrospective_stays_absent(self):
+        assert _extract_report_section("Verdict: REVISE. All prose.\n", "Retrospective") == ""

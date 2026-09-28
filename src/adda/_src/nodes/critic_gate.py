@@ -5,11 +5,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .parsing import _extract_report_section, _parse_verdict
+
 # Bound on how many earlier reviews are echoed back to the critic, and the
 # total char budget for the digest — injected context must be current and
 # bounded, not an ever-growing transcript.
 _MAX_PRIOR_REVIEWS = 6
 _PRIOR_REVIEWS_CHAR_BUDGET = 6000
+_PRIOR_REVIEW_BODY_CAP = 2500
 
 # #9 live verdict validator: on the Nth repeat flag of the SAME hypothesis,
 # append a louder warning pointing at the gate critic (the lightweight "teeth";
@@ -81,26 +84,6 @@ def problem_statement_block(study_dir) -> str:
     return f"<problem_statement>\n{text.strip()}\n</problem_statement>\n\n"
 
 
-def _extract_md_section(text: str, header: str) -> str:
-    """Return the body under a `### Header` up to the next `### ` heading.
-
-    Used to pull just the Verdict and Findings out of a persisted review,
-    dropping Actions/Numbers/Retrospective noise. Empty string if absent.
-    """
-    lines = text.splitlines()
-    out: list[str] = []
-    capturing = False
-    for line in lines:
-        if line.strip() == header:
-            capturing = True
-            continue
-        if capturing and line.lstrip().startswith("### "):
-            break
-        if capturing:
-            out.append(line)
-    return "\n".join(out).strip()
-
-
 class CriticGateMixin:
     """Mixin carrying the four critic-consultation helpers for an orchestrating node.
 
@@ -155,8 +138,15 @@ class CriticGateMixin:
             except Exception:  # noqa: BLE001
                 continue
             n = f.stem.replace("call_", "")
-            verdict = _extract_md_section(text, "### Verdict") or "(unparsed)"
-            findings = _extract_md_section(text, "### Findings") or "(none)"
+            verdict = (
+                _extract_report_section(text, "Verdict")
+                or _parse_verdict(text)
+            )
+            findings = (
+                _extract_report_section(text, "Findings")
+                or text.strip()[:_PRIOR_REVIEW_BODY_CAP]
+                or "(none)"
+            )
             blocks.append(
                 f"--- call_{n} ---\n"
                 f"Verdict: {verdict}\n"

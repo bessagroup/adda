@@ -9,10 +9,10 @@ prepends it.
 
 from __future__ import annotations
 
-from adda._src.nodes.critic_gate import (
-    CriticGateMixin,
-    _extract_md_section,
-)
+import pytest
+
+from adda._src.nodes import _extract_report_section
+from adda._src.nodes.critic_gate import CriticGateMixin
 
 
 def _write_review(notes_dir, n: int, verdict: str, findings: str) -> None:
@@ -36,16 +36,16 @@ class _Stub(CriticGateMixin):
         self._current_notes_dir = notes_dir
 
 
-def test_extract_md_section_pulls_only_that_section():
+def test_extract_section_pulls_only_that_section():
     text = (
         "### Findings\n[CRITICAL] foo\n[MINOR] bar\n\n"
         "### Verdict\nREJECT — because foo\n\n"
         "### Numbers\nverdict: REJECT\n"
     )
-    assert _extract_md_section(text, "### Verdict") == "REJECT — because foo"
-    assert "[CRITICAL] foo" in _extract_md_section(text, "### Findings")
-    assert "verdict: REJECT" not in _extract_md_section(text, "### Findings")
-    assert _extract_md_section(text, "### Missing") == ""
+    assert _extract_report_section(text, "Verdict") == "REJECT — because foo"
+    assert "[CRITICAL] foo" in _extract_report_section(text, "Findings")
+    assert "verdict: REJECT" not in _extract_report_section(text, "Findings")
+    assert _extract_report_section(text, "Missing") == ""
 
 
 def test_no_prior_reviews_yields_empty_digest(tmp_path):
@@ -143,3 +143,45 @@ def test_invoke_critic_prepends_digest_to_task_msg(tmp_path):
     assert captured["msg"].index("prior_reviews_this_run") < captured[
         "msg"
     ].index("THE ACTUAL TASK")
+
+
+def test_digest_carries_a_prose_review_instead_of_marking_it_unparsed(tmp_path):
+    """A critic that writes prose, with no ### headings, still has its verdict
+    and objections echoed back (run 20260928T233115: the round-2 critic saw
+    "(unparsed)" / "(none)" for a round-1 review that held a MAJOR finding)."""
+    notes = tmp_path / "notes"
+    notes.mkdir()
+    d = notes.parent / "critic_reviews"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "call_001.md").write_text(
+        "Verdict: REVISE. I found no CRITICAL findings, one MAJOR.\n\n"
+        "The MAJOR finding is that the notebook cannot regenerate the run.\n"
+        "- The doe cell only has a comment.\n",
+        encoding="utf-8",
+    )
+    digest = _Stub(notes)._prior_reviews_digest()
+    assert "(unparsed)" not in digest
+    assert "REVISE" in digest
+    assert "cannot regenerate the run" in digest
+
+
+@pytest.mark.parametrize("text", [
+    "### Findings\n[MAJOR] x\n\n### Verdict\nREVISE\n",
+    "## Findings\n[MAJOR] x\n\n## Verdict\nREVISE\n",
+    "**Findings**\n[MAJOR] x\n\n**Verdict**\nREVISE\n",
+    "**Findings:**\n[MAJOR] x\n\n**Verdict:**\nREVISE\n",
+    "Findings:\n[MAJOR] x\n### Verdict\nREVISE\n",
+])
+def test_section_extractor_accepts_each_heading_style(text):
+    assert _extract_report_section(text, "Findings") == "[MAJOR] x"
+    assert _extract_report_section(text, "Verdict").startswith("REVISE")
+
+
+def test_section_extractor_inline_opener_is_one_paragraph():
+    text = "Verdict: REVISE. Because.\n\nMore prose that is not the verdict.\n"
+    assert _extract_report_section(text, "Verdict") == "REVISE. Because."
+
+
+def test_section_extractor_rejects_a_longer_word_and_midline_mentions():
+    assert _extract_report_section("### VerdictNotes\nx\n", "Verdict") == ""
+    assert _extract_report_section("The Verdict: is mixed\n", "Verdict") == ""

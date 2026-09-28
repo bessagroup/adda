@@ -216,31 +216,43 @@ def _classify_response(
 
 
 def _extract_report_section(text: str, name: str) -> str:
-    """Return the body under a ``### <name>`` report heading, or '' if absent.
+    """Return the body of the section called ``name``, or '' if absent.
 
-    Captures from the heading to the next ``###``/``##`` heading, a
-    horizontal rule, or end of text. Best-effort and tolerant of trailing
-    free-form content — INCLUDING on the heading line itself: ``\\b`` after
-    ``name`` (not ``\\s*\\n``) means "### Retrospective (System & Framework)"
-    or "### Retrospective:" still match, and only a genuinely different
-    heading that merely starts with the same word (e.g. "### RetrospectiveNotes",
-    no word boundary between "Retrospective" and "Notes") is rejected. The
-    stricter regex used to require nothing but whitespace before the newline,
-    so an agent's good-faith elaboration on the heading — asked for by name in
-    _EXIT_INTERVIEW's prompt, which never says the heading must be bare —
-    silently discarded a real, well-formed retrospective (run 20260926T214835:
-    the strategizer's "### Retrospective (System & Framework)" vanished, and
-    the run's own record then wrongly claimed no retrospective ever arrived —
-    see _record_retrospective's parse_failed path, which this regex fix is
-    the other half of).
+    The one section extractor for every heading-based parse (retrospectives,
+    the critic's prior-review digest). Models write the same section several
+    ways, so all of these open a section: ``### X`` / ``## X`` (any trailing
+    text on the heading line is elaboration and is ignored, so "### X (Y)"
+    matches but "### XNotes" does not), ``**X**`` / ``**X:**``, and a line
+    starting ``X:``. A section whose opener carries nothing after the name runs
+    to the next heading, bold-only heading line, horizontal rule or end of
+    text. A bold or ``X:`` opener that carries text on its own line ("Verdict:
+    REVISE. I found ...") is a paragraph: it runs to the first blank line.
     """
     import re as _re
-    m = _re.search(
-        rf"(?mis)^###\s+{_re.escape(name)}\b[^\n]*\n(.*?)"
-        r"(?=^\s*###\s|^\s*##\s|^---\s*$|\Z)",
-        text,
+    n = _re.escape(name)
+    opener = _re.compile(
+        rf"^\s*(?:(?P<hash>\#{{1,6}})\s+{n}\b(?P<hrest>.*)"
+        rf"|(?P<bold>\*\*|__){n}\b\s*:?\s*(?:\*\*|__)?\s*:?(?P<brest>.*)"
+        rf"|{n}\s*:(?P<prest>.*))$",
+        _re.IGNORECASE,
     )
-    return m.group(1).strip() if m else ""
+    stop = _re.compile(
+        r"^\s*(?:\#{1,6}\s|---\s*$|(?:\*\*|__)[^*_\n]+(?:\*\*|__)\s*:?\s*$)")
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        m = opener.match(line)
+        if not m:
+            continue
+        rest = (m.group("brest") if m.group("bold") else m.group("prest")
+                if m.group("prest") is not None else "").strip()
+        inline = bool(rest)
+        body = [rest] if inline else []
+        for nxt in lines[i + 1:]:
+            if stop.match(nxt) or (inline and not nxt.strip()):
+                break
+            body.append(nxt)
+        return "\n".join(body).strip()
+    return ""
 
 
 @tool_examples(
