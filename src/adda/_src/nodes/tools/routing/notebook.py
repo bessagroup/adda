@@ -558,9 +558,13 @@ class NotebookTools:
         empty = self._empty_store_refusal()
         if empty is not None:
             return empty
-        _BUDGET = 10
+        # Disabled (Elvis): the hard refusal below churned a genuinely
+        # iterative debugging session (re-read the last error, fix, re-check)
+        # into a forced close before the notebook actually reproduced. Kept,
+        # not deleted -- set an int to re-enable a cap.
+        _BUDGET = None
         prior = getattr(node, "_check_deliverable_calls", 0)
-        if prior >= _BUDGET:
+        if _BUDGET is not None and prior >= _BUDGET:
             return (f"Gate-check budget exhausted ({_BUDGET}/"
                     f"{_BUDGET} used). Stop iterating — write a correct lazy "
                     "pipeline in ONE decisive edit (re-read the LAST error; the "
@@ -569,13 +573,9 @@ class NotebookTools:
                     "is recorded FAILED if it still doesn't reproduce).")
         node._check_deliverable_calls = prior + 1
         used = node._check_deliverable_calls
-        left = _BUDGET - used
-        # Show the budget on EVERY call so the agent paces itself and never hits
-        # an unseen wall.
-        footer = (
-            f"\n\n[RunNotebook(gate=True): {used}/{_BUDGET} used — {left} check"
-            f"{'s' if left != 1 else ''} left before you must close with "
-            "Done().]")
+        # Show the running count on every call so the agent can pace itself,
+        # even with no cap to hit.
+        footer = f"\n\n[RunNotebook(gate=True): {used} check{'s' if used != 1 else ''} so far.]"
         problem = node._reproduction_gate()
         new_rev = getattr(node, "_hypotheses_rev_after_refresh", None)
         if new_rev is not None:

@@ -316,10 +316,12 @@ def test_readnote_lists_a_directory_so_delegation_code_is_discoverable(tmp_path)
 
 
 @pytest.mark.xdist_group(name="jupyter_kernel")
-def test_check_deliverable_shows_countdown_and_bounds_iteration(tmp_path):
-    """The gate check has a visible 10-call budget: each call reports how many
-    remain (so the agent never hits an unseen wall), and the 11th refuses —
-    converting an endless check↔write grind into a fast, bounded close."""
+def test_check_deliverable_shows_a_running_count_with_no_cap(tmp_path):
+    """The gate-check cap is disabled (Elvis): a genuinely iterative debug
+    session (re-read the last error, fix, re-check) must never be forced
+    into a premature close. Each call still reports a running count, purely
+    to help the agent pace itself -- there is no budget to exhaust and no
+    refusal, however many times it is called."""
     n = _study_with_store(tmp_path, "C2")
     _write_nb(tmp_path, "import sys\nsys.exit(1)")  # never passes
     run = n.adapter.closure_tools["RunNotebook"]
@@ -327,12 +329,13 @@ def test_check_deliverable_shows_countdown_and_bounds_iteration(tmp_path):
     def check():
         return run(gate=True)
     first = check()
-    assert "1/10 used" in first and "9 checks left" in first
-    outs = [check() for _ in range(9)]   # calls 2..10
-    assert "10/10 used" in outs[-1] and "0 checks left" in outs[-1]
-    # 11th call refuses without running the gate again.
-    exhausted = check()
-    assert "budget exhausted" in exhausted.lower() and "Done()" in exhausted
+    assert "1 check so far" in first
+    assert "checks left" not in first
+    assert "used" not in first
+    outs = [check() for _ in range(14)]   # well past the OLD 10-call cap
+    assert "15 checks so far" in outs[-1]
+    assert "exhausted" not in outs[-1].lower()
+    assert "NOT YET" in outs[-1]  # still genuinely running the gate, not refusing
 
 
 def test_repro_failure_closes_FAILED_not_ungated(tmp_path):
