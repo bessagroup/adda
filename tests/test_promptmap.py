@@ -33,7 +33,18 @@ import pytest
 # invisible to `data`'s cache. Marked `promptmap` so CI can run this module's
 # tests once (in check_promptmap) instead of once per matrix leg (see
 # pyproject.toml's markers and .github/workflows/pull_request.yml).
-pytestmark = pytest.mark.promptmap
+# The session-scoped `data` fixture rebuilds the whole prompt corpus
+# (~100-170s, whichever test happens to be collected first pays for it --
+# see pyproject.toml's own marker description) and this module's newest
+# test (test_the_maps_tools_match_the_real_wiring_under_both_knob_values)
+# does a SECOND full rebuild inside itself for the peer_interaction=False
+# arm. Both comfortably exceed the global 120s per-test timeout on a
+# loaded CI runner (observed: check_promptmap, ubuntu-latest/3.12, CI run
+# for 23ff170 -- 103s locally for the first `data`-consuming test alone,
+# no margin left for a slower shared runner). Matches the same
+# @pytest.mark.timeout(600) pattern already used for real-inference tests
+# in test_literature_corpus.py/test_literature_guardrails.py.
+pytestmark = [pytest.mark.promptmap, pytest.mark.timeout(300)]
 
 _ROOT = Path(__file__).resolve().parents[1]
 _GEN = _ROOT / "internal" / "tools" / "promptmap.py"
