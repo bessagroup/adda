@@ -1498,6 +1498,57 @@ def test_worker_write_strips_redundant_delegation_prefix(tmp_path):
     assert written[1].replace("\\", "/").endswith("/D001/b.csv")
 
 
+def test_dispatch_strips_native_write_alongside_the_sandboxed_closure(tmp_path):
+    """A dispatched worker must not keep the SDK's own native "Write" tool
+    enabled once the sandboxed closure is installed under the same name.
+
+    Real friction (retrospective D006, accidental_20260927T012131): the
+    model called bare "Write" (still enabled -- unsandboxed) and the SDK
+    refused it ("not enabled in this context"), only succeeding once it
+    switched to the MCP-qualified closure. Node._setup_sandboxed_write
+    (the entry-node path) already strips native Write when installing its
+    own closure; WorkerSession._sandbox_worker_writes (the DISPATCHED
+    WORKER path -- what every Delegate() target actually goes through)
+    never did, leaving both declared simultaneously for any role that
+    lists "Write" (e.g. implementer.py)."""
+    class WritingWorker(StubAdapter):
+        def __init__(self):
+            super().__init__()
+            self.native_tools = ["Bash", "Read", "Write", "Glob", "Grep"]
+
+        def invoke(self, messages):
+            return ("## Report\n\n### Actions taken\n- x\n\n"
+                    "### Files touched\n(none)\n\n### Conclusions\nok\n\n"
+                    "### Numbers\nevals: 0")
+
+    class DelegateAdapter(StubAdapter):
+        def invoke(self, messages):
+            self.closure_tools["HypothesisPropose"](
+                statement="Native Write strip test",
+                falsification_criterion="c", prediction="p", prior=0.5)
+            self.closure_tools["Delegate"](
+                target="implementer", intent="test", expected_report="",
+                hypothesis_ids=["H1"])
+            _time.sleep(0.3)
+            self.closure_tools["Done"](summary="done")
+            return "Done."
+
+    from adda._src.nodes import Node
+    study_tmp = tmp_path / "study"
+    study_tmp.mkdir()
+    worker = WritingWorker()
+    node = Node(
+        DelegateAdapter(), name="strategizer", outgoing=["implementer"],
+        spec=_ledger_spec(), worker_adapters={"implementer": worker},
+        notes_dir=tmp_path, study_dir=study_tmp)
+    node(make_state(study_dir=str(study_tmp)))
+
+    assert "Write" not in worker.native_tools, (
+        f"native Write still enabled alongside the sandboxed closure: "
+        f"{worker.native_tools}")
+    assert "Write" in worker.closure_tools
+
+
 def test_worker_report_evals_credits_the_right_delegation(tmp_path):
     """ReportEvals(n) on one delegation must not bleed into another's count.
 

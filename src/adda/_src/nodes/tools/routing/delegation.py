@@ -1991,10 +1991,26 @@ class DelegationTools:
     def _sandbox_worker_writes(
         self, worker: Any, delegation_id: str, target: str
     ) -> None:
-        """Confine this worker's Write to its own ``{delegation_id}/``."""
+        """Confine this worker's Write to its own ``{delegation_id}/``.
+
+        Also strips native "Write" from ``worker.native_tools``, mirroring
+        ``Node._setup_sandboxed_write``'s existing pattern for a node
+        reached via real graph routing. Without this, a role that declares
+        "Write" (e.g. implementer.py) keeps BOTH the SDK's own native Write
+        tool enabled AND this sandboxed closure registered under the same
+        name -- the model sometimes calls the bare, still-enabled native
+        one (unsandboxed, and apparently refused server-side regardless --
+        observed: "not enabled in this context") before falling back to the
+        MCP-qualified closure that actually works, real friction reported
+        from a live run (retrospective D006, accidental_20260927T012131).
+        """
         node = self.node
         if node._study_dir is None:
             return
+        if hasattr(worker, "native_tools") and "Write" in worker.native_tools:
+            worker.native_tools = [
+                t for t in worker.native_tools if t != "Write"
+            ]
         _workspace = (
             node._workspace_dir.resolve()
             if node._workspace_dir is not None
