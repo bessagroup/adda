@@ -551,7 +551,33 @@ def _best_rows_table(
             "(all matching rows are infeasibility placeholders)."
         )
     best_rows = filtered.loc[best_idx]
-    # Include input columns + output_name + _delegation_id
+    if columns is not None:
+        # An explicit columns= request can name ANY existing output or
+        # input column (e.g. a different output than output_name, like
+        # 'feasible' when ranking by 'sigma_peak') -- narrow the FULL
+        # frame, not the restricted default-display set built below.
+        # Pre-restricting to that set first (the original bug) made
+        # _select_columns report a real column as "not found" whenever it
+        # wasn't output_name/an input/_delegation_id/_namespace, even
+        # though it existed in the store all along (real friction:
+        # retrospectives D004 and critic-1, accidental_20260927T012131).
+        if filtered_in is not None:
+            best_in_full = filtered_in.loc[best_idx]
+            combined = _pd.concat(
+                [best_in_full, best_rows[
+                    [c for c in best_rows.columns
+                     if c not in best_in_full.columns]
+                ]], axis=1
+            )
+        else:
+            combined = best_rows
+        combined, _col_err = _select_columns(combined, columns)
+        if _col_err:
+            return _col_err
+        return combined.to_string(index=False)
+
+    # No explicit columns=: the default display set, unchanged --
+    # input columns + output_name + _delegation_id/_namespace.
     show_cols = []
     if filtered_in is not None:
         show_cols.extend(

@@ -356,3 +356,30 @@ def test_float_equality_hint_absent_when_rows_do_match(tmp_path):
     out = q(where="x0==0.1")
     assert "1 rows match" in out or "1 row" in out
     assert "abs(" not in out
+
+
+def test_n_best_columns_can_name_an_output_other_than_output_name(tmp_path):
+    """Regression: columns= combined with n_best=/output_name= used to
+    silently restrict the working frame to output_name + inputs +
+    _delegation_id/_namespace BEFORE columns= ever got a chance to look --
+    so naming any OTHER real output column (here 'coilable', ranking by
+    'f') always errored "not found", even though the column plainly
+    exists (used in where= elsewhere in this file). Real friction from a
+    live run (retrospectives D004 and critic-1,
+    accidental_20260927T012131): "silently drops the feasible column and
+    errors 'column not found' whenever combined with n_best=/where=
+    referencing it directly by name in columns=... even though plain
+    unfiltered listing shows it fine"."""
+    q = _querystore(tmp_path)
+    out = q(n_best=1, output_name="f", minimize=False, columns=["coilable"])
+    assert not out.startswith("ERROR:"), out
+    assert "coilable" in out
+
+
+def test_n_best_columns_still_rejects_a_genuinely_missing_column(tmp_path):
+    """The fix widens what columns= can name to any real column -- it must
+    not stop rejecting one that truly doesn't exist."""
+    q = _querystore(tmp_path)
+    out = q(n_best=1, output_name="f", minimize=False, columns=["no_such_col"])
+    assert out.startswith("ERROR:")
+    assert "Available columns" in out
