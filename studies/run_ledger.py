@@ -35,7 +35,28 @@ COLUMNS = [
     "cost_usd", "time_used", "wall_s",
     "milestones_done", "milestones_skipped",
     "milestones_pending", "diagnostics",
+    # Computed from exact tokens x model_prices.yaml, alongside (never merged
+    # into) the SDK's `cost_usd`; covers calls the SDK never priced (the
+    # strategizer). Blank = unknown.
+    "cost_usd_computed",
 ]
+
+
+def _migrate_header() -> None:
+    """Rewrite an existing ledger whose header predates a column added to
+    COLUMNS, so appended rows stay aligned with it (old rows get blanks)."""
+    if not LEDGER.exists():
+        return
+    with LEDGER.open(newline="") as f:
+        rows = list(csv.DictReader(f))
+        header = f.seek(0) or next(csv.reader(f), [])
+    if header == COLUMNS:
+        return
+    with LEDGER.open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=COLUMNS, restval="",
+                           extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows)
 
 
 def _git_short_sha() -> str:
@@ -157,6 +178,8 @@ def extract(run_dir: Path) -> dict:
             # unpriced run is unmeasured, not free.
             _cost = _tot.get("total_cost_usd")
             row["cost_usd"] = "" if _cost is None else _cost
+            _comp = _tot.get("cost_usd_computed")
+            row["cost_usd_computed"] = "" if _comp is None else _comp
         except Exception:
             pass
 
@@ -456,6 +479,7 @@ def main() -> None:
     row = extract(run_dir)
     row["commit"] = commit or _git_short_sha()
 
+    _migrate_header()
     new = not LEDGER.exists()
     with LEDGER.open("a", newline="") as f:
         w = csv.DictWriter(f, fieldnames=COLUMNS)

@@ -119,3 +119,18 @@ def test_the_deliverable_never_overwrites_a_telemetry_value(tmp_path):
     assert row["cost_usd"] == 1.2345
     # time_used has no telemetry equivalent, so it still comes from here
     assert row["time_used"] == "00:10:00"
+
+
+def test_ledger_header_migrates_when_a_column_is_added(tmp_path, monkeypatch):
+    import csv as _csv
+    old = [c for c in run_ledger.COLUMNS if c != "cost_usd_computed"]
+    led = tmp_path / "run_ledger.csv"
+    with led.open("w", newline="") as f:
+        w = _csv.DictWriter(f, fieldnames=old)
+        w.writeheader()
+        w.writerow({c: "x" for c in old})
+    monkeypatch.setattr(run_ledger, "LEDGER", led)
+    run_ledger._migrate_header()
+    rows = list(_csv.DictReader(led.open()))
+    assert list(rows[0]) == run_ledger.COLUMNS
+    assert rows[0]["cost_usd_computed"] == "" and rows[0]["study"] == "x"

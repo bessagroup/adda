@@ -6,3 +6,4 @@ recursive-include src/adda/_src/knowledge *.md *.json
 recursive-include src/adda/_src/viewer/templates *.html
 recursive-include docs *.md *.rst *.ipynb
 recursive-include src/adda/_src/viewer/static *.woff2 *.txt
+recursive-include src/adda/_src/infra *.yaml

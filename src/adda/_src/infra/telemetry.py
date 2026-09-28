@@ -21,11 +21,50 @@ A row carries the same token fields the run already accumulates
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
 import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
+
+_log = logging.getLogger(__name__)
+
+_PRICES_PATH = Path(__file__).with_name("model_prices.yaml")
+_SNAPSHOT_SUFFIX = re.compile(r"-\d{8}$")
+_prices_cache: dict | None = None
+_warned_models: set[str] = set()
+
+
+def _load_prices() -> dict:
+    global _prices_cache
+    if _prices_cache is None:
+        import yaml
+        _prices_cache = (
+            yaml.safe_load(_PRICES_PATH.read_text(encoding="utf-8")) or {}
+        ).get("models") or {}
+    return _prices_cache
+
+
+def compute_cost_usd(model: Optional[str], usage: dict) -> Optional[float]:
+    """Cost of one call from its exact token counts and the model's list price
+    (``model_prices.yaml``). None for a model with no entry, with a one-time
+    warning -- an unpriced call is unknown, never free."""
+    entry = _load_prices().get(_SNAPSHOT_SUFFIX.sub("", model or ""))
+    if entry is None:
+        if model not in _warned_models:
+            _warned_models.add(model)
+            _log.warning(
+                "telemetry: no price for model %r in %s; cost_usd_computed "
+                "is None for its calls", model, _PRICES_PATH.name)
+        return None
+    return (
+        (usage.get("input_tokens") or 0) * entry["input"]
+        + (usage.get("output_tokens") or 0) * entry["output"]
+        + (usage.get("cache_read_input_tokens") or 0) * entry["cache_read"]
+        + (usage.get("cache_creation_input_tokens") or 0) * entry["cache_write"]
+    ) / 1e6
 
 # Token fields copied verbatim from adapter.last_usage.
 _TOKEN_FIELDS = (
@@ -74,6 +113,12 @@ class Telemetry:
                 row[f] = usage.get(f, 0) or 0
             # cost is the one field that stays None under ollama (never faked)
             row["total_cost_usd"] = usage.get("total_cost_usd")
+            # Computed from exact tokens x config price; separate from the
+            # SDK's figure above, which it never overwrites.
+            try:
+                row["cost_usd_computed"] = compute_cost_usd(model, row)
+            except Exception:  # noqa: BLE001
+                row["cost_usd_computed"] = None
             self._append_row(row)
         except Exception:  # noqa: BLE001 — telemetry is best-effort
             pass
@@ -123,6 +168,8 @@ class Telemetry:
                 "cache_read_input_tokens": 0,
                 "cache_creation_input_tokens": 0,
                 "total_cost_usd": 0.0,
+                "computed_cost_calls": 0,
+                "cost_usd_computed": 0.0,
             }
 
         def _add(b: dict, r: dict) -> None:
@@ -133,6 +180,10 @@ class Telemetry:
             if cost is not None:
                 b["cost_calls"] += 1
                 b["total_cost_usd"] += cost
+            comp = r.get("cost_usd_computed")
+            if comp is not None:
+                b["computed_cost_calls"] += 1
+                b["cost_usd_computed"] += comp
 
         def _finish(b: dict) -> dict:
             """Unpriced calls leave the cost UNKNOWN, not zero.
@@ -146,6 +197,8 @@ class Telemetry:
             """
             if b["cost_calls"] == 0:
                 b["total_cost_usd"] = None
+            if b["computed_cost_calls"] == 0:
+                b["cost_usd_computed"] = None
             return b
 
         totals = _bucket()

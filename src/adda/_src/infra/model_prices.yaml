@@ -1,0 +1,41 @@
+# Per-model list prices, USD per million tokens (MTok). Read by
+# infra/telemetry.py to compute `cost_usd_computed` from EXACT token counts.
+# It is recorded ALONGSIDE the SDK's own `total_cost_usd` and never merged into
+# it: the SDK figure is authoritative where it exists; this one exists for the
+# calls that carry no SDK cost (the strategizer, whose stream is cut by
+# route_watcher before the SDK's ResultMessage arrives).
+#
+# Source: https://platform.claude.com/docs/en/about-claude/pricing (model
+# pricing table, verified 2026-09-28). Cache multipliers on that page: 5-minute
+# write 1.25x base input, 1-hour write 2x, read 0.1x -- EXCEPT Claude Opus 5.5,
+# whose cache read is 0.05x. The numbers below are the page's, not derived.
+#
+# `cache_write` is the 1-hour rate: adda's claude sessions are observed
+# writing 1-hour ephemeral cache entries (transcript `result.usage
+# .cache_creation.ephemeral_1h_input_tokens`). Telemetry rows carry only the
+# combined cache-creation count, so the 1-hour rate is applied to all of it.
+#
+# A model absent from this file gets cost_usd_computed = None and a logged
+# warning -- never a silent zero. Keys match a model id exactly or with a
+# trailing -YYYYMMDD snapshot suffix (claude-haiku-4-5-20251001).
+models:
+  claude-opus-5-5:
+    input: 4.00
+    output: 20.00
+    cache_read: 0.20
+    cache_write: 8.00
+  claude-sonnet-5-5:
+    input: 2.00
+    output: 10.00
+    cache_read: 0.20
+    cache_write: 4.00
+  claude-sonnet-5:
+    input: 2.00
+    output: 10.00
+    cache_read: 0.20
+    cache_write: 4.00
+  claude-haiku-4-5:
+    input: 1.00
+    output: 5.00
+    cache_read: 0.10
+    cache_write: 2.00

@@ -749,6 +749,17 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   so memory/kill OS-specifics live in one place; psutil impl + stdlib fallback.
 - **Where:** `resource_backend.py`. **Status:** done (Linux cgroup backend = future).
 
+### Computed cost from an explicit price table (2026-09-28)
+`infra/model_prices.yaml` holds per-model list prices (USD/MTok, sourced from
+the Anthropic pricing page, cited in the file). `Telemetry.record_call` adds
+`cost_usd_computed` = exact tokens x that table to every row, ALONGSIDE the
+SDK's `total_cost_usd` (never merged into it); `summary.json` carries
+`cost_usd_computed` / `computed_cost_calls` per bucket and `run_ledger.csv` a
+`cost_usd_computed` column. Exists because the strategizer's stream is cut by
+`route_watcher` before the SDK prices it. A model absent from the table gives
+None plus a logged warning, never zero. Validated in `tests/test_model_prices.py`
+against the SDK's cost on calls it did price.
+
 ### Per-delegation resource telemetry
 - **What:** `Wait(id, block=False)` shows a delegation's eval count, current RSS, and **peak
   RSS** (the high-water across the watcher's ticks), so the strategizer can see a
