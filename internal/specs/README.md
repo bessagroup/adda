@@ -20,6 +20,7 @@ Priority order (highest first) and how they compose:
 | [10](10-math-expert-agent.md) | MathExpert: symbolic-derivation verification node | medium | spec |
 | [11](11-delegation-bounded-version-control.md) | Delegation-bounded version control of the workspace | medium | **DONE** (workspace relocation remains) |
 | [12](12-peer-interaction.md) | Peer-interaction contract: Delegate/SendMessage/Wait | high | **ratified 2026-09-27, build in progress** |
+| [13](13-epistemic-architecture.md) | Epistemic architecture: typed claims, lineage, sequential evidence | tbd | design notes, not approved |
 
 **Dependency graph (build order matters):**
 - **01 + 02 + 06 are one cluster.** 06 *detects* a stuck/slow delegation; 02
