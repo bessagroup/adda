@@ -77,28 +77,55 @@ For every claim or conclusion in the document, ask:
    the weakest link in the chain it rests on; aggregating individually
    inconclusive results does not license a conclusion none of them carries.
 
-5. RUN ADEQUACY — DOES THE CONCLUSION SATISFY WHAT WAS ASKED
-   The <problem_statement> block in this task message states the run's own
-   success/termination criteria — e.g. an explicit "do not stop until a
-   good design is found or the budget is exhausted" clause. Judge the
-   conclusion against THAT ask, not only against internal consistency: an
-   internally-consistent early INCONCLUSIVE/negative close that stops well
-   short of a stated "do not stop until X" clause, with budget still
-   remaining (see the constraint snapshot in this message), is a MAJOR
-   finding. This is distinct from criteria 1-4 (which judge whether the
-   SCIENCE is sound) — a conclusion can be evidentially sound and still
-   fail the run's own charter for when a run is allowed to close.
+5. RUN ADEQUACY — DOES THE CONCLUSION USE THE TIME IT HAD
+   Continuous investigation is the default ethic, not something a problem
+   statement has to ask for: an internally-consistent early INCONCLUSIVE/
+   negative close with meaningful investigation still fitting inside the
+   remaining budget (see the constraint snapshot in this message) has not
+   yet earned its conclusion. This is distinct from criteria 1-4 (which
+   judge whether the SCIENCE is sound) — a conclusion can be evidentially
+   sound and still fail this criterion for when a run is allowed to close.
+   The <problem_statement> block in this task message may define its own
+   success criteria (floors, targets, an instruction to use the full
+   time); those take precedence on WHAT counts as success. But "use the
+   whole time" is satisfied by spending what remains WELL, not by the
+   clock reaching 100% — it does not exempt a run from the graded
+   judgment below, and cannot turn an early close into a worse verdict
+   than that judgment already gives it.
+
+   Grade the remaining budget in the constraint snapshot:
+   - Substantial time remains: a genuinely new idea, or the groundwork
+     for one, counts even if it does not finish — a fresh mechanism, a
+     further literature pass, a theoretical argument, a new oracle stood
+     up and tested even thinly. Closing without attempting or laying the
+     groundwork for one is the finding.
+   - Little time remains: the bar shifts to tightening what is already
+     there — a sharper causal argument, more rigorous checks of an
+     existing claim, closing an evidence gap on a hypothesis already
+     open. Demanding a wholly new direction this late is not this
+     criterion's ask.
    Judge WHERE the budget went, not merely whether the clock was emptied.
    Spending the remainder on a genuinely DIFFERENT candidate — a fresh
-   mechanism, a new oracle stood up and tested even thinly — satisfies a
-   "do not stop until X" clause; that is the run still searching. Do NOT
-   raise this finding against such a run merely because time was left on
-   the clock when the new lead ran out of runway. Conversely, additional
-   points inside a region the run has already mapped do not discharge the
-   clause just because they consumed the clock: work the run itself cannot
-   say what it might have learned from is padding, and padding is not
-   adequacy. Demanding it is the failure this criterion exists to prevent,
-   inverted.
+   mechanism, a new oracle stood up and tested even thinly — satisfies
+   this criterion even if that candidate itself runs out of runway before
+   closing; that is the run still searching, not failing. Conversely,
+   additional points inside a region the run has already mapped do not
+   satisfy it just because they consumed the clock: work the run itself
+   cannot say what it might have learned from is padding, and padding is
+   not adequacy. Demanding it is the failure this criterion exists to
+   prevent, inverted.
+
+   ENDPOINT. Once you judge that nothing meaningful fits in the time that
+   remains — the graded bar above cannot be met by anything the run could
+   still do — judge the deliverable on its own merits alone; unused time
+   past that point is no longer grounds to withhold approval.
+
+   Severity: an early close with meaningful work still fitting is a MAJOR
+   finding, and it must name what the remaining time should have bought
+   (the specific idea, check, or groundwork skipped) — not merely that
+   time was left. Never REJECT on this criterion for unused time alone;
+   only an unsupported claim under criteria 1-4 earns a CRITICAL/REJECT
+   verdict.
 
 6. INTERNAL CONSISTENCY
    Do the numbers in the conclusions match the numbers in the workspace
