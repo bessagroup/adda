@@ -485,6 +485,58 @@ def test_last_usage_recovered_from_assistant_message_when_route_watcher_breaks_e
     assert adapter.last_usage["total_cost_usd"] is None
 
 
+def test_route_watcher_break_sums_every_api_call_of_the_stream():
+    """The strategizer's whole run is ONE long stream of many API calls.
+    Breaking on the closing AssistantMessage used to record only that last
+    message's snapshot usage (output_tokens ~1 for the entire run, run
+    20260928T141126). The per-call usage the stream reports (message_start
+    input/cache, message_delta FINAL output) must be summed instead --
+    AssistantMessage.usage is a pre-completion snapshot and is not used when
+    stream events exist."""
+    class _Ev(_StreamEvent):
+        def __init__(self, event):
+            self.event = event
+
+    class _Asst(_AssistantMessage):
+        def __init__(self, blocks, mid, usage):
+            super().__init__(blocks)
+            self.message_id = mid
+            self.usage = usage
+
+    def _start(mid, inp, cr, cc):
+        return _Ev({"type": "message_start", "message": {
+            "id": mid, "usage": {
+                "input_tokens": inp, "cache_read_input_tokens": cr,
+                "cache_creation_input_tokens": cc, "output_tokens": 1}}})
+
+    def _delta(out):
+        return _Ev({"type": "message_delta", "usage": {"output_tokens": out}})
+
+    stale = {"input_tokens": 0, "output_tokens": 1}
+
+    async def _gen(prompt, options):
+        yield _start("m1", 10, 1000, 200)
+        yield _Asst([_TextBlock("a")], "m1", stale)
+        yield _delta(300)
+        yield _start("m2", 5, 1500, 0)
+        yield _Asst([_TextBlock("Run complete.")], "m2", stale)
+        # route_watcher breaks here, before m2's message_delta / any result
+
+    _install_fake_sdk(query=_gen, StreamEvent=_Ev)
+    ClaudeAdapter = _get_adapter()
+    adapter = ClaudeAdapter("claude-3", "sys", None, [])
+    seen = []
+    adapter.route_watcher = lambda: len(seen.append(1) or seen) >= 2
+    adapter.invoke([{"role": "user", "content": "hi"}])
+
+    u = adapter.last_usage
+    assert u["input_tokens"] == 15
+    assert u["cache_read_input_tokens"] == 2500
+    assert u["cache_creation_input_tokens"] == 200
+    assert u["output_tokens"] == 301  # m1 final 300 + m2's start snapshot 1
+    assert u["total_cost_usd"] is None
+
+
 # ---------------------------------------------------------------------------
 # STREAM_ENDED_WITHOUT_RESULT (report 7, run 20260830T004106, Oscar): a
 # stream that ends mid-tool with no ResultMessage used to return silently,

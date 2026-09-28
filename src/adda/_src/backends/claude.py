@@ -156,6 +156,58 @@ def _format_messages_as_prompt(messages: list[dict]) -> str:
 _STREAM_DONE = object()
 
 
+_USAGE_KEYS = ("input_tokens", "output_tokens",
+               "cache_read_input_tokens", "cache_creation_input_tokens")
+
+
+def _track_message_usage(
+    event: Any, by_id: dict[str, dict], cur: list[str | None]
+) -> None:
+    """Fold one raw stream event into a per-API-call usage map.
+
+    ``message_start`` carries the call's input/cache tokens; ``message_delta``
+    carries its FINAL output tokens. ``AssistantMessage.usage`` is a snapshot
+    taken before generation finishes (output_tokens 5 vs a true 140), so it is
+    only a fallback for calls whose stream events never arrived.
+    """
+    if not isinstance(event, dict):
+        return
+    et = event.get("type")
+    if et == "message_start":
+        m = event.get("message") or {}
+        cur[0] = m.get("id")
+        if cur[0]:
+            by_id[cur[0]] = dict(m.get("usage") or {})
+    elif et == "message_delta" and cur[0]:
+        by_id.setdefault(cur[0], {}).update(event.get("usage") or {})
+
+
+def _usage_fields(event: Any) -> dict:
+    """Usage worth persisting on a transcript ``stream_evt`` row, so a run's
+    spend can be recomputed from the transcript alone (see
+    ``adda._src.infra.usage_recompute``)."""
+    if not isinstance(event, dict):
+        return {}
+    et = event.get("type")
+    if et == "message_start":
+        m = event.get("message") or {}
+        u = m.get("usage") or {}
+        return {"message_id": m.get("id"),
+                "usage": {k: u.get(k) for k in _USAGE_KEYS if k in u}}
+    if et == "message_delta":
+        u = event.get("usage") or {}
+        return {"usage": {k: u.get(k) for k in _USAGE_KEYS if k in u}}
+    return {}
+
+
+def _sum_message_usage(usages: Any) -> dict:
+    total = dict.fromkeys(_USAGE_KEYS, 0)
+    for u in usages:
+        for k in _USAGE_KEYS:
+            total[k] += (u.get(k) or 0)
+    return total
+
+
 async def _anext_or_done(ait: Any) -> Any:
     """Return the next item, or the _STREAM_DONE sentinel when exhausted.
 
@@ -628,6 +680,8 @@ class ClaudeAdapter:
         last_result: Any = None
         _buffer_overflowed = False
         _deliberate_break = False
+        _msg_usage: dict[str, dict] = {}
+        _cur_msg_id: list[str | None] = [None]
         gen = query(prompt=prompt_str, options=options)
         # Idle-stream timeout — turns a silent stream into a retryable
         # TimeoutError. Resets on EVERY stream message. Scoped to model
@@ -682,7 +736,8 @@ class ClaudeAdapter:
                         if t:
                             thinking.append(t)
                 return {"type": "assistant", "text": "".join(texts),
-                        "tools": tools, "thinking": thinking}
+                        "tools": tools, "thinking": thinking,
+                        "message_id": getattr(msg, "message_id", None)}
             if isinstance(msg, UserMessage):
                 results = []
                 for b in (getattr(msg, "content", None) or []):
@@ -748,6 +803,13 @@ class ClaudeAdapter:
             # stream event (≈ prefill latency).
             _last_evt = [time.monotonic()]
             async for msg in _stream:
+                if isinstance(msg, StreamEvent):
+                    _track_message_usage(
+                        getattr(msg, "event", None), _msg_usage, _cur_msg_id)
+                elif isinstance(msg, AssistantMessage) \
+                        and getattr(msg, "usage", None) \
+                        and getattr(msg, "message_id", None):
+                    _msg_usage.setdefault(msg.message_id, dict(msg.usage))
                 if _capture:
                     if isinstance(msg, StreamEvent):
                         _pcount[0] += 1
@@ -767,7 +829,8 @@ class ClaudeAdapter:
                         if _et != "content_block_delta" or _gap > 2.0:
                             append_transcript({
                                 "type": "stream_evt", "evt": _et,
-                                "gap_s": round(_gap, 2)})
+                                "gap_s": round(_gap, 2),
+                                **_usage_fields(_ev)})
                         _d = _extract_delta(_ev)
                         if _d:
                             _pbuf.append(_d)
@@ -853,18 +916,23 @@ class ClaudeAdapter:
                 **(last_result.usage or {}),
                 "total_cost_usd": last_result.total_cost_usd,
             }
+        elif _msg_usage:
+            # route_watcher broke the stream on the AssistantMessage that
+            # closes the run (Done()) before the SDK's ResultMessage -- the
+            # only carrier of the session's cumulative usage and cost -- ever
+            # arrived. The strategizer's whole run is ONE long stream, so
+            # taking just the last message's usage recorded ~1 output token
+            # for the entire run (run 20260928T141126). Sum the per-API-call
+            # usage the stream itself reported instead. total_cost_usd stays
+            # None: cost is a session-level rollup no single message carries,
+            # the same "unknown, not zero" convention openai_compatible uses.
+            self.last_usage = {
+                **_sum_message_usage(_msg_usage.values()),
+                "total_cost_usd": None,
+            }
         elif last_assistant is not None and getattr(last_assistant, "usage", None):
-            # route_watcher (strategizer.py) broke the stream on THIS
-            # AssistantMessage before the SDK's own ResultMessage (and its
-            # total_cost_usd) ever arrived -- e.g. every strategizer turn that
-            # actually closes the run via Done(). Falling back to {} here
-            # silently recorded zero tokens/cost for that turn, steadily
-            # under-recording the strategizer's total spend on every run.
-            # The message we just broke on already carries its own usage
-            # dict; total_cost_usd is a session-level rollup a lone
-            # AssistantMessage doesn't carry, so it stays None here -- the
-            # same "cost unknown, not zero" convention openai_compatible.py
-            # already uses for backends that can't price a call at all.
+            # A backend/stream that never sent message_start/delta events or a
+            # message id: the lone message's own (possibly stale) usage.
             self.last_usage = {
                 **last_assistant.usage, "total_cost_usd": None,
             }
