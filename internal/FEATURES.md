@@ -1095,6 +1095,19 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   `app.py` the Starlette app, `templates/graph.html` the UI);
   `agent_runtime.py`'s `AgenticRun.serve_viewer`; `pyproject.toml`'s `viewer`
   optional-dependency group. **Status:** done (v1, read-only).
+- **Lifecycle, event colours, fonts (2026-09-28):** the delegation panel
+  names the stage (`lifeOf`: queued / running / awaiting review / done /
+  failed / gate outcome) with one explanatory sentence, distinguishing a
+  QUEUED delegation (`session_started_at` present and null) and an
+  OPEN_FOR_REVIEW one from plain running/done. adda notices are classified
+  by their marker (`app.py::_notice_kind`: adda / science monitor / verdict
+  validator / operator), each with its own colour AND a text tag; critic
+  verdicts and review approvals colour their result block. Science-monitor
+  injections render collapsed in the transcript and are also listed run-wide,
+  behind a count badge, from `readers.read_monitor_injections`
+  (`GET /api/runs/{id}/monitor`). Light theme (Catppuccin Latte) follows the
+  OS. IBM Plex Sans/Mono are bundled under `viewer/static/fonts` (SIL OFL) and
+  served from `/static`; Alpine and marked are still CDN-loaded.
 
 ---
 

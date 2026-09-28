@@ -7,6 +7,18 @@
   <script defer src="https://unpkg.com/alpinejs@3.14.3/dist/cdn.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
   <style>
+    /* Bundled locally (viewer/static/fonts, IBM Plex, SIL OFL): body copy is
+       Plex Sans, machine text is Plex Mono. Chosen as one family so the two
+       share proportions and the switch between prose and output is a change
+       of texture, not of design. No network fetch. */
+    @font-face { font-family: 'Plex Sans'; font-weight: 400; font-display: swap;
+      src: url('/static/fonts/ibm-plex-sans-latin-400-normal.woff2') format('woff2'); }
+    @font-face { font-family: 'Plex Sans'; font-weight: 600; font-display: swap;
+      src: url('/static/fonts/ibm-plex-sans-latin-600-normal.woff2') format('woff2'); }
+    @font-face { font-family: 'Plex Mono'; font-weight: 400; font-display: swap;
+      src: url('/static/fonts/ibm-plex-mono-latin-400-normal.woff2') format('woff2'); }
+    @font-face { font-family: 'Plex Mono'; font-weight: 500; font-display: swap;
+      src: url('/static/fonts/ibm-plex-mono-latin-500-normal.woff2') format('woff2'); }
     /* Catppuccin Mocha. Every value below is an official token — grounds,
        text ramp, and the two colour channels the interface uses:
        IDENTITY (which agent) is a cool hue carried on an agent's NAME;
@@ -29,6 +41,16 @@
       --green:     #a6e3a1;
       --peach:     #fab387;
       --red:       #f38ba8;
+      --yellow:    #f9e2af;
+      --maroon:    #eba0ac;
+      --flamingo:  #f2cdcd;
+      --sapphire:  #74c7ec;
+      --pulse-rgb: 205, 214, 244;
+      --shadow-rgb: 0, 0, 0;
+      --on-text:   #ffffff;
+
+      --sans: 'Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+      --mono: 'Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
       /* Identity ramp, cool arc. Index comes from the server
          (`identity`), so a node keeps its colour across runs. */
@@ -47,6 +69,32 @@
       --fs-label: 10.5px;
     }
 
+    /* Catppuccin Latte, same token names, so every rule below themes with no
+       further change. Followed automatically from the OS; data-theme on
+       <html> forces either. */
+    @media (prefers-color-scheme: light) {
+      :root:not([data-theme="dark"]) {
+        --base:#eff1f5; --mantle:#e6e9ef; --crust:#dce0e8;
+        --surface0:#ccd0da; --surface1:#bcc0cc; --surface2:#acb0be;
+        --overlay0:#9ca0b0; --overlay1:#8c8fa1; --overlay2:#7c7f93;
+        --subtext0:#6c6f85; --subtext1:#5c5f77; --text:#4c4f69;
+        --green:#40a02b; --peach:#fe640b; --red:#d20f39;
+        --yellow:#df8e1d; --maroon:#e64553; --flamingo:#dd7878; --sapphire:#209fb5;
+        --id0:#179299; --id1:#1e66f5; --id2:#8839ef; --id3:#ea76cb; --id4:#04a5e5; --id5:#7287fd;
+        --pulse-rgb:76, 79, 105; --shadow-rgb:76, 79, 105; --on-text:#eff1f5;
+      }
+    }
+    :root[data-theme="light"] {
+      --base:#eff1f5; --mantle:#e6e9ef; --crust:#dce0e8;
+      --surface0:#ccd0da; --surface1:#bcc0cc; --surface2:#acb0be;
+      --overlay0:#9ca0b0; --overlay1:#8c8fa1; --overlay2:#7c7f93;
+      --subtext0:#6c6f85; --subtext1:#5c5f77; --text:#4c4f69;
+      --green:#40a02b; --peach:#fe640b; --red:#d20f39;
+      --yellow:#df8e1d; --maroon:#e64553; --flamingo:#dd7878; --sapphire:#209fb5;
+      --id0:#179299; --id1:#1e66f5; --id2:#8839ef; --id3:#ea76cb; --id4:#04a5e5; --id5:#7287fd;
+      --pulse-rgb:76, 79, 105; --shadow-rgb:76, 79, 105; --on-text:#eff1f5;
+    }
+
     * { box-sizing: border-box; }
     [x-cloak] { display: none !important; }
 
@@ -58,15 +106,12 @@
       flex-direction: column;
       background: var(--base);
       color: var(--text);
-      /* System stack on purpose: the viewer is a local tool that must look
-         the same with no network. The legibility complaint was the type
-         SCALE, not the typeface. */
-      font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+      font-family: var(--sans);
       font-size: var(--fs-ui);
     }
 
     .m {
-      font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+      font-family: var(--mono);
       font-variant-numeric: tabular-nums;
     }
     .label {
@@ -126,15 +171,17 @@
     }
     .dot.done   { background: var(--green); }
     .dot.failed { background: var(--red); }
+    .dot.queued { background: var(--overlay1); }
+    .dot.review { background: var(--sapphire); }
     .dot.running {
       width: 7px; height: 7px;
       background: var(--text);
       animation: pulse 1.8s ease-in-out infinite;
     }
     @keyframes pulse {
-      0%   { box-shadow: 0 0 0 0 rgba(205,214,244,.45); }
-      70%  { box-shadow: 0 0 0 7px rgba(205,214,244,0); }
-      100% { box-shadow: 0 0 0 0 rgba(205,214,244,0); }
+      0%   { box-shadow: 0 0 0 0 rgba(var(--pulse-rgb), .45); }
+      70%  { box-shadow: 0 0 0 7px rgba(var(--pulse-rgb), 0); }
+      100% { box-shadow: 0 0 0 0 rgba(var(--pulse-rgb), 0); }
     }
 
     .vitals { margin-left: auto; display: flex; align-items: center; gap: 24px; }
@@ -237,7 +284,7 @@
     .md ul, .md ol { padding-left: 22px; }
     .md li { margin: 5px 0; }
     .md code {
-      font-family: ui-monospace, Menlo, monospace;
+      font-family: var(--mono);
       font-size: var(--fs-meta);
       background: var(--surface0);
       border-radius: 4px;
@@ -345,7 +392,7 @@
     }
     .bar:hover { background: var(--surface1); }
     .bar.selected { background: var(--surface1); color: var(--text); }
-    .bar .bar-id { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+    .bar .bar-id { font-family: var(--mono); font-size: 11px; }
     .bar .bar-out { font-size: 11.5px; }
 
     .deleg { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -375,8 +422,33 @@
       font-size: var(--fs-meta);
       color: var(--subtext0);
     }
+    /* Run-wide science-monitor log: one collapsed header with a count. */
+    .monitor-log { flex: none; padding: 0 26px; border-bottom: 1px solid var(--surface0); }
+    .monitor-log > summary {
+      display: flex; align-items: center; gap: 10px; cursor: pointer;
+      list-style: none; padding: 11px 0;
+      font-size: var(--fs-meta); color: var(--subtext0);
+    }
+    .monitor-log > summary::-webkit-details-marker { display: none; }
+    .monitor-log > summary::before { content: "\25B8"; color: var(--yellow); font-size: 10px; }
+    .monitor-log[open] > summary::before { content: "\25BE"; }
+    .monitor-badge {
+      font-family: var(--mono); font-size: var(--fs-label);
+      color: var(--base); background: var(--yellow);
+      border-radius: 9px; padding: 1px 7px; font-weight: 500;
+    }
+    .monitor-rows { display: flex; flex-direction: column; gap: 6px; padding-bottom: 12px; max-height: 260px; overflow-y: auto; }
+    .monitor-row { display: flex; gap: 10px; align-items: baseline; }
+    .monitor-src { flex: none; font-family: var(--mono); font-size: var(--fs-label); color: var(--overlay1); min-width: 9em; }
+    .monitor-txt { min-width: 0; font-family: var(--mono); font-size: var(--fs-meta); color: var(--subtext1); white-space: pre-wrap; }
+    .life-line {
+      margin: 0; padding: 10px 26px 10px;
+      font-size: var(--fs-meta); color: var(--subtext0);
+    }
     .pill.done   { color: var(--green); }
     .pill.failed { color: var(--red); }
+    .pill.queued { color: var(--overlay1); }
+    .pill.review { color: var(--sapphire); }
 
     /* ---- ledger -------------------------------------------------------- */
     .ledger {
@@ -469,7 +541,7 @@
     .tools { display: flex; flex-direction: column; gap: 15px; }
     .tool { display: flex; flex-direction: column; gap: 3px; }
     .tool b {
-      font-family: ui-monospace, Menlo, monospace;
+      font-family: var(--mono);
       font-size: 13px; font-weight: 400; color: var(--text);
     }
     .tool span { font-size: var(--fs-meta); line-height: 1.45; color: var(--overlay2); }
@@ -548,7 +620,7 @@
     .nb-cell { display: flex; gap: 14px; }
     .nb-gutter {
       flex: none; width: 44px;
-      font-family: ui-monospace, Menlo, monospace;
+      font-family: var(--mono);
       font-size: 11.5px;
       color: var(--overlay0);
       text-align: right;
@@ -564,7 +636,7 @@
       margin: 0;
       padding: 14px 16px;
       background: var(--mantle);
-      font-family: ui-monospace, Menlo, monospace;
+      font-family: var(--mono);
       font-size: var(--fs-meta);
       line-height: 1.7;
       color: var(--subtext1);
@@ -577,7 +649,7 @@
     }
     .nb-out pre {
       margin: 0;
-      font-family: ui-monospace, Menlo, monospace;
+      font-family: var(--mono);
       font-size: var(--fs-meta);
       line-height: 1.7;
       color: var(--subtext0);
@@ -621,9 +693,9 @@
       animation: node-pulse 1.9s ease-in-out infinite;
     }
     @keyframes node-pulse {
-      0%   { box-shadow: 0 0 0 0 rgba(205,214,244,.40); }
-      70%  { box-shadow: 0 0 0 12px rgba(205,214,244,0); }
-      100% { box-shadow: 0 0 0 0 rgba(205,214,244,0); }
+      0%   { box-shadow: 0 0 0 0 rgba(var(--pulse-rgb), .40); }
+      70%  { box-shadow: 0 0 0 12px rgba(var(--pulse-rgb), 0); }
+      100% { box-shadow: 0 0 0 0 rgba(var(--pulse-rgb), 0); }
     }
     .node.entry { border-color: var(--surface1); }
     .node.selected { border-color: var(--text); }
@@ -642,7 +714,7 @@
       background: var(--surface0);
       border: 1px solid var(--surface2);
       border-radius: 10px;
-      box-shadow: 0 18px 44px rgba(0,0,0,.55);
+      box-shadow: 0 18px 44px rgba(var(--shadow-rgb), .45);
       padding: 18px 20px;
       display: flex;
       flex-direction: column;
@@ -666,7 +738,7 @@
     }
     .btn:hover { background: var(--surface1); }
     .btn.primary { background: var(--text); color: var(--base); border-color: var(--text); }
-    .btn.primary:hover { background: #fff; }
+    .btn.primary:hover { background: var(--on-text); }
 
     /* ---- chat ---------------------------------------------------------- */
     .chat-rail {
@@ -780,7 +852,7 @@
     .tool-call + .tool-call { margin-top: 18px; }
     .tool-line {
       display: flex; align-items: baseline; gap: 9px;
-      font-family: ui-monospace, Menlo, monospace;
+      font-family: var(--mono);
       font-size: 12.5px;
       line-height: 1.6;
     }
@@ -802,8 +874,8 @@
       animation: call-wait 1.4s ease-in-out infinite;
     }
     @keyframes call-wait {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(205, 214, 244, .55); }
-      50%      { box-shadow: 0 0 0 4px rgba(205, 214, 244, 0); }
+      0%, 100% { box-shadow: 0 0 0 0 rgba(var(--pulse-rgb), .55); }
+      50%      { box-shadow: 0 0 0 4px rgba(var(--pulse-rgb), 0); }
     }
     @media (prefers-reduced-motion: reduce) {
       .tool-call.pending > .tool-line > .call-glyph { animation: none; }
@@ -845,7 +917,7 @@
       background: var(--crust);
       border: 1px solid var(--surface0);
       border-radius: 6px;
-      font-family: ui-monospace, Menlo, monospace;
+      font-family: var(--mono);
       font-size: var(--fs-meta);
       line-height: 1.65;
       color: var(--subtext0);
@@ -864,7 +936,7 @@
     }
     .result-glyph {
       flex: none;
-      font-family: ui-monospace, Menlo, monospace;
+      font-family: var(--mono);
       font-size: 12px;
       line-height: 1.9;
       color: var(--overlay0);
@@ -881,7 +953,7 @@
       background: var(--crust);
       border: 1px solid var(--surface0);
       border-radius: 6px;
-      font-family: ui-monospace, Menlo, monospace;
+      font-family: var(--mono);
       font-size: var(--fs-meta);
       line-height: 1.65;
       color: var(--subtext1);
@@ -912,29 +984,79 @@
        confused. Peach reads as "the system is telling you something"
        without claiming the --red an actual error owns. */
     .notice {
+      --nc: var(--peach);
       display: flex;
-      gap: 7px;
+      gap: 8px;
       margin: 5px 0 6px 16px;
+      align-items: flex-start;
     }
-    .notice-glyph {
+    .notice-monitor   { --nc: var(--yellow); }
+    .notice-validator { --nc: var(--flamingo); }
+    .notice-operator  { --nc: var(--sapphire); }
+    /* The tag repeats what the colour says, so a colour-blind reader (or a
+       grayscale screenshot) loses nothing. */
+    .notice-tag {
       flex: 0 0 auto;
-      color: var(--peach);
-      font-size: var(--fs-meta);
-      line-height: 1.9;
+      font-family: var(--mono);
+      font-size: var(--fs-label);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--nc);
+      line-height: 2.3;
+      min-width: 6.5em;
     }
     .notice-body { min-width: 0; flex: 1 1 auto; }
     .notice-pre {
       margin: 0;
       padding: 8px 11px;
       background: var(--surface0);
-      border-left: 2px solid var(--peach);
+      border-left: 2px solid var(--nc);
       border-radius: 4px;
-      font-family: ui-monospace, Menlo, monospace;
+      font-family: var(--mono);
       font-size: var(--fs-meta);
       line-height: 1.65;
       color: var(--subtext1);
       white-space: pre-wrap;
       overflow-x: auto;
+    }
+    /* Science-monitor injections are frequent and routine: collapsed to
+       their rule line, expanded on demand. */
+    details.notice { display: block; }
+    details.notice > summary {
+      display: flex; gap: 8px; align-items: baseline;
+      cursor: pointer; list-style: none;
+      font-size: var(--fs-meta); color: var(--subtext0);
+    }
+    details.notice > summary::-webkit-details-marker { display: none; }
+    details.notice > summary::before {
+      content: "\25B8"; color: var(--nc); font-size: 10px;
+    }
+    details.notice[open] > summary::before { content: "\25BE"; }
+    details.notice > .notice-body { margin: 5px 0 0 22px; }
+    .notice-first {
+      min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
+    /* A result that IS a critic verdict or a review approval. */
+    .tool-result.ev-verdict-pass   { --ec: var(--green); }
+    .tool-result.ev-verdict-revise { --ec: var(--maroon); }
+    .tool-result.ev-verdict-reject { --ec: var(--red); }
+    .tool-result.ev-review         { --ec: var(--sapphire); }
+    .tool-result[class*="ev-"] .result-glyph { color: var(--ec); }
+    .tool-result[class*="ev-"] .result-pre { border-color: var(--ec); }
+    .tool-result[class*="ev-"] .result-body::before {
+      font-family: var(--mono); font-size: var(--fs-label);
+      letter-spacing: .08em; text-transform: uppercase;
+      color: var(--ec); margin-bottom: 3px;
+    }
+    .tool-result.ev-verdict-pass   .result-body::before { content: "critic verdict · pass"; }
+    .tool-result.ev-verdict-revise .result-body::before { content: "critic verdict · revise"; }
+    .tool-result.ev-verdict-reject .result-body::before { content: "critic verdict · reject"; }
+    .tool-result.ev-review         .result-body::before { content: "review approved"; }
+    .tool-result.is-error .result-body::before {
+      content: "error"; font-family: var(--mono); font-size: var(--fs-label);
+      letter-spacing: .08em; text-transform: uppercase;
+      color: var(--red); margin-bottom: 3px;
     }
 
     .empty { color: var(--overlay0); font-size: var(--fs-body); padding: 8px 0; }
@@ -1122,6 +1244,22 @@
           </div>
         </div>
 
+        <details class="monitor-log" x-show="monitor.length > 0" x-cloak>
+          <summary>
+            <span class="label">Science monitor</span>
+            <span class="monitor-badge" x-text="monitor.length"></span>
+            <span>injections shown to agents</span>
+          </summary>
+          <div class="monitor-rows">
+            <template x-for="(m, i) in monitor" :key="i">
+              <div class="monitor-row">
+                <span class="monitor-src" x-text="m.source"></span>
+                <span class="monitor-txt" x-text="m.text"></span>
+              </div>
+            </template>
+          </div>
+        </details>
+
         <div class="deleg">
           <template x-if="!currentDelegation()">
             <div class="deleg-body">
@@ -1140,9 +1278,9 @@
                   to <span :style="`color:${identityColorFor(currentDelegation().to_node)}`"
                            x-text="currentDelegation().to_node"></span>
                 </span>
-                <span class="pill" :class="stateOf(currentDelegation())">
-                  <span class="dot" :class="stateOf(currentDelegation())"></span>
-                  <span x-text="delegOutcome(currentDelegation())"></span>
+                <span class="pill" :class="lifeOf(currentDelegation()).key">
+                  <span class="dot" :class="lifeOf(currentDelegation()).key"></span>
+                  <span x-text="lifeOf(currentDelegation()).label"></span>
                 </span>
                 <span class="m" style="font-size:11.5px; color:var(--overlay0)"
                       x-text="delegVitals(currentDelegation())"></span>
@@ -1152,6 +1290,8 @@
                   Open chat
                 </button>
               </div>
+
+              <p class="life-line" x-text="lifeOf(currentDelegation()).detail"></p>
 
               <!-- Only while THIS delegation is running: a note addressed to
                    finished work would never be acted on, and offering the
@@ -1603,7 +1743,7 @@
               <p style="margin:0; font-size:var(--fs-body); line-height:1.6;
                         color:var(--subtext0)">
                 Expected for a study that sets
-                <code style="font-family:ui-monospace,Menlo,monospace">pipeline_deliverable: false</code>.
+                <code style="font-family:var(--mono)">pipeline_deliverable: false</code>.
                 Files the run's work produced are below.
               </p>
             </div>
@@ -1654,7 +1794,7 @@
                     <pre x-show="artifactText !== null"
                          style="margin:0; padding:14px 16px; background:var(--crust);
                                 border:1px solid var(--surface0); border-radius:7px;
-                                font-family:ui-monospace,Menlo,monospace;
+                                font-family:var(--mono);
                                 font-size:var(--fs-meta); line-height:1.7;
                                 color:var(--subtext1); overflow-x:auto;
                                 white-space:pre-wrap; word-break:break-word;"
@@ -1756,6 +1896,7 @@
         notebook: null,
         vitals: null,
         oracle: null,
+        monitor: [],
         evalOpen: null,
         questions: [],
         answerDraft: {},
@@ -1857,6 +1998,7 @@
           this.loadLedger();
           this.loadVitals();
           this.loadOracle();
+          this.loadMonitor();
           this.pollOperator();
           // Every poll refreshes the watch heartbeat server-side,
           // which is what tells a run somebody is here to answer.
@@ -1867,6 +2009,7 @@
             this.loadLedger();
             this.loadVitals();
             this.loadOracle();
+            this.loadMonitor();
           }, 5000);
 
           this._clock = setInterval(() => {
@@ -1878,6 +2021,13 @@
         // rows. The critic's gate row was written uncosted, so a
         // delegation-derived total silently omitted its whole budget —
         // $0.697 shown against a real $1.078 on run 20260905T162758.
+        loadMonitor() {
+          fetch(`/api/runs/${this.runId}/monitor`)
+            .then(r => r.ok ? r.json() : null)
+            .then(m => { if (Array.isArray(m)) this.monitor = m; })
+            .catch(() => {});
+        },
+
         loadOracle() {
           fetch(`/api/runs/${this.runId}/oracle`)
             .then(r => r.ok ? r.json() : null)
@@ -2056,6 +2206,40 @@
           if (s === 'RUNNING') return 'running';
           if (s.includes('FAIL')) return 'failed';
           return 'done';
+        },
+
+        // The delegation's whole lifecycle in one word plus one sentence.
+        // stateOf() above stays coarse on purpose (it answers "is anything
+        // running?"); this one names the stage. A row that carries
+        // session_started_at with an explicit null was dispatched QUEUED
+        // behind a same-role delegation; the key's absence means an older
+        // log that never recorded the distinction, which reads as running.
+        lifeOf(row) {
+          const s = (row.status || '').toUpperCase();
+          if (s.startsWith('GATE:')) {
+            const o = this.gateOutcome(row);
+            return { key: o === 'passed' ? 'done' : 'failed',
+                     label: `gate ${o}`,
+                     detail: `Reproduction/critic gate: ${o}.` };
+          }
+          if (s === 'RUNNING') {
+            if ('session_started_at' in row && row.session_started_at === null) {
+              return { key: 'queued', label: 'queued',
+                       detail: 'Queued behind an earlier delegation to the same agent; it has not started yet.' };
+            }
+            return { key: 'running', label: 'running',
+                     detail: 'Running now.' };
+          }
+          if (s === 'OPEN_FOR_REVIEW') {
+            return { key: 'review', label: 'awaiting review',
+                     detail: 'Report delivered; waiting for the orchestrator to approve it or send feedback.' };
+          }
+          if (s.includes('FAIL')) {
+            return { key: 'failed', label: 'failed',
+                     detail: 'The delegation ended in failure.' };
+          }
+          return { key: 'done', label: 'done',
+                   detail: 'Approved and finalized.' };
         },
 
         // ---- identity (cool channel) -------------------------------------

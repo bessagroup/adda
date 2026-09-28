@@ -15,7 +15,8 @@ from pathlib import Path
 
 from starlette.applications import Starlette
 from starlette.responses import HTMLResponse, JSONResponse, StreamingResponse
-from starlette.routing import Route
+from starlette.routing import Mount, Route
+from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
 from ..infra import operator_channel
@@ -25,6 +26,7 @@ from . import readers
 __all__ = ["create_app", "run_viewer"]
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
+_STATIC_DIR = Path(__file__).parent / "static"
 
 
 def _run_dir(study_dir: Path, run_id: str) -> Path | None:
@@ -159,6 +161,58 @@ def _preview_block(text: str, css: str) -> str:
     return html
 
 
+# What adda is saying, told apart by the marker its injection site writes.
+# Each kind gets its own colour AND a text tag, so colour is never the only
+# channel. Science-monitor injections are the frequent, low-urgency ones, so
+# they render collapsed to their rule name.
+_NOTICE_KINDS = (
+    ("[SCIENCE MONITOR", "monitor", "science monitor"),
+    ("[VERDICT VALIDATOR", "validator", "verdict validator"),
+    ("[OPERATOR NOTE", "operator", "operator"),
+)
+
+
+def _notice_kind(text: str) -> tuple[str, str]:
+    head = (text or "").lstrip()
+    for prefix, kind, tag in _NOTICE_KINDS:
+        if head.startswith(prefix):
+            return kind, tag
+    return "adda", "adda"
+
+
+def _notice_html(text: str) -> str:
+    kind, tag = _notice_kind(text)
+    if kind == "monitor":
+        first = (text.strip().splitlines() or [""])[0]
+        return (
+            f"<details class='notice notice-{kind}'>"
+            f"<summary><span class='notice-tag'>{tag}</span> "
+            f"<span class='notice-first'>{_esc(first)}</span></summary>"
+            f"<div class='notice-body'>{_preview_block(text, 'notice-pre')}"
+            "</div></details>"
+        )
+    return (
+        f"<div class='notice notice-{kind}'><span class='notice-tag'>{tag}"
+        "</span>"
+        f"<div class='notice-body'>{_preview_block(text, 'notice-pre')}</div>"
+        "</div>"
+    )
+
+
+_VERDICT_RE = re.compile(
+    r"###\s*Verdict\b[\s:>*_`\"'\-]*(PASS|REVISE|REJECT)\b", re.IGNORECASE)
+
+
+def _result_event_kind(text: str) -> str:
+    """A result that is itself a critic verdict or a review approval."""
+    m = _VERDICT_RE.search(text or "")
+    if m:
+        return f"verdict-{m.group(1).lower()}"
+    if (text or "").lstrip().startswith("Approved."):
+        return "review"
+    return ""
+
+
 # Two backends write transcripts in two shapes. The Claude backend records
 # type "assistant" with a `tools` list of {name, input}; the
 # OpenAI-compatible one (used when a node points at a local Ollama/vLLM
@@ -226,12 +280,7 @@ def _bubble_html(event: dict, call_index: int = 0,
         notices, body = split_notices(event.get("text") or "")
         if not notices and not body.strip():
             return ""
-        notices_html = "".join(
-            f"<div class='notice'><span class='notice-glyph'>&#9432;</span>"
-            f"<div class='notice-body'>{_preview_block(n, 'notice-pre')}</div>"
-            "</div>"
-            for n in notices
-        )
+        notices_html = "".join(_notice_html(n) for n in notices)
         body_html = (f"<div class='bubble-text'>{_esc(body)}</div>"
                      if body.strip() else "")
         return ("<div class='turn turn-human'>"
@@ -348,19 +397,16 @@ def _tool_result_html(event: dict, names: list[str]) -> str:
         # failed the startswith() and lost its error styling, which is
         # precisely the result a reader most needs to see flagged.
         is_error = bool(r.get("is_error")) or text.lstrip().startswith("ERROR")
-        notices_html = "".join(
-            f"<div class='notice'><span class='notice-glyph'>&#9432;</span>"
-            f"<div class='notice-body'>{_preview_block(n, 'notice-pre')}</div>"
-            "</div>"
-            for n in notices
-        )
+        notices_html = "".join(_notice_html(n) for n in notices)
+        ev = "" if is_error else _result_event_kind(text)
         body_html = (
             f"{_preview_block(text, 'result-pre')}" if text.strip() else ""
         )
         html += (
             "<div class='turn turn-cont turn-res'><div class='turn-body'>"
             f"{notices_html}"
-            f"<div class='tool-result{' is-error' if is_error else ''}'>"
+            f"<div class='tool-result{' is-error' if is_error else ''}"
+            f"{(' ev-' + ev) if ev else ''}'>"
             "<span class='result-glyph' "
             f"title='{_esc(_display_tool_name(name))}'>&#9151;</span>"
             "<div class='result-body'>"
@@ -610,6 +656,13 @@ def create_app(study_dir: Path | str, graph=None) -> Starlette:
             return _not_found(f"no such run {run_id!r}")
         return JSONResponse(readers.read_oracle(run_dir))
 
+    async def get_monitor(request):
+        run_id = request.path_params["run_id"]
+        run_dir = _run_dir(study_dir, run_id)
+        if run_dir is None:
+            return _not_found(f"no such run {run_id!r}")
+        return JSONResponse(readers.read_monitor_injections(run_dir))
+
     async def get_problem_statement(request):
         run_id = request.path_params["run_id"]
         run_dir = _run_dir(study_dir, run_id)
@@ -794,6 +847,7 @@ def create_app(study_dir: Path | str, graph=None) -> Starlette:
         Route("/api/runs/{run_id}/note", post_note, methods=["POST"]),
         Route("/api/runs/{run_id}/vitals", get_vitals),
         Route("/api/runs/{run_id}/oracle", get_oracle),
+        Route("/api/runs/{run_id}/monitor", get_monitor),
         Route("/api/runs/{run_id}/artifacts", get_artifacts),
         Route("/api/runs/{run_id}/artifact", get_artifact),
         Route("/api/runs/{run_id}/notebook", get_notebook),
@@ -806,6 +860,7 @@ def create_app(study_dir: Path | str, graph=None) -> Starlette:
         Route("/api/runs/{run_id}/transcript/{key:path}", get_transcript),
         Route("/api/runs/{run_id}/stream", stream),
         Route("/runs/{run_id}", graph_page),
+        Mount("/static", StaticFiles(directory=_STATIC_DIR), name="static"),
     ]
     return Starlette(routes=routes)
 

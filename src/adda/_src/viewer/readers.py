@@ -946,6 +946,50 @@ def read_run_status(run_dir: Path | str) -> dict[str, Any] | None:
         return None
 
 
+def read_monitor_injections(run_dir: Path | str) -> list[dict[str, Any]]:
+    """Every science-monitor injection the agents were shown, run-wide.
+
+    Read from the transcripts, because that is where an injection is
+    actually delivered (diagnostics.jsonl records the rule firing, not the
+    text the agent saw). Each row: ``source`` (transcript key), ``ts``, and
+    the notice ``text``, in transcript-file order.
+    """
+    from ..nodes.notices import split_notices
+
+    root = Path(run_dir) / "debug" / "transcripts"
+    if not root.is_dir():
+        return []
+    out: list[dict[str, Any]] = []
+    for path in sorted(root.rglob("*.jsonl")):
+        key = path.relative_to(root).with_suffix("").as_posix()
+        for line in path.read_text(
+                encoding="utf-8", errors="replace").splitlines():
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            # Only what was delivered TO the agent; an agent quoting a
+            # notice back in its own turn is not an injection.
+            if ev.get("type") in ("assistant", "partial"):
+                continue
+            texts = [ev.get("text") or ""]
+            for r in ev.get("results") or []:
+                c = r.get("content", "")
+                if isinstance(c, list):
+                    c = "\n".join(
+                        (b.get("text") or b.get("content") or "")
+                        if isinstance(b, dict) else str(b) for b in c)
+                texts.append(c if isinstance(c, str) else "")
+            for t in texts:
+                if "[SCIENCE MONITOR" not in t:
+                    continue
+                for n in split_notices(t)[0]:
+                    if n.lstrip().startswith("[SCIENCE MONITOR"):
+                        out.append(
+                            {"source": key, "ts": ev.get("ts"), "text": n})
+    return out
+
+
 def read_transcript(run_dir: Path | str, key: str) -> list[dict[str, Any]] | None:
     """Parsed events for one transcript file.
 

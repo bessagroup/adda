@@ -1009,7 +1009,7 @@ def test_injected_nudges_render_as_notices_not_as_the_humans_task(tmp_path):
         "text": wrap_notice("[EVAL BUDGET] 180/200 evals used.",
                             trailing="") + "\n\nPlease continue.",
     })
-    assert "class='notice'" in html, "a marked nudge must get the notice band"
+    assert "class='notice notice-adda'" in html, "a marked nudge must get the notice band"
     assert "EVAL BUDGET" in html
     # the human's own words stay outside the band
     assert "Please continue." in html
@@ -1021,10 +1021,66 @@ def test_plain_human_turn_renders_without_a_notice_band(tmp_path):
 
     html = _bubble_html({"type": "HumanMessage", "text": "Minimise the drag."})
     assert "Minimise the drag." in html
-    assert "class='notice'" not in html
+    assert "class='notice" not in html
 
 
 def test_empty_human_turn_renders_nothing(tmp_path):
     from adda._src.viewer.app import _bubble_html
 
     assert _bubble_html({"type": "HumanMessage", "text": "   "}) == ""
+
+
+def test_notices_are_classified_and_monitor_is_collapsed():
+    from adda._src.nodes.notices import wrap_notice
+    from adda._src.viewer.app import _tool_result_html
+    html = _tool_result_html(
+        {"results": [{"tool_use_id": "t", "content":
+            wrap_notice("[SCIENCE MONITOR — RULE_X] drifted")
+            + wrap_notice("[OPERATOR NOTE — from the human] hi")
+            + wrap_notice("[NUDGE] plain")
+            + "out"}]}, ["Bash"])
+    assert "<details class='notice notice-monitor'>" in html
+    assert "RULE_X" in html
+    assert "notice notice-operator" in html
+    assert "notice notice-adda" in html
+
+
+def test_critic_verdict_and_approval_results_carry_an_event_class():
+    from adda._src.viewer.app import _tool_result_html
+    v = _tool_result_html(
+        {"results": [{"content": "### Verdict\n\n**REVISE**\nfix it"}]}, ["x"])
+    assert "tool-result ev-verdict-revise" in v
+    a = _tool_result_html(
+        {"results": [{"content": "Approved. D004 finalized."}]}, ["x"])
+    assert "tool-result ev-review" in a
+    e = _tool_result_html(
+        {"results": [{"content": "ERROR: ### Verdict REVISE"}]}, ["x"])
+    assert " ev-" not in e and "is-error" in e
+
+
+def test_monitor_endpoint_lists_injections_across_transcripts(tmp_path):
+    from adda._src.nodes.notices import wrap_notice
+    study = _make_study(tmp_path)
+    run_dir = _make_run(study, "20260904T120000")
+    _write_jsonl(run_dir / "debug" / "transcripts" / "D001.jsonl", [
+        {"ts": "t1", "type": "tool_result", "results": [{"content": [
+            {"type": "text", "text": wrap_notice(
+                "[SCIENCE MONITOR — R] one") + "x"}]}]},
+        {"ts": "t2", "type": "tool_result", "results": [{"content":
+            wrap_notice("[NUDGE] not monitor") + "y"}]},
+    ])
+    _write_jsonl(
+        run_dir / "debug" / "transcripts" / "strategizer" / "turn_001.jsonl",
+        [{"ts": "t3", "type": "user",
+          "text": wrap_notice("[SCIENCE MONITOR] +2 more: A(h1)")}])
+    client = TestClient(create_app(study))
+    rows = client.get("/api/runs/20260904T120000/monitor").json()
+    assert sorted(r["source"] for r in rows) == [
+        "D001", "strategizer/turn_001"]
+
+
+def test_bundled_fonts_are_served_locally(tmp_path):
+    study = _make_study(tmp_path)
+    client = TestClient(create_app(study))
+    r = client.get("/static/fonts/ibm-plex-sans-latin-400-normal.woff2")
+    assert r.status_code == 200 and len(r.content) > 1000
