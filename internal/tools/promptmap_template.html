@@ -292,8 +292,10 @@ mark{background:var(--mark);color:var(--ink);border-radius:2px;padding:0 1px}
 /* ---------- tables ---------- */
 .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
 table{border-collapse:collapse;width:100%;font-size:12.5px;min-width:520px}
-table.reflect{min-width:760px}
-table.reflect td{vertical-align:top}
+.reflfacts{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;
+  margin-top:10px;font-size:12.5px}
+.reflfacts b{display:block;font-size:11px;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--ink-3);margin-bottom:4px}
 .cite{margin-bottom:4px}
 .cite .src{display:block;font-size:11px}
 th{text-align:left;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);
@@ -1140,27 +1142,37 @@ function citeList(cs){
   return cs.map(c=>`<div class="cite">${esc(c.label)}${c.file
     ? ` <span class="src">${esc(c.file.replace(/^src\/adda\/_src\//,""))}:${c.line}</span>` : ""}</div>`).join("");
 }
+/* The text that asks is prompt, so it renders as the same editable row the
+   role and gate views use. A worker's request lives inside its <output_format>,
+   so its row IS that section -- one place to edit it, whichever view you are in. */
+function askRow(a, key){
+  if(a.section){
+    const role = DATA.roles.find(r=>r.id===a.section.role);
+    const sec = role && role.layers.flatMap(l=>l.sections).find(x=>x.tag===a.section.tag);
+    if(sec) return sectionRow(sec, key);
+  }
+  if(a.text) return sectionRow({label:a.label, text:a.text, chars:a.text.length, edit:a.edit,
+    source:{file:a.file, line:a.line, line_end:a.line_end, match:"ast", span:true}}, key, true);
+  return `<p class="nomsg">${esc(a.label)}</p>`;
+}
 function renderReflection(){
   const R = DATA.reflection;
   return `<p class="eyebrow">Machinery</p>
     <h1>Reflection</h1>
     <p class="lede">Each agent is asked for a <code>### Retrospective</code> about the system it
-      worked within — its rules, tools and feedback — not about the science. It reports
-      CONSISTENCY (ok or flagged, quoting both sides of any contradiction), DECISION and FRICTION;
-      the strategizer's interview adds BLOCKED, for capability gaps.</p>
-    <p class="lede" style="color:var(--ink-3)">The text of each request is in the role's prompt
-      (workers) or on the <b>Exit interview</b> gate (strategizer); a malformed worker report is
-      re-requested by the <b>Report shape retry</b> gate. This table is built from the code.</p>
-    <div class="tablewrap"><table class="reflect">
-      <thead><tr><th>Role</th><th>Asked by</th><th>When</th><th>Enforced by</th><th>Recorded by</th></tr></thead>
-      <tbody>${R.rows.map(r=>`<tr>
-        <td class="m">${esc(r.role)}</td>
-        <td>${citeList(r.asks)}</td>
-        <td>${esc(r.when)}</td>
-        <td>${citeList(r.enforced)}</td>
-        <td>${citeList(r.recorded)}</td>
-      </tr>`).join("")}</tbody>
-    </table></div>
+      worked within — its rules, tools and feedback — not about the science. Below, per role: the
+      text that asks (editable, like any prompt section), when it fires, what enforces it, and what
+      records the answer.</p>
+    ${R.rows.map(r=>`<section class="layer">
+      <div class="layerhead"><h2>${esc(r.role)}</h2></div>
+      <p class="layernote">${esc(r.when)}</p>
+      <div class="rows">${r.asks.map((a,i)=>askRow(a, `refl-${r.role}-${i}`)).join("")
+        || `<p class="nomsg">Not asked.</p>`}</div>
+      <div class="reflfacts">
+        <div><b>Enforced by</b>${citeList(r.enforced)}</div>
+        <div><b>Recorded by</b>${citeList(r.recorded)}</div>
+      </div>
+    </section>`).join("")}
     <div class="sectionhead"><h2>Where the answers land</h2>
       <p><code>${esc(R.sink.path)}</code>, one line per retrospective:
         ${R.sink.fields.map(f=>`<code>${esc(f)}</code>`).join(", ")}. ${esc(R.sink.flag)}

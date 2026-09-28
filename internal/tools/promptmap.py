@@ -1640,9 +1640,20 @@ def _cite(module_rel: str, qualname: str, label: str) -> dict:
 
 
 def _cite_constant(module_rel: str, name: str, label: str) -> dict:
+    """A constant the agent reads: its text, and the edit that rewrites it.
+
+    The key is the same one the gate card uses for this constant, so a
+    proposal made on either shows on both.
+    """
     s = assign_span(module_rel, name)
+    text = _module_str_constant(PKG / module_rel, name)[1]
     return {"label": label, "file": s["file"], "line": s["line"],
-            "line_end": s["line_end"]}
+            "line_end": s["line_end"], "text": text, "constant": name,
+            "edit": {"ok": True, "mode": "constant",
+                     "key": "{}:{}-{}".format(s["file"].replace("/", "~"),
+                                              s["line"], s["line_end"]),
+                     "file": s["file"], "line": s["line"],
+                     "line_end": s["line_end"]}}
 
 
 def _retrospective_line(mod_path: Path) -> int | None:
@@ -1708,8 +1719,12 @@ def build_reflection() -> dict:
                     ask_path = Path(mod.__file__).resolve()
                     break
         is_critic = getattr(agent, "role", None) == "critic"
+        # The request is part of the role's <output_format>, which the role's
+        # own view already shows as an editable section: point at that
+        # section, so there is one place to edit it.
         asks = ([{"label": "### Retrospective in its <output_format>",
-                  "file": _rel(ask_path), "line": line}]
+                  "file": _rel(ask_path), "line": line,
+                  "section": {"role": name, "tag": "output_format"}}]
                 if asked and line else [])
         if is_critic:
             when = "Every critic review: each Done() that reaches the critic gate."
