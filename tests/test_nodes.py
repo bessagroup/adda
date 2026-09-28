@@ -749,7 +749,17 @@ def _ledger_spec():
 
 
 def test_delegate_id_is_sequential(tmp_path):
-    """Delegation IDs are D001, D002, D003 within a run."""
+    """Delegation IDs are D001, D002, D003 within a run.
+
+    StubAdapter's worker completes instantly, so the first delegation can
+    race ahead to OpenForReview before the second Delegate() call fires
+    (spec 12 item 1/6 then correctly refuses it) -- observed in CI on
+    macOS for an identical pattern elsewhere, not locally, a real race not
+    flakiness to work around by relaxing the assertion. Collecting and
+    approving between the two calls removes the race.
+    """
+    from .fixtures import approve_delegation
+
     received_ids = []
 
     class CaptureAdapter(StubAdapter):
@@ -764,12 +774,16 @@ def test_delegate_id_is_sequential(tmp_path):
                 target="implementer", intent="task A", expected_report="",
                 hypothesis_ids=["H1"],
             )
+            self.closure_tools["Wait"]("D001")
+            approve_delegation(self.closure_tools, "D001")
             r2 = self.closure_tools["Delegate"](
                 target="implementer", intent="task B", expected_report="",
                 hypothesis_ids=["H1"],
             )
             received_ids.extend([r1, r2])
             _time.sleep(0.3)
+            self.closure_tools["Wait"]("D002")
+            approve_delegation(self.closure_tools, "D002")
             self.closure_tools["Done"](summary="done")
             return "Done."
 
@@ -3783,7 +3797,18 @@ def test_delegate_decodes_json_and_comma_string_hypothesis_ids(tmp_path):
 
     Observed live: Haiku strategizer sent a JSON-encoded string and a
     comma-joined string before getting the list form right.
+
+    Both Delegate calls are async (wait=False); under the default
+    (peer_interaction on) the first one's report can race ahead to
+    OpenForReview before the second Delegate() call runs (observed in CI
+    on macOS, not locally -- a real race, not flakiness to ignore), which
+    Delegate then correctly refuses (spec 12 item 1/6: no new dispatch
+    while a review is open). Collecting and approving the first
+    delegation between the two calls removes the race entirely, matching
+    what a real delegator must do anyway.
     """
+    from .fixtures import approve_delegation
+
     captured = []
 
     class Adapter(StubAdapter):
@@ -3799,10 +3824,14 @@ def test_delegate_decodes_json_and_comma_string_hypothesis_ids(tmp_path):
                 target="implementer", intent="t", expected_report="",
                 hypothesis_ids='["H1", "H2"]',
             ))
+            self.closure_tools["Wait"]("D001")
+            approve_delegation(self.closure_tools, "D001")
             captured.append(self.closure_tools["Delegate"](
                 target="implementer", intent="t", expected_report="",
                 hypothesis_ids="H1, H2",
             ))
+            self.closure_tools["Wait"]("D002")
+            approve_delegation(self.closure_tools, "D002")
             self.closure_tools["Done"](summary="done")
             return "Done."
 
