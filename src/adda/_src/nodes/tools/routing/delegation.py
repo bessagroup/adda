@@ -441,6 +441,11 @@ class WorkerSession:
         # from inside the adapter's lock (see ClaudeAdapter.invoke's
         # ``on_session_end``); _NO_SESSION_REPORT until an invoke reports one.
         self._own_session_id: Any = _NO_SESSION_REPORT
+        # Per-invoke usage dicts handed back the same way, drained (summed and
+        # cleared) each time this delegation records its usage; empty AND
+        # never-reported means the adapter takes no callbacks.
+        self._pending_usage: list[dict] = []
+        self._usage_reported = False
         # Honour-system eval count, set by ReportEvals; reconciled against the
         # provenance-stamped ledger rows before it is believed.
         self.claimed_evals: int = 0
@@ -546,9 +551,7 @@ class WorkerSession:
             self._bind_backend_context()
             text = self._invoke_with_report_retry()
             self._record_oracle_nudges()
-            usage = getattr(self.worker, "last_usage", {}) or {}
-            self.node._record_worker_usage(
-                self.worker, self.target, self.delegation_id)
+            usage = self._record_usage_once()
             self._flag_mcp_errors(text)
             evals, off_ledger, stamped = self._reconcile_evals()
             text = self._append_budget_report(text)
@@ -636,8 +639,48 @@ class WorkerSession:
                 node._current_notes_dir.parent / "transcripts"
                 / f"{self.delegation_id}.jsonl"))
 
-    def _capture_session_id(self, session_id: str | None) -> None:
+    def _capture_invoke_result(
+        self, session_id: str | None, usage: dict | None = None,
+    ) -> None:
         self._own_session_id = session_id
+        self._pending_usage.append(dict(usage or {}))
+        self._usage_reported = True
+
+    def _take_usage(self) -> dict:
+        """This delegation's own token usage since it last recorded, summed
+        over every worker.invoke it made (first attempt, report-retry, resume).
+
+        Taken from the per-call reports, never from ``worker.last_usage``:
+        that is shared adapter state a queued same-role delegation
+        overwrites, and it holds only the LAST invoke anyway, so a report
+        retry dropped the first attempt's spend. Falls back to
+        ``last_usage`` only for an adapter that reports nothing.
+        """
+        if not self._usage_reported:
+            return getattr(self.worker, "last_usage", {}) or {}
+        total: dict = {}
+        for u in self._pending_usage:
+            for k, v in u.items():
+                if k == "total_cost_usd":
+                    if v is not None:
+                        total[k] = (total.get(k) or 0) + v
+                    else:
+                        total.setdefault(k, None)
+                elif isinstance(v, (int, float)) and not isinstance(v, bool):
+                    total[k] = total.get(k, 0) + v
+                else:
+                    total[k] = v
+        self._pending_usage = []
+        return total
+
+    def _record_usage_once(self) -> dict:
+        """Take this delegation's usage and record it against the node."""
+        usage = self._take_usage()
+        self.node._record_usage(
+            usage, role=self.node._role_of(self.target),
+            model=getattr(self.worker, "model", None),
+            phase="delegation", delegation_id=self.delegation_id)
+        return usage
 
     def _worker_invoke(
         self, messages: list[dict], *, first: bool = False, **kw: Any,
@@ -649,7 +692,7 @@ class WorkerSession:
         (the queued->started patch). A worker whose invoke accepts neither
         (an older/custom stub) falls back to a plain call.
         """
-        cbs: dict[str, Any] = {"on_session_end": self._capture_session_id}
+        cbs: dict[str, Any] = {"on_session_end": self._capture_invoke_result}
         if first:
             cbs["on_session_start"] = self._mark_session_started_if_queued
         try:
@@ -1037,8 +1080,7 @@ class WorkerSession:
                 text = self._fallback_reconstructed_invoke(
                     wrap_notice(rebuild_note), prior_report)
             self._record_oracle_nudges()
-            usage = getattr(self.worker, "last_usage", {}) or {}
-            node._record_worker_usage(self.worker, self.target, delegation_id)
+            usage = self._record_usage_once()
             self._flag_mcp_errors(text)
             evals, off_ledger, stamped = self._reconcile_evals()
             text = self._append_budget_report(text)
@@ -1298,8 +1340,7 @@ class WorkerSession:
     def _finish_error(self, tb: str) -> None:
         """Record a delegation whose worker raised: registry + FAILED log row."""
         node, delegation_id, target = self.node, self.delegation_id, self.target
-        usage = getattr(self.worker, "last_usage", {}) or {}
-        node._record_worker_usage(self.worker, target, delegation_id)
+        usage = self._record_usage_once()
 
         # Durable before observable — the same ordering invariant as
         # _finish_ok. A poller watching Wait(block=False) leaves "Working" the

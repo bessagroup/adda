@@ -1036,9 +1036,10 @@ class OpenAICompatibleAdapter:
         behind another same-role delegation learns when its wait is really
         over. Best-effort.
 
-        ``on_session_end``: see ClaudeAdapter.invoke's docstring. This
-        backend has no resumable sessions, so it is always called with None
-        (kept for signature parity so callers treat both backends alike).
+        ``on_session_end``: see ClaudeAdapter.invoke's docstring -- called
+        as ``on_session_end(session_id, usage)`` under the lock, also when
+        the turn raised (``_capture_usage`` runs on the failure path too).
+        This backend has no resumable sessions, so the id is always None.
         """
         from .base import retry_on_transient
         with self._lock:
@@ -1047,14 +1048,20 @@ class OpenAICompatibleAdapter:
                     on_session_start()
                 except Exception:  # noqa: BLE001
                     pass
-            text = retry_on_transient(
-                lambda: self._invoke_once(messages), max_attempts=retry_max)
-            if on_session_end is not None:
-                try:
-                    on_session_end(self.last_session_id)
-                except Exception:  # noqa: BLE001
-                    pass
-            return text
+            # Cleared so a turn that raises before _capture_usage() runs
+            # cannot hand its caller the PREVIOUS call's values.
+            self.last_session_id = None
+            self.last_usage = {}
+            try:
+                return retry_on_transient(
+                    lambda: self._invoke_once(messages), max_attempts=retry_max)
+            finally:
+                if on_session_end is not None:
+                    try:
+                        on_session_end(
+                            self.last_session_id, dict(self.last_usage or {}))
+                    except Exception:  # noqa: BLE001
+                        pass
 
     def _invoke_once(self, messages: list[dict]) -> str:
         """Core invoke logic — build agent if needed, run, return text."""

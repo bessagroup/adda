@@ -923,14 +923,16 @@ class ClaudeAdapter:
         Best-effort: swallows any exception so a broken callback never
         breaks the real turn.
 
-        ``on_session_end``: called with THIS call's own session id (or None)
-        while ``_lock`` is still held, right after the turn finishes. The
-        session id is per-call output, but ``last_session_id`` is shared
+        ``on_session_end``: called as ``on_session_end(session_id, usage)``
+        with THIS call's own session id and token usage while ``_lock`` is
+        still held, once the turn is over (also when it raised, with
+        whatever it produced: ``None`` / ``{}`` if nothing). Both are
+        per-call output, but ``last_session_id`` / ``last_usage`` are shared
         adapter state: the moment the lock releases, a same-role delegation
-        queued behind this one may start (and overwrite it) before the
-        caller reads it, so a caller that needs ITS session id must take it
-        from here, never from ``last_session_id`` afterwards. Not called if
-        the turn raised. Best-effort like ``on_session_start``.
+        queued behind this one may start (and overwrite them) before the
+        caller reads them, so a caller that needs ITS OWN values must take
+        them from here, never from those attributes afterwards. Best-effort
+        like ``on_session_start``.
         """
         from .base import retry_on_transient
         with self._lock:
@@ -939,15 +941,22 @@ class ClaudeAdapter:
                     on_session_start()
                 except Exception:  # noqa: BLE001
                     pass
-            text = retry_on_transient(
-                lambda: _run_async_safe(
-                    self.ainvoke(
-                        messages, idle_timeout=idle_timeout, resume=resume)),
-                max_attempts=retry_max,
-            )
-            if on_session_end is not None:
-                try:
-                    on_session_end(self.last_session_id)
-                except Exception:  # noqa: BLE001
-                    pass
-            return text
+            # Cleared so a turn that raises before ainvoke() sets them cannot
+            # hand its caller the PREVIOUS call's values.
+            self.last_session_id = None
+            self.last_usage = {}
+            try:
+                return retry_on_transient(
+                    lambda: _run_async_safe(
+                        self.ainvoke(
+                            messages, idle_timeout=idle_timeout,
+                            resume=resume)),
+                    max_attempts=retry_max,
+                )
+            finally:
+                if on_session_end is not None:
+                    try:
+                        on_session_end(
+                            self.last_session_id, dict(self.last_usage or {}))
+                    except Exception:  # noqa: BLE001
+                        pass

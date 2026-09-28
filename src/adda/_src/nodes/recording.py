@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from .parsing import _extract_report_section
 
@@ -50,19 +49,6 @@ class RecordingMixin:
     def _role_of(self, target: str) -> str:
         """Configured role of a connected node, falling back to its name."""
         return getattr(self._spec.nodes.get(target), "role", None) or target
-
-    def _record_worker_usage(
-        self, worker: Any, target: str, delegation_id: str | None
-    ) -> None:
-        """Record a worker delegation's token usage. Shared by the success and
-        error paths so the two can never drift (role is derived, not hardcoded)."""
-        self._record_usage(
-            getattr(worker, "last_usage", {}) or {},
-            role=self._role_of(target),
-            model=getattr(worker, "model", None),
-            phase="delegation",
-            delegation_id=delegation_id,
-        )
 
     def _record_usage(
         self,

@@ -194,6 +194,7 @@ class _SessionWorker:
         self._lock = threading.Lock()
         self._n = 0
         self.by_thread: dict[int, str] = {}
+        self.usage_by_call: list[dict] = []
         self._first_thread: int | None = None
         self.second_turn_done = threading.Event()
 
@@ -210,8 +211,12 @@ class _SessionWorker:
                 self._first_thread = tid
             elif tid != self._first_thread:
                 self.second_turn_done.set()
+            self.last_usage = {"input_tokens": 100 * self._n,
+                               "output_tokens": 10 * self._n,
+                               "total_cost_usd": 0.01 * self._n}
+            self.usage_by_call.append(dict(self.last_usage))
             if on_session_end is not None:
-                on_session_end(self.last_session_id)
+                on_session_end(self.last_session_id, dict(self.last_usage))
             return ("## Report\n### Actions taken\n"
                     + "nothing further to do here. " * 4
                     + "\n### Conclusions\nok\n### Numbers\nn: 0")
@@ -255,3 +260,71 @@ def test_each_review_stores_its_own_session_id_not_the_shared_adapters(
     assert worker.last_session_id == own["D002"] != own["D001"]
     for d in ("D001", "D002"):
         assert n._registry[d]["session_id"] == own[d], (d, own)
+
+
+def test_recorded_usage_sums_each_invokes_own_usage_not_the_shared_adapters(
+        tmp_path, monkeypatch):
+    """The run's token/cost TOTAL is what lands in run_ledger. Reading
+    worker.last_usage after the lock is released let a queued neighbour's
+    turn overwrite it, so one delegation's usage was counted twice and the
+    other's lost. Here D001's post-invoke bookkeeping is held (at its first
+    step, just before usage is taken) until D002's whole turn has run (the exact interleaving that corrupts the shared
+    value); the node's totals must still equal the sum of every invoke's
+    own usage."""
+    from adda._src.nodes.tools.routing.delegation import WorkerSession
+
+    worker = _SessionWorker()
+    n = _node(tmp_path, worker)
+    tools = n.adapter.closure_tools
+
+    real_nudges = WorkerSession._record_oracle_nudges
+
+    def _nudges_after_d002_ran(self):
+        # the first post-invoke step, right before usage is read
+        if self.delegation_id == "D001":
+            assert worker.second_turn_done.wait(timeout=5)
+        return real_nudges(self)
+
+    monkeypatch.setattr(WorkerSession, "_record_oracle_nudges",
+                        _nudges_after_d002_ran)
+
+    worker._lock.acquire()
+    tools["Delegate"]("implementer", "task A", "a report")
+    tools["Delegate"]("implementer", "task B", "a report")
+    worker._lock.release()
+    n._threads["D001"].join(timeout=10)
+    n._threads["D002"].join(timeout=10)
+
+    calls = worker.usage_by_call
+    assert len(calls) == 2, calls
+    totals = n._token_totals
+    assert totals["input_tokens"] == sum(c["input_tokens"] for c in calls)
+    assert totals["output_tokens"] == sum(c["output_tokens"] for c in calls)
+    assert totals["total_cost_usd"] == pytest.approx(
+        sum(c["total_cost_usd"] for c in calls))
+    # and each delegation's own row carries its own invoke's usage
+    by_id = {d: n._registry[d]["usage"] for d in ("D001", "D002")}
+    assert {u["input_tokens"] for u in by_id.values()} == {100, 200}
+
+
+def test_usage_sums_across_a_delegations_own_invokes(tmp_path):
+    """A delegation that invokes more than once (malformed report -> one
+    corrective retry) spent tokens on BOTH; worker.last_usage held only the
+    last one."""
+    worker = _SessionWorker()
+    n = _node(tmp_path, worker)
+    tools = n.adapter.closure_tools
+    worker_short = "## Report\n### Actions taken\nx\n### Conclusions\nok\n### Numbers\nn: 0"
+    real_invoke = worker.invoke
+    calls = {"n": 0}
+
+    def _first_short_then_real(messages, **kw):
+        calls["n"] += 1
+        text = real_invoke(messages, **kw)
+        return worker_short if calls["n"] == 1 else text
+
+    worker.invoke = _first_short_then_real
+    tools["Delegate"]("implementer", "task A", "a report", wait=True)
+    assert len(worker.usage_by_call) == 2
+    assert n._token_totals["input_tokens"] == sum(
+        c["input_tokens"] for c in worker.usage_by_call)
