@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import inspect as _inspect
+import re
 import threading
 import time
 from pathlib import Path
@@ -23,6 +24,37 @@ __all__ = ["ClaudeAdapter"]
 # stream_evt already covers liveness, so recording every one of these too
 # would just be volume, not signal.
 _SYSTEM_MESSAGE_NOISE_SUBTYPES = frozenset({"thinking_tokens"})
+
+# Models that accept ``thinking={"type": "adaptive"}`` (Anthropic docs, "Thinking
+# support ... by model", verified 2026-09-29): Opus/Sonnet 4.6+ and the 5.x
+# families. Haiku 4.5, Opus/Sonnet 4.5 and earlier are extended-thinking only
+# and reject "adaptive" with a 400, so they get no thinking option at all
+# (their default display is already "summarized").
+_ADAPTIVE_THINKING_MODEL = re.compile(
+    r"^claude-(?:(?:opus|sonnet)-(?:4-[6-9]|[5-9])|(?:fable|mythos)-[5-9])")
+
+_THINKING_DISPLAYS = ("summarized", "omitted")
+
+
+def _thinking_options(model: str | None) -> dict:
+    """``ClaudeAgentOptions`` kwargs for the ``thinking_display`` knob.
+
+    Newer models default to "omitted": every ThinkingBlock arrives with an
+    empty ``thinking`` field and only a signature, so the transcript and
+    viewer show bare tool calls. "summarized" returns readable text. Billing
+    is identical either way (the full thinking tokens are charged; docs,
+    "Controlling thinking display"). Models without adaptive thinking are left
+    untouched."""
+    from ..runtime.settings import get_str
+    display = get_str("thinking_display", "summarized")
+    if display not in _THINKING_DISPLAYS:
+        raise ValueError(
+            f"runtime.thinking_display must be one of {_THINKING_DISPLAYS}, "
+            f"got {display!r}")
+    if not _ADAPTIVE_THINKING_MODEL.match(model or ""):
+        return {}
+    return {"thinking": {"type": "adaptive", "display": display}}
+
 
 # The in-process MCP server name every f3dasm closure is registered under. The
 # Claude SDK exposes each closure to the model ONLY by its qualified name
@@ -680,6 +712,7 @@ class ClaudeAdapter:
             # idle timeout can be bounded without false-positiving a
             # slow-but-working generation.
             include_partial_messages=True,
+            **_thinking_options(self.model),
             **({"hooks": _hooks} if _hooks else {}),
             **(
                 {"resume": resume, "fork_session": False}
@@ -738,6 +771,7 @@ class ClaudeAdapter:
             # are skipped (the assembled AssistantMessage carries the text).
             if isinstance(msg, AssistantMessage):
                 texts, tools, thinking = [], [], []
+                thinking_omitted = 0
                 for b in msg.content:
                     if isinstance(b, TextBlock):
                         texts.append(b.text)
@@ -748,8 +782,15 @@ class ClaudeAdapter:
                              or getattr(b, "text", None))
                         if t:
                             thinking.append(t)
+                        elif hasattr(b, "thinking"):
+                            # A thinking block that arrived with no text
+                            # (display "omitted"): counted, so "the model
+                            # thought but it was hidden" is distinguishable
+                            # from "the model did not think".
+                            thinking_omitted += 1
                 return {"type": "assistant", "text": "".join(texts),
                         "tools": tools, "thinking": thinking,
+                        "thinking_omitted": thinking_omitted,
                         "message_id": getattr(msg, "message_id", None)}
             if isinstance(msg, UserMessage):
                 results = []

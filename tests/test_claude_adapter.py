@@ -758,3 +758,74 @@ def test_unknown_system_subtype_defaults_to_recorded(tmp_path, monkeypatch):
     system_recs = [r for r in recs if r["type"] == "system"]
     assert len(system_recs) == 1
     assert system_recs[0]["subtype"] == "init"
+
+
+class _ThinkingBlock:
+    def __init__(self, thinking="") -> None:
+        self.thinking = thinking
+        self.signature = "sig"
+
+
+def test_thinking_display_defaults_to_summarized_on_adaptive_models():
+    cap: dict = {}
+    _install_fake_sdk(query=_capture_options_gen(cap))
+    _get_adapter()("claude-sonnet-5-5", "sys", None, []).invoke(
+        [{"role": "user", "content": "hi"}])
+    assert cap["options"]["thinking"] == {
+        "type": "adaptive", "display": "summarized"}
+
+
+def test_thinking_display_is_configurable_and_typos_are_loud():
+    import pytest
+    from adda._src.runtime import settings
+    cap: dict = {}
+    _install_fake_sdk(query=_capture_options_gen(cap))
+    try:
+        settings.configure({"thinking_display": "omitted"})
+        _get_adapter()("claude-opus-5-5", "sys", None, []).invoke(
+            [{"role": "user", "content": "hi"}])
+        assert cap["options"]["thinking"]["display"] == "omitted"
+        settings.configure({"thinking_display": "sumarized"})
+        with pytest.raises(ValueError, match="thinking_display"):
+            _get_adapter()("claude-opus-5-5", "sys", None, []).invoke(
+                [{"role": "user", "content": "hi"}])
+    finally:
+        settings.configure(None)
+
+
+def test_no_thinking_option_for_models_without_adaptive_thinking():
+    """Haiku 4.5 / 4.5 and older reject "adaptive" with a 400."""
+    from adda._src.backends.claude import _thinking_options
+    for model in ("claude-haiku-4-5-20251001", "claude-sonnet-4-5",
+                  "claude-opus-4-5", "claude-3", "", None):
+        assert _thinking_options(model) == {}, model
+    for model in ("claude-sonnet-5", "claude-sonnet-5-5", "claude-opus-5-5",
+                  "claude-opus-4-7", "claude-fable-5-1"):
+        assert _thinking_options(model)["thinking"]["type"] == "adaptive", model
+
+
+def test_transcript_counts_omitted_thinking_blocks(tmp_path, monkeypatch):
+    """A ThinkingBlock with empty text (display "omitted") is counted, so
+    "thought but hidden" is distinguishable from "did not think"."""
+    from adda._src.backends.base import set_transcript_sink
+
+    async def _gen(prompt, options):
+        yield _AssistantMessage([_ThinkingBlock(""), _TextBlock("a")])
+        yield _AssistantMessage([_ThinkingBlock("real summary"), _TextBlock("b")])
+        yield _AssistantMessage([_TextBlock("c")])
+        yield _ResultMessage()
+
+    monkeypatch.setenv("F3DASM_DEBUG", "1")
+    _install_fake_sdk(query=_gen)
+    sink = tmp_path / "D001.jsonl"
+    set_transcript_sink(str(sink))
+    try:
+        _get_adapter()("claude-3", "sys", None, []).invoke(
+            [{"role": "user", "content": "hi"}])
+    finally:
+        set_transcript_sink(None)
+    import json
+    recs = [json.loads(x) for x in sink.read_text().strip().splitlines()]
+    a = [r for r in recs if r["type"] == "assistant"]
+    assert [(r["thinking"], r["thinking_omitted"]) for r in a] == [
+        ([], 1), (["real summary"], 0), ([], 0)]

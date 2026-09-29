@@ -75,6 +75,7 @@ KNOWN_KEYS: frozenset[str] = frozenset({
     "run_backstop_multiple",
     "science_monitor",
     "semantic_scholar_api_key",
+    "thinking_display",
     "verdict_validator",
 })
 

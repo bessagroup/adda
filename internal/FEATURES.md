@@ -1185,6 +1185,20 @@ against the SDK's cost on calls it did price.
 
 ---
 
+- **Thinking display (`runtime.thinking_display`):** `summarized` (default) or
+  `omitted`, passed as `thinking={"type": "adaptive", "display": ...}` to
+  `ClaudeAgentOptions` on models that support adaptive thinking (Opus/Sonnet
+  4.6+, the 5.x families); other models are untouched. Newer models default to
+  `omitted`, which returns every ThinkingBlock with empty text and only a
+  signature, so transcripts and the viewer read as bare tool calls (Sonnet 5.5
+  smoke 20260928T233115: 0 of 78 assistant records carried thinking, against
+  126 of 369 on Haiku). Billing is the same either way — the full thinking
+  tokens are charged (Anthropic docs, "Controlling thinking display"). Each
+  assistant transcript record now also carries `thinking_omitted`, the count
+  of thinking blocks that arrived empty, so "thought but hidden" is
+  distinguishable from "did not think". A value outside the two is a
+  `ValueError`, not a silent default.
+
 ## Tools (every one must be documented above; the test enforces it)
 
 | Tool | Feature |
