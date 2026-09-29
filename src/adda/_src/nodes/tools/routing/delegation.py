@@ -285,6 +285,13 @@ def build_recall_history(node: Any) -> Any:
     return DelegationTools(node).RecallHistory
 
 
+# How often a blocked Wait looks for an operator note / science-monitor
+# message that should wake it (any-wait: every N one-second ticks; named
+# wait: every join of this many seconds).
+_NOTICE_POLL_TICKS = 10
+_NOTICE_POLL_S = 10.0
+
+
 class ConferTools:
     """Confer, bound to one sender node.
 
@@ -2577,12 +2584,16 @@ class DelegationTools:
                 return ("ERROR: block=False reads ONE delegation's status — "
                         "pass its delegation_id.")
             return self._status(delegation_id)
-        prefix = self.node._drain_notifications()
+        # An operator note already queued as this Wait starts is delivered
+        # now, and (like one arriving mid-wait) must not sit unread while
+        # the Wait blocks.
+        operator = self.node._drain_operator_notes()
+        prefix = operator + self.node._drain_notifications()
         if delegation_id is None:
-            return self._wait_for_any(prefix)
-        return self._wait_for_one(delegation_id, prefix)
+            return self._wait_for_any(prefix, wake=bool(operator))
+        return self._wait_for_one(delegation_id, prefix, wake=bool(operator))
 
-    def _wait_for_any(self, prefix: str) -> str:
+    def _wait_for_any(self, prefix: str, wake: bool = False) -> str:
         """Wait for whichever delegation finishes first -- OR (spec 12,
         peer_interaction) a SendMessage question from any of THIS caller's
         own children, whichever arrives first.
@@ -2722,13 +2733,20 @@ class DelegationTools:
                     "ERROR: waiting cannot make progress; every in-flight "
                     "delegation is " + "; and ".join(bits) + "."
                 )
+            if wake:
+                return prefix + self._woken_early_note(my_identity)
             with cond:
                 cond.wait(timeout=_tick)
             _n += 1
-            if _n % 10 == 0:
-                prefix += self._drain_while_waiting()
+            if _n % _NOTICE_POLL_TICKS == 0:
+                text, woke = self._drain_while_waiting()
+                prefix += text
+                if woke:
+                    return prefix + self._woken_early_note(my_identity)
 
-    def _wait_for_one(self, delegation_id: str, prefix: str) -> str:
+    def _wait_for_one(
+        self, delegation_id: str, prefix: str, wake: bool = False,
+    ) -> str:
         """Wait for one named delegation."""
         node = self.node
         with node._registry_lock:
@@ -2746,9 +2764,22 @@ class DelegationTools:
             t = node._threads.get(delegation_id)
 
         if t is not None:
+            if wake and t.is_alive():
+                return prefix + (
+                    f"[woken early by the note above: {delegation_id} is "
+                    f"still working -- Wait({delegation_id!r}) again to "
+                    "keep waiting]")
             while t.is_alive():
-                t.join(timeout=10.0)
-                prefix += self._drain_while_waiting()
+                t.join(timeout=_NOTICE_POLL_S)
+                text, woke = self._drain_while_waiting()
+                prefix += text
+                if woke and t.is_alive():
+                    with node._registry_lock:
+                        status = node._registry.get(
+                            delegation_id, {}).get("status")
+                    return prefix + (
+                        f"[woken early: {delegation_id} is still {status} "
+                        f"-- Wait({delegation_id!r}) again to keep waiting]")
 
         with node._registry_lock:
             entry = node._registry.get(delegation_id, {})
@@ -2759,17 +2790,37 @@ class DelegationTools:
         body = f"{entry.get('status', 'Unknown')}\n\n{entry.get('result', '')}"
         return prefix + body + (("\n\n" + cp) if cp else "")
 
-    def _drain_while_waiting(self) -> str:
-        """Notifications and science drift, drained mid-Wait.
+    def _woken_early_note(self, my_identity: str) -> str:
+        """What a Wait that returned early on an operator note or a
+        science-monitor message tells its caller: nothing was harvested, and
+        what is still in flight."""
+        node = self.node
+        with node._registry_lock:
+            pending = sorted(
+                i for i, e in node._registry.items()
+                if e.get("parent") == my_identity
+                and e.get("status") in
+                ("Working", "FollowUp", "OpenForReview", "Revising"))
+        return (
+            "[woken early by the message above; still in flight: "
+            + (", ".join(pending) or "none")
+            + " -- Wait() again to keep waiting]")
 
-        Wakes a strategizer that's asleep in Wait() for a live campaign —
-        without this, a science-monitor nudge (e.g. DUPLICATE_EVALUATION) only
-        surfaces on the NEXT tool call, by which point the whole delegation
-        (and its eval budget) has already finished. Same drain() every other
-        call site uses; each poll tick is a fresh check, not a repeat.
+    def _drain_while_waiting(self) -> tuple[str, bool]:
+        """Notices drained mid-Wait, and whether the Wait should return now.
+
+        A blocking Wait ends no turn, and a notice appended to a local string
+        only surfaces when the tool returns -- so an operator note or a
+        science-monitor nudge (e.g. DUPLICATE_EVALUATION) would otherwise sit
+        unseen for the whole delegation, by which point its eval budget has
+        already been spent. Those two mean somebody wants the agent NOW:
+        they WAKE the Wait (second element True) so they are delivered
+        in-band. Routine notifications (a report ready, a retrospective flag)
+        are drained into the returned text but do not wake it, to avoid
+        churn; they ride along with whatever the Wait returns next.
         """
         node = self.node
-        out = ""
+        out, wake = "", False
         with node._notifications_lock:
             _notifs = list(node._notifications)
             node._notifications.clear()
@@ -2780,11 +2831,16 @@ class DelegationTools:
         # before one (see nodes/notices.py for why the marker, not a regex).
         if _notifs:
             out += wrap_notice("\n".join(_notifs))
+        operator = node._drain_operator_notes()
+        if operator:
+            out += wrap_notice(operator.strip())
+            wake = True
         if node._science_monitor is not None:
             drift = node._science_monitor.drain()
             if drift:
                 out += wrap_notice(drift)
-        return out
+                wake = True
+        return out, wake
 
     @tool_examples(
         "Reply('D004', answer='Yes — treat the mass cap as hard.')",

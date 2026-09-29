@@ -142,7 +142,11 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   drained by N calls; it refuses when nothing is in flight, and refuses rather
   than hanging when every open delegation is parked on a `FollowUp` or has
   already died without reporting (a blocking call ends no turn, so the run's
-  time backstop cannot fire while inside it). `Cancelled` is never harvested
+  time backstop cannot fire while inside it). A blocked `Wait` (bare or by id)
+  also RETURNS EARLY when an operator note or a science-monitor message
+  arrives — delivered in-band with a "still in flight" line, nothing harvested
+  — so a human's correction or a live nudge is never held unread behind a
+  long delegation; routine notices do not wake it. `Cancelled` is never harvested
   (its result is excluded from the run). Naming an id keeps the original
   single-target behaviour.
   **Why:** dispatching a fan-out was already cheap (85% of real `Delegate`

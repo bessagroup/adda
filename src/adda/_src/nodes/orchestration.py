@@ -355,23 +355,12 @@ class OrchestrationMixin:
         notes = self._current_notes_dir
         return None if notes is None else notes.parent.parent
 
-    def _drain_notifications(self) -> str:
-        """Return and clear any pending push notifications, or empty
-        string."""
-        with self._notifications_lock:
-            if not self._notifications:
-                text = ""
-            else:
-                msgs = list(self._notifications)
-                self._notifications.clear()
-                text = "\n".join(msgs) + "\n\n"
-        # Confer inbox: messages other nodes addressed to THIS node (async
-        # mailbox). Drained here so the orchestrator receives them on its next
-        # turn / next tool call, prepended to any push notifications.
-        with self._confer_inbox_lock:
-            _confer = self._confer_inbox.pop(self._name, [])
-        if _confer:
-            text = "\n\n".join(_confer) + "\n\n" + text
+    def _drain_operator_notes(self) -> str:
+        """Operator notes queued by a human in the viewer, marked as coming
+        from the operator; "" when none. Notes addressed to a RUNNING
+        delegation are routed to that worker instead. Claims the queue
+        destructively, so whatever calls this owns delivery."""
+        text = ""
         # Operator notes: messages a human queued in the viewer while the run
         # was working. Delivered here, on the same path as Confer, so a note
         # reaches the agent at its next tool call rather than interrupting a
@@ -418,6 +407,26 @@ class OrchestrationMixin:
                 mine.append(_note)
             if mine:
                 text = "\n\n".join(mine) + "\n\n" + text
+        return text
+
+    def _drain_notifications(self) -> str:
+        """Return and clear any pending push notifications, or empty
+        string."""
+        with self._notifications_lock:
+            if not self._notifications:
+                text = ""
+            else:
+                msgs = list(self._notifications)
+                self._notifications.clear()
+                text = "\n".join(msgs) + "\n\n"
+        # Confer inbox: messages other nodes addressed to THIS node (async
+        # mailbox). Drained here so the orchestrator receives them on its next
+        # turn / next tool call, prepended to any push notifications.
+        with self._confer_inbox_lock:
+            _confer = self._confer_inbox.pop(self._name, [])
+        if _confer:
+            text = "\n\n".join(_confer) + "\n\n" + text
+        text = self._drain_operator_notes() + text
         if self._science_monitor is not None:
             offenders = self._science_monitor.escalation_due()
             _critic_name = self._find_critic_name()

@@ -199,3 +199,106 @@ def test_named_wait_marks_the_report_read_for_a_later_bare_wait(tmp_path):
 def test_named_wait_still_reports_an_unknown_delegation(tmp_path):
     _, Wait = _wait(tmp_path, {})
     assert "unknown delegation" in Wait("D404")
+
+
+# ── a blocked Wait must not leave the agent unaware that someone needs it ──
+
+def _fast_poll(monkeypatch):
+    from adda._src.nodes.tools.routing import delegation as d
+    monkeypatch.setattr(d, "_NOTICE_POLL_TICKS", 1)
+    monkeypatch.setattr(d, "_NOTICE_POLL_S", 0.2)
+
+
+def test_bare_wait_wakes_on_an_operator_note(tmp_path, monkeypatch):
+    from adda._src.infra import operator_channel as oc
+    _fast_poll(monkeypatch)
+    run_dir = tmp_path / "runs" / "T1"
+    node, Wait = _wait(tmp_path, {"D001": {"status": "Working"}})
+    oc.queue_note(run_dir, "use the coarse mesh")
+    started = time.monotonic()
+    out = Wait()
+    assert time.monotonic() - started < 5, "Wait ignored the operator note"
+    assert "use the coarse mesh" in out, out
+    assert "OPERATOR NOTE" in out, out
+    assert "still in flight: D001" in out, out
+    assert node._registry["D001"]["status"] == "Working"  # nothing harvested
+
+
+def test_named_wait_wakes_on_an_operator_note(tmp_path, monkeypatch):
+    from adda._src.infra import operator_channel as oc
+    _fast_poll(monkeypatch)
+    node, Wait = _wait(tmp_path, {"D001": {"status": "Working"}})
+    gate = threading.Event()
+    t = threading.Thread(target=gate.wait, args=(10,), daemon=True)
+    t.start()
+    node._threads["D001"] = t
+    oc.queue_note(tmp_path / "runs" / "T1", "reconsider the floor")
+    try:
+        started = time.monotonic()
+        out = Wait("D001")
+        assert time.monotonic() - started < 5
+        assert "reconsider the floor" in out, out
+        assert "D001 is still" in out, out
+    finally:
+        gate.set()
+
+
+def test_bare_wait_wakes_on_a_science_monitor_message(tmp_path, monkeypatch):
+    _fast_poll(monkeypatch)
+    node, Wait = _wait(tmp_path, {"D001": {"status": "Working"}})
+
+    class _Monitor:
+        def __init__(self):
+            self.sent = False
+
+        def escalation_due(self):
+            return []
+
+        def drain(self):
+            # Nothing at Wait's entry; the nudge lands mid-wait.
+            first, self.sent = not self.sent, True
+            return "" if first else "DUPLICATE_EVALUATION: you re-ran x=(1,1)"
+
+    node._science_monitor = _Monitor()
+    started = time.monotonic()
+    out = Wait()
+    assert time.monotonic() - started < 5
+    assert "DUPLICATE_EVALUATION" in out, out
+    assert "still in flight: D001" in out, out
+
+
+def test_a_routine_notification_does_not_wake_the_wait():
+    """A report-ready style notice is drained but does not end the Wait."""
+    from adda._src.nodes.tools.routing.delegation import DelegationTools
+
+    class _N:
+        _notifications = ["[Delegation D001 report ready for review]"]
+        _notifications_lock = threading.Lock()
+        _science_monitor = None
+
+        def _drain_operator_notes(self):
+            return ""
+
+    text, wake = DelegationTools._drain_while_waiting(
+        type("T", (), {"node": _N()})())
+    assert "report ready" in text
+    assert wake is False
+
+
+def test_note_arriving_mid_wait_wakes_a_named_wait(tmp_path, monkeypatch):
+    from adda._src.infra import operator_channel as oc
+    _fast_poll(monkeypatch)
+    node, Wait = _wait(tmp_path, {"D001": {"status": "Working"}})
+    gate = threading.Event()
+    t = threading.Thread(target=gate.wait, args=(10,), daemon=True)
+    t.start()
+    node._threads["D001"] = t
+    threading.Timer(0.5, oc.queue_note, (tmp_path / "runs" / "T1",
+                                         "mid-wait correction")).start()
+    try:
+        started = time.monotonic()
+        out = Wait("D001")
+        assert time.monotonic() - started < 5
+        assert "mid-wait correction" in out and "still Working" in out, out
+    finally:
+        gate.set()
