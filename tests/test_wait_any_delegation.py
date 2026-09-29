@@ -61,7 +61,9 @@ def _node(run_dir: Path) -> Node:
 def _wait(tmp_path, registry):
     node = _node(tmp_path / "runs" / "T1")
     with node._registry_lock:
-        node._registry.update(registry)
+        # Real entries always carry their delegator ("entry" = the strategizer).
+        node._registry.update(
+            {k: {"parent": "entry", **v} for k, v in registry.items()})
     return node, node._build_routing_closures()["Wait"]
 
 

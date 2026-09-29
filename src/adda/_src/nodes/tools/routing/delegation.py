@@ -1013,7 +1013,7 @@ class WorkerSession:
                 # _commit_workspace call (unchanged) provides it then.
                 workspace_sha=None,
             )
-        parent_cond = node._get_delegator_cond(entry.get("parent"))
+        parent_cond = node._get_delegator_cond(entry.get("parent", "entry"))
         with parent_cond:
             parent_cond.notify_all()
         with node._notifications_lock:
