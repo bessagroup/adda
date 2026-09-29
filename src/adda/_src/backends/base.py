@@ -14,10 +14,8 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from pathlib import Path
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Debug / transcript capture — master switch F3DASM_DEBUG, OFF by default.
@@ -80,6 +78,46 @@ def get_run_config_path() -> str | None:
     return getattr(_transcript_tls, "run_config_path", None)
 
 
+def record_stream_diagnostic(event_type: str, message: str, **extra: Any) -> None:
+    """Best-effort append to this delegation's ``debug/diagnostics.jsonl``.
+
+    ``ClaudeAdapter`` is backend-level and has no ``node`` reference (that
+    lives in ``nodes/``, a layer up), so it cannot call ``_record_tool_error``/
+    ``_record_intervention`` directly. Reuses the SAME thread-local
+    ``run_config_path`` ``claude._build_session_env`` already reads (bound per
+    delegation thread in ``delegation.py``) to derive ``debug_dir`` and
+    append in the identical shape those methods use — one diagnostics.jsonl,
+    written from wherever the fact is first known.
+
+    No-op, never raises, if the path isn't bound on this thread — every
+    ``ClaudeAdapter`` call site binds it (worker delegations directly in
+    ``delegation.py``; the entry node's own turns, the critic gate, the
+    verdict validator, and the pre-run problem-statement review via
+    ``backends.base.bind_run_context``) — so this is a genuine "no run
+    context available" case (e.g. a bare unit test), not a routine gap.
+    """
+    try:
+        rc = get_run_config_path()
+        if not rc:
+            return
+        import json as _json
+        from datetime import datetime, timezone
+        debug_dir = Path(rc).parent
+        record: dict = {
+            "ts": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
+            "node": get_delegation_id() or "",
+            "tool": event_type,
+            "error_type": event_type,
+            "fault": "system",
+            "message": message,
+        }
+        record.update(extra)
+        with (debug_dir / "diagnostics.jsonl").open("a", encoding="utf-8") as f:
+            f.write(_json.dumps(record) + "\n")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 @contextmanager
 def bind_run_context(delegation_id: str | None, run_config_path: str | None):
     """Bind this thread's delegation id + run_config path for one call,
@@ -90,7 +128,7 @@ def bind_run_context(delegation_id: str | None, run_config_path: str | None):
     invocation OUTSIDE a worker delegation (the entry node's own turns, the
     critic gate, the verdict validator, the pre-run problem-statement review)
     ran with neither set, and a backend-level diagnostic keyed on them
-    (``_record_stream_diagnostic``'s ``CONTEXT_COMPACTED`` /
+    (``record_stream_diagnostic``'s ``CONTEXT_COMPACTED`` /
     ``STREAM_ENDED_WITHOUT_RESULT``) silently found nowhere to write — on
     exactly the sessions most likely to run long enough to hit a forced
     compaction (the entry node's own turn is the longest-lived session in a

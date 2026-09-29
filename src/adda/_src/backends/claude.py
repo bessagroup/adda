@@ -11,6 +11,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .base import record_stream_diagnostic
+
 __all__ = ["ClaudeAdapter"]
 
 # SystemMessage subtypes that are pure per-token/streaming noise at
@@ -320,47 +322,6 @@ async def _stream_with_idle_timeout(
             elif phase is False:
                 tool_pending = False
         yield msg
-
-
-def _record_stream_diagnostic(event_type: str, message: str, **extra: Any) -> None:
-    """Best-effort append to this delegation's ``debug/diagnostics.jsonl``.
-
-    ``ClaudeAdapter`` is backend-level and has no ``node`` reference (that
-    lives in ``nodes/``, a layer up), so it cannot call ``_record_tool_error``/
-    ``_record_intervention`` directly. Reuses the SAME thread-local
-    ``run_config_path`` ``_build_session_env`` already reads (bound per
-    delegation thread in ``delegation.py``) to derive ``debug_dir`` and
-    append in the identical shape those methods use — one diagnostics.jsonl,
-    written from wherever the fact is first known.
-
-    No-op, never raises, if the path isn't bound on this thread — every
-    ``ClaudeAdapter`` call site binds it (worker delegations directly in
-    ``delegation.py``; the entry node's own turns, the critic gate, the
-    verdict validator, and the pre-run problem-statement review via
-    ``backends.base.bind_run_context``) — so this is a genuine "no run
-    context available" case (e.g. a bare unit test), not a routine gap.
-    """
-    try:
-        from .base import get_delegation_id, get_run_config_path
-        rc = get_run_config_path()
-        if not rc:
-            return
-        import json as _json
-        from datetime import datetime, timezone
-        debug_dir = Path(rc).parent
-        record: dict = {
-            "ts": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
-            "node": get_delegation_id() or "",
-            "tool": event_type,
-            "error_type": event_type,
-            "fault": "system",
-            "message": message,
-        }
-        record.update(extra)
-        with (debug_dir / "diagnostics.jsonl").open("a", encoding="utf-8") as f:
-            f.write(_json.dumps(record) + "\n")
-    except Exception:  # noqa: BLE001
-        pass
 
 
 def _build_session_env() -> dict:
@@ -902,7 +863,7 @@ class ClaudeAdapter:
                     # Unconditional (not gated on _capture/debug mode): a
                     # compaction is a run-level fact an analyst should never
                     # have to enable debug transcripts to discover.
-                    _record_stream_diagnostic(
+                    record_stream_diagnostic(
                         "CONTEXT_COMPACTED",
                         "The SDK compacted this session's context "
                         "mid-turn (compact_boundary).",
@@ -955,7 +916,7 @@ class ClaudeAdapter:
                 for _b in last_assistant.content:
                     if isinstance(_b, ToolUseBlock):
                         _last_tool = _b.name
-            _record_stream_diagnostic(
+            record_stream_diagnostic(
                 "STREAM_ENDED_WITHOUT_RESULT",
                 "CLI stream ended without a ResultMessage or a deliberate "
                 "route break — the turn may not have completed; its "

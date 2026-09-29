@@ -125,6 +125,11 @@ def _plan(messages: list, *, context_window: int, reserve_tokens: int):
     return head, span, tail, budget
 
 
+def summary_header(n: int) -> str:
+    """The exact prefix of the note that replaces a compacted span of ``n``."""
+    return _SUMMARY_HEADER.format(n=n)
+
+
 def compact_to_budget(messages: list, *, context_window: int,
                       reserve_tokens: int, summarize, cache: dict):
     """Replace the middle of the conversation with a summary of it.

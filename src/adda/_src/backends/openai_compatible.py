@@ -972,6 +972,8 @@ class OpenAICompatibleAdapter:
         reserve = context_budget.estimate_tokens(system_prompt)
         policy = self._context_policy()
 
+        seen: list = [None]
+
         def _hook(state):
             msgs = (state or {}).get("messages") or []
             if policy == "compact":
@@ -981,19 +983,48 @@ class OpenAICompatibleAdapter:
             else:
                 kept, report = context_budget.trim_to_budget(
                     msgs, context_window=window, reserve_tokens=reserve)
-            if report.fired:
-                from .base import append_transcript, debug_enabled
+            # The hook re-runs on every model call and graph state keeps the
+            # full history, so an unchanged compaction re-fires each turn.
+            # Record a compaction once, and again only when it moves.
+            marker = (report.dropped, report.truncated)
+            if report.fired and marker != seen[0]:
+                seen[0] = marker
+                from .base import (
+                    append_transcript,
+                    debug_enabled,
+                    record_stream_diagnostic,
+                )
                 log.warning(
                     "context %s fired: %d message(s) removed, %d truncated "
                     "(%d -> %d est. tokens, budget %d, window %d from %s)",
                     policy, report.dropped, report.truncated, report.before,
                     report.after, report.budget, window, source,
                 )
+                summary = ""
+                if policy == "compact":
+                    header = context_compaction.summary_header(report.dropped)
+                    for m in kept:
+                        text = context_budget._text_of(m)
+                        if text.startswith(header):
+                            summary = text[len(header):]
+                            break
+                record_stream_diagnostic(
+                    "CONTEXT_COMPACTED",
+                    f"adda's {policy} context policy fired: "
+                    f"{report.dropped} message(s) dropped, "
+                    f"{report.truncated} truncated "
+                    f"({report.before} -> {report.after} est. tokens).",
+                    compaction_data={
+                        "policy": policy, "window": window,
+                        "window_source": source, **report.as_dict()},
+                )
                 if debug_enabled():
                     append_transcript({
                         "type": "ContextCompaction",
                         "text": f"policy={policy} window={window} source={source}",
                         "trim": report.as_dict(),
+                        "policy": policy,
+                        "summary": summary,
                     })
             return {"llm_input_messages": kept}
 
