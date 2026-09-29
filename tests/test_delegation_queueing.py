@@ -238,9 +238,10 @@ def test_each_review_stores_its_own_session_id_not_the_shared_adapters(
     real_reconcile = WorkerSession._reconcile_evals
 
     def _reconcile_after_d002_ran(self):
-        # D001 reaches its post-invoke bookkeeping only after D002's whole
-        # turn has completed and overwritten the shared last_session_id.
-        if self.delegation_id == "D001":
+        # Whichever delegation won the (non-fair) lock and ran first reaches
+        # its post-invoke bookkeeping only after the other's whole turn has
+        # completed and overwritten the shared last_session_id.
+        if worker.by_thread.get(threading.get_ident()) == "S1":
             assert worker.second_turn_done.wait(timeout=5)
         return real_reconcile(self)
 
@@ -256,8 +257,11 @@ def test_each_review_stores_its_own_session_id_not_the_shared_adapters(
 
     own = {d: worker.by_thread[n._threads[d].ident] for d in ("D001", "D002")}
     assert own["D001"] != own["D002"]
-    # the shared state D001 must NOT have read: it belongs to D002's turn
-    assert worker.last_session_id == own["D002"] != own["D001"]
+    # the shared state the first runner must NOT have read: it belongs to
+    # the second runner's turn
+    first = next(d for d in own if own[d] == "S1")
+    second = next(d for d in own if d != first)
+    assert worker.last_session_id == own[second] != own[first]
     for d in ("D001", "D002"):
         assert n._registry[d]["session_id"] == own[d], (d, own)
 
