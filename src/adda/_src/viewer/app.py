@@ -242,6 +242,70 @@ def _tool_input(tool: dict) -> dict:
     return {}
 
 
+def _compaction_facts(event: dict) -> dict | None:
+    """Normalise both backends' compaction record to one shape, or ``None``.
+
+    Claude: ``{"type":"system","subtype":"compact_boundary","data":{...}}``,
+    where the SDK's own metadata names the token counts (``preTokens`` /
+    ``postTokens``, sometimes under ``compact_metadata``, in either case
+    convention). Local: ``{"type":"ContextCompaction","policy":...,
+    "trim":{tokens_before,...},"summary":...}``.
+    """
+    etype = str(event.get("type") or "").lower()
+    if etype == "contextcompaction":
+        trim = event.get("trim") or {}
+        return {
+            "policy": event.get("policy") or "",
+            "before": trim.get("tokens_before"),
+            "after": trim.get("tokens_after"),
+            "dropped": trim.get("dropped"),
+            "detail": event.get("text") or "",
+            "summary": event.get("summary") or "",
+        }
+    if etype == "system" and event.get("subtype") == "compact_boundary":
+        data = event.get("data") or {}
+        meta = data.get("compact_metadata") or data.get("compactMetadata") or {}
+
+        def pick(*keys):
+            for src in (data, meta):
+                for k in keys:
+                    if src.get(k) is not None:
+                        return src[k]
+            return None
+
+        return {
+            "policy": pick("trigger") or "sdk",
+            "before": pick("preTokens", "pre_tokens"),
+            "after": pick("postTokens", "post_tokens"),
+            "dropped": None,
+            "detail": "",
+            "summary": pick("summary") or "",
+        }
+    return None
+
+
+def _compaction_html(facts: dict) -> str:
+    """An inline marker at the point the context was compacted."""
+    bits = []
+    if facts["before"] is not None and facts["after"] is not None:
+        bits.append(f"{facts['before']} \u2192 {facts['after']} tokens")
+    elif facts["before"] is not None:
+        bits.append(f"{facts['before']} tokens before")
+    if facts["dropped"] is not None:
+        bits.append(f"{facts['dropped']} message(s) dropped")
+    if facts["policy"]:
+        bits.append(f"policy: {facts['policy']}")
+    line = " \u00b7 ".join(bits)
+    head = ("<span class='compaction-tag'>context compacted</span> "
+            f"<span class='compaction-facts'>{_esc(line)}</span>")
+    if facts["summary"].strip():
+        return ("<details class='compaction'>"
+                f"<summary>{head}</summary>"
+                f"<div class='compaction-summary'>{_esc(facts['summary'])}</div>"
+                "</details>")
+    return f"<div class='compaction'>{head}</div>"
+
+
 def _bubble_html(event: dict, call_index: int = 0,
                  resolved_calls: int | None = None) -> str:
     """Render one ``assistant`` event as a chat-turn HTML fragment.
@@ -287,6 +351,9 @@ def _bubble_html(event: dict, call_index: int = 0,
                 "<div class='turn-body'>"
                 f"{notices_html}{body_html}"
                 "</div></div>")
+    compaction = _compaction_facts(event)
+    if compaction is not None:
+        return _compaction_html(compaction)
     if etype not in _ASSISTANT_TYPES:
         return ""
     text = event.get("text") or ""

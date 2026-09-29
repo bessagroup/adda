@@ -990,6 +990,28 @@
       margin: 5px 0 6px 16px;
       align-items: flex-start;
     }
+    /* A compaction is the runtime rewriting what the agent can see, so it
+       gets a full-width rule in the transcript rather than a bubble. */
+    .compaction {
+      margin: 10px 0;
+      padding: 5px 0;
+      border-top: 1px dashed var(--overlay0);
+      border-bottom: 1px dashed var(--overlay0);
+      font-family: var(--mono);
+      font-size: var(--fs-label);
+      color: var(--subtext0);
+    }
+    .compaction summary { cursor: pointer; }
+    .compaction-tag {
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--sapphire);
+    }
+    .compaction-summary {
+      margin-top: 6px;
+      white-space: pre-wrap;
+      color: var(--text);
+    }
     .notice-monitor   { --nc: var(--yellow); }
     .notice-validator { --nc: var(--flamingo); }
     .notice-operator  { --nc: var(--sapphire); }

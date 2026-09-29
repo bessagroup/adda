@@ -722,12 +722,7 @@ def test_a_tool_name_cannot_inject_an_event_handler(tmp_path):
     assert "&#39;" in html
 
 
-def test_system_message_event_renders_safely(tmp_path):
-    """The transcript writer now records SystemMessage (incl. compact_boundary)
-    as a ``"system"`` event type. _bubble_html only knows how to render
-    assistant/HumanMessage bubbles, so an unrecognized type must degrade to
-    an empty fragment rather than raise.
-    """
+def test_claude_compact_boundary_renders_a_marker(tmp_path):
     from adda._src.viewer.app import _bubble_html
 
     html = _bubble_html({
@@ -735,7 +730,68 @@ def test_system_message_event_renders_safely(tmp_path):
         "subtype": "compact_boundary",
         "data": {"trigger": "auto", "preTokens": 123456},
     })
-    assert html == ""
+    assert "context compacted" in html
+    assert "123456 tokens before" in html
+    assert "policy: auto" in html
+
+
+def test_claude_compact_boundary_reads_nested_metadata(tmp_path):
+    from adda._src.viewer.app import _bubble_html
+
+    html = _bubble_html({
+        "type": "system", "subtype": "compact_boundary",
+        "data": {"compact_metadata": {"trigger": "manual", "pre_tokens": 900,
+                                      "post_tokens": 100}},
+    })
+    assert "900 \u2192 100 tokens" in html
+
+
+def test_local_compaction_renders_the_same_marker_with_collapsed_summary(tmp_path):
+    from adda._src.viewer.app import _bubble_html
+
+    html = _bubble_html({
+        "type": "ContextCompaction",
+        "text": "policy=compact window=2048 source=setting",
+        "policy": "compact",
+        "trim": {"dropped": 41, "truncated": 0, "tokens_before": 9000,
+                 "tokens_after": 1500, "budget": 1600},
+        "summary": "the <b>earlier</b> work",
+    })
+    assert "context compacted" in html
+    assert "9000 \u2192 1500 tokens" in html
+    assert "41 message(s) dropped" in html
+    assert "policy: compact" in html
+    assert "<details class='compaction'>" in html
+    assert "the &lt;b&gt;earlier&lt;/b&gt; work" in html
+
+
+def test_local_trim_compaction_has_no_summary_disclosure(tmp_path):
+    from adda._src.viewer.app import _bubble_html
+
+    html = _bubble_html({
+        "type": "ContextCompaction", "policy": "trim", "summary": "",
+        "trim": {"dropped": 3, "tokens_before": 10, "tokens_after": 5},
+    })
+    assert "context compacted" in html
+    assert "<details" not in html
+
+
+def test_other_system_subtypes_still_render_nothing(tmp_path):
+    from adda._src.viewer.app import _bubble_html
+
+    assert _bubble_html({"type": "system", "subtype": "init", "data": {}}) == ""
+
+
+def test_compaction_marker_appears_in_order_in_a_rendered_fragment(tmp_path):
+    from adda._src.viewer.app import _render_fragment
+
+    html = _render_fragment([
+        {"type": "assistant", "text": "before", "tools": []},
+        {"type": "ContextCompaction", "policy": "trim",
+         "trim": {"dropped": 1, "tokens_before": 9, "tokens_after": 4}},
+        {"type": "assistant", "text": "after", "tools": []},
+    ], 0)
+    assert html.index("before") < html.index("context compacted") < html.index("after")
 
 
 def test_malformed_client_input_does_not_500(tmp_path):

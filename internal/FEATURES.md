@@ -1199,6 +1199,20 @@ against the SDK's cost on calls it did price.
   distinguishable from "did not think". A value outside the two is a
   `ValueError`, not a silent default.
 
+- **Context compaction is visible, on every backend:** the Claude SDK's
+  `compact_boundary` and the local backends' `trim`/`compact` policy both write
+  a `CONTEXT_COMPACTED` row to `debug/diagnostics.jsonl` unconditionally (debug
+  off included; a local compaction is recorded once and again only when it
+  moves, not on every model call), via the one shared
+  `backends.base.record_stream_diagnostic`. With debug on, the transcript also
+  carries the record (`system`/`compact_boundary` for Claude,
+  `ContextCompaction` with `policy` and, for `compact`, the `summary` text for
+  local). The viewer draws one inline marker at that point in the node's
+  transcript (before -> after tokens, policy, messages dropped; the summary
+  collapsed), and the run-wide Monitor list shows the diagnostic. **Where:**
+  `backends/openai_compatible.py` (`_context_hook`), `backends/claude.py`,
+  `viewer/app.py` (`_compaction_facts`, `_compaction_html`). **Status:** done.
+
 ## Tools (every one must be documented above; the test enforces it)
 
 | Tool | Feature |
