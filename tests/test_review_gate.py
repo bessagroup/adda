@@ -313,6 +313,117 @@ def test_bare_wait_names_an_open_review_instead_of_nothing_to_wait_for():
     assert did in out
 
 
+def _inject_running_sibling(node, review_id):
+    """A second delegation of the same caller that is still Working, with
+    a live thread, without going through Delegate (which refuses while a
+    review is open)."""
+    gate = threading.Event()
+    t = threading.Thread(target=gate.wait, args=(10,), daemon=True)
+    t.start()
+    with node._registry_lock:
+        sib = dict(node._registry[review_id])
+        sib.update({"status": "Working", "result": "", "waited": False})
+        node._registry["sibling-running"] = sib
+        node._threads["sibling-running"] = t
+    return gate
+
+
+def test_bare_wait_returns_an_open_review_while_a_sibling_still_runs():
+    """One delegation reaching OPEN-FOR-REVIEW must not be held hostage by
+    a sibling that is still Working: the review is actionable now."""
+    import time
+    node = _make_node()
+    dt = DelegationTools(node)
+    set_delegation_id(None)
+
+    dt.Delegate("implementer", "do the thing", "a report", wait=False)
+    did = next(iter(node._registry))
+    node._threads[did].join(timeout=5)
+    gate = _inject_running_sibling(node, did)
+    try:
+        t0 = time.monotonic()
+        out = dt.Wait()
+        assert time.monotonic() - t0 < 3
+        assert "OPEN FOR REVIEW" in out
+        assert "A fine report." in out
+        assert "sibling-running" in out  # named as still in flight
+        assert node._registry[did]["waited"] is True
+        # Delivered, so it can be approved without a second read.
+        assert "Approved" in dt.SendMessage(did, "ok", approve=True)
+        assert node._registry[did]["status"] == "Done"
+    finally:
+        gate.set()
+
+
+def test_bare_wait_wakes_when_a_review_opens_during_the_wait():
+    """The review opening WHILE Wait is already blocked wakes it."""
+    import time
+    node = _make_node()
+    dt = DelegationTools(node)
+    set_delegation_id(None)
+
+    dt.Delegate("implementer", "do the thing", "a report", wait=False)
+    did = next(iter(node._registry))
+    node._threads[did].join(timeout=5)
+    gate = _inject_running_sibling(node, did)
+    with node._registry_lock:
+        node._registry[did]["waited"] = True  # already read
+    out: list = []
+    th = threading.Thread(target=lambda: out.append(dt.Wait()), daemon=True)
+    th.start()
+    time.sleep(0.3)
+    assert not out  # nothing actionable yet: blocked on the sibling
+    with node._registry_lock:
+        node._registry[did]["waited"] = False
+    th.join(timeout=4)
+    gate.set()
+    assert out and "OPEN FOR REVIEW" in out[0]
+
+
+def test_bare_wait_ignores_another_delegators_children():
+    """Two delegators, each with a child in flight: a bare Wait belongs to
+    its caller alone -- it neither returns, nor is blocked by, the other
+    delegator's delegations."""
+    node = _make_node()
+    dt = DelegationTools(node)
+    set_delegation_id(None)
+
+    dt.Delegate("implementer", "do the thing", "a report", wait=False)
+    did = next(iter(node._registry))
+    node._threads[did].join(timeout=5)
+    with node._registry_lock:
+        node._registry[did]["parent"] = "D-other"  # another delegator's
+
+    # Caller ("entry") has nothing of its own in flight: not handed the
+    # other delegator's review, and told there is nothing to wait for.
+    out = dt.Wait()
+    assert "nothing to wait for" in out
+    assert "A fine report." not in out
+    assert node._registry[did]["waited"] is False
+
+    # A finished child of the other delegator is not harvested either.
+    with node._registry_lock:
+        node._registry[did].update({"status": "Done", "waited": False})
+    assert "nothing to wait for" in dt.Wait()
+
+    # The other delegator's running child does not block the caller's own
+    # review from being returned.
+    gate = _inject_running_sibling(node, did)
+    try:
+        with node._registry_lock:
+            node._registry["mine"] = {
+                **node._registry[did], "parent": "entry",
+                "status": "OpenForReview", "waited": False,
+                "result": "MY REPORT",
+            }
+            node._registry["sibling-running"]["parent"] = "D-other"
+        out = dt.Wait()
+        assert "MY REPORT" in out
+        assert "sibling-running" not in out
+    finally:
+        gate.set()
+
+
 def test_wait_by_id_still_returns_the_open_reports_text():
     """Wait(id) is the "read" event design item 3 refers to -- it must
     keep returning an open review's report text, not treat it as if

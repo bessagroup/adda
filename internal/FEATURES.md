@@ -134,8 +134,11 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   pre-spec-12 surface `SendMessage` replaced — withheld by default, restored
   only by the `peer_interaction` ablation arm off (see below).
 - **Fan-out harvesting:** `Wait()` takes an OPTIONAL delegation id. Bare
-  `Wait()` blocks until whichever delegation finishes first and returns that
-  one's report (labelled with its ID), marking it read so N in flight are
+  `Wait()` blocks until whichever delegation becomes actionable first — a
+  finish, a worker's question, or a report OPEN FOR REVIEW (delivered, hence
+  read, so it can be approved/answered while siblings still run; the reply
+  names what is still in flight) — and returns that one's report (labelled
+  with its ID), marking it read so N in flight are
   drained by N calls; it refuses when nothing is in flight, and refuses rather
   than hanging when every open delegation is parked on a `FollowUp` or has
   already died without reporting (a blocking call ends no turn, so the run's

@@ -1013,6 +1013,9 @@ class WorkerSession:
                 # _commit_workspace call (unchanged) provides it then.
                 workspace_sha=None,
             )
+        parent_cond = node._get_delegator_cond(entry.get("parent"))
+        with parent_cond:
+            parent_cond.notify_all()
         with node._notifications_lock:
             node._notifications.append(
                 f"[Delegation {delegation_id} report ready for review -- "
@@ -2548,11 +2551,13 @@ class DelegationTools:
         """Block until a delegation finishes (Done or Errored), then return its
         result — holds the current turn open with no extra turns consumed.
 
-        OMIT delegation_id to wait for whichever delegation finishes FIRST.
+        OMIT delegation_id to wait for whichever delegation becomes actionable
+        FIRST: a finished report, a report open for review (delivered, so you
+        can approve or answer it now), or a question from a worker.
         That is how you collect a fan-out: dispatch several with
         Delegate(wait=False), then call Wait() once per worker — each call
-        hands back one finished delegation's report (labelled with its ID) and
-        blocks only while nothing is ready. Naming an ID instead waits for that
+        hands back one delegation's report (labelled with its ID, plus a note
+        of what is still in flight) and blocks only while nothing is ready. Naming an ID instead waits for that
         specific worker, which leaves any others finishing unread, so prefer
         the bare form whenever more than one delegation is in flight.
 
@@ -2604,15 +2609,35 @@ class DelegationTools:
                     (i, e) for i, e in node._registry.items()
                     # Cancelled is terminal but its result is explicitly
                     # excluded from the run, so it is never harvestable.
-                    if e.get("status") in ("Done", "Errored")
+                    # An unread OpenForReview report is actionable too:
+                    # the delegator can approve or give feedback on it
+                    # now, so a bare Wait must not sit on it while a
+                    # sibling is still running. Only THIS caller's own
+                    # children count -- another delegator's are never its
+                    # to harvest, nor to be blocked by.
+                    if e.get("parent") == my_identity
+                    and e.get("status") in ("Done", "Errored", "OpenForReview")
                     and not e.get("waited")
                 ]
                 if ready:
                     did, entry = ready[0]
                     entry["waited"] = True
                     cp = entry.get("checkpoint", "")
-                    body = (f"[{did}] {entry['status']}\n\n"
-                            f"{entry.get('result', '')}")
+                    if entry["status"] == "OpenForReview":
+                        body = (f"[{did}] report ready but OPEN FOR REVIEW "
+                                f"-- {entry.get('result', '')}")
+                    else:
+                        body = (f"[{did}] {entry['status']}\n\n"
+                                f"{entry.get('result', '')}")
+                    pending = sorted(
+                        i for i, e in node._registry.items()
+                        if i != did and e.get("parent") == my_identity
+                        and e.get("status") in
+                        ("Working", "FollowUp", "OpenForReview", "Revising"))
+                    if pending:
+                        body += (
+                            "\n\n[still in flight: " + ", ".join(pending)
+                            + " -- Wait() again for the next]")
                     return prefix + body + (("\n\n" + cp) if cp else "")
                 # Every access to a `to_delegator` queue -- append (in
                 # _send_upward), or check-and-pop (here) -- must share ONE
@@ -2638,7 +2663,8 @@ class DelegationTools:
                             f"[{did}] message from {sender_label}: {msg}")
                 open_ids = sorted(
                     i for i, e in node._registry.items()
-                    if e.get("status") in
+                    if e.get("parent") == my_identity
+                    and e.get("status") in
                     ("Working", "FollowUp", "OpenForReview", "Revising")
                 )
                 # Classify what is actually still capable of finishing.
