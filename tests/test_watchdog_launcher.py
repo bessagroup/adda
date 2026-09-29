@@ -84,8 +84,11 @@ def test_grandchild_is_also_reaped(tmp_path):
         f"open({str(grandchild_pid_file)!r}, 'w').write(str(p.pid))\n"
         "time.sleep(30)\n"
     )
+    # The deadline must outlast interpreter start-up plus the grandchild
+    # spawn on a slow runner, or the pid file is not written before the
+    # kill and there is no grandchild to check (macos CI, 20260929).
     result = run_under_watchdog(
-        [sys.executable, str(script)], deadline_s=0.3, kill_grace_s=0.5,
+        [sys.executable, str(script)], deadline_s=4.0, kill_grace_s=0.5,
     )
     assert result.timed_out is True
 
