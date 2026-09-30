@@ -7,7 +7,7 @@ any build happens on a feature branch, not `main`; small independent patches
 may still land on `main`.
 
 Paper interpretations cited here are recorded in Zotero (the ground truth for
-paper interpretation in this project), in each item's "Relevance to a3dasm"
+paper interpretation in this project), in each item's "Relevance to adda"
 note: POPPER `XUPPQ4SV`, Hypothesis Evolution Protocol `SC573Z2A`
 (duplicate item `PK8WT5ES`), "AI scientists produce results without reasoning
 scientifically" `TZH5WRR6`. Where this document and a Zotero note disagree,
@@ -74,7 +74,7 @@ Readings, with their caveats:
   parents); five states including `dormant`; verdicts gated at belief ≥ 0.8 /
   ≤ 0.2; saturation-based stopping. Per the Zotero note it lacks a
   falsification requirement, adversarial validation and a live monitor, which
-  a3dasm has; a3dasm lacks its immutable event log and lineage.
+  adda has; adda lacks its immutable event log and lineage.
 - **AI scientists produce results without reasoning scientifically**
   (Ríos-García et al., 2026). Over 25,000 runs of thin scaffolds (ReAct,
   tool-calling; multi-agent orchestration explicitly out of scope): evidence
@@ -117,7 +117,7 @@ Each component is listed with its status in the discussion.
      designs, since a deterministic oracle's randomness is the design sampling)
      converted to e-values and accumulated POPPER-style, verdict at 1/α.
    To satisfy POPPER's Assumption 2, the test would be fixed at registration
-   (a3dasm already pre-registers falsification criteria) rather than chosen by
+   (adda already pre-registers falsification criteria) rather than chosen by
    the executing agent. *Status: proposal. The transfer to deterministic
    oracles and the bounded universal rule are adda-boss-whopper's inference,
    not results from the papers.*
