@@ -521,7 +521,10 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   `CorpusAdd` also takes a PDF URL), `SearchPapers` (all three databases in
   parallel, the same paper merged into one entry, and a first line saying how
   each provider did — so a throttled or failing provider is visible without
-  being a separate tool), `CitationGraph` (citing / references / similar,
+  being a separate tool; the arXiv leg requires EVERY word, as
+  `all:w1 AND all:w2 ...`, because arXiv ORs bare words, and relaxes to the
+  longest ~60% of the words and then the raw text if that returns
+  nothing — `discovery._arxiv_queries`), `CitationGraph` (citing / references / similar,
   OpenAlex first with Semantic Scholar as fallback) and `PaperDetails`.
   These replaced thirteen per-provider tools and the
   `wait=False` / `CollectSearches` async pool the agent used to fan them out by

@@ -47,12 +47,47 @@ _ARXIV_ABS = re.compile(r"arxiv\.org/(?:abs|pdf)/([^/?#]+?)(?:v\d+)?(?:\.pdf)?$"
 
 # ── Provider adapters: each returns (records, status) ────────────────────────
 
+_ARXIV_STOP = frozenset(
+    "a an the of for in on and or with to by from via using is are as at".split())
+_ARXIV_FIELDED = re.compile(r"\b(?:all|ti|au|abs|co|jr|cat|rn|id):|\b(?:AND|OR|ANDNOT)\b|\"")
+
+
+def _arxiv_queries(text: str) -> list[str]:
+    """Queries to try in order: every word required (arXiv ORs bare words,
+    so "coilable longeron mast" returned tokamak papers), then the longest
+    ~60% of the words, then the text as given. A query the caller already
+    wrote in arXiv syntax is used as-is."""
+    if _ARXIV_FIELDED.search(text):
+        return [text]
+    words = list(dict.fromkeys(
+        w for w in re.findall(r"[A-Za-z0-9][A-Za-z0-9\-]*", text.lower())
+        if w not in _ARXIV_STOP))
+    if len(words) < 2:
+        return [text]
+    def _and(ws: list[str]) -> str:
+        return " AND ".join(f"all:{w}" for w in ws)
+    keep = max(2, -(-len(words) * 3 // 5))
+    longest = set(sorted(words, key=len, reverse=True)[:keep])
+    relaxed = [w for w in words if w in longest]
+    out = [_and(words)]
+    if len(relaxed) < len(words):
+        out.append(_and(relaxed))
+    out.append(text)
+    return out
+
+
 def arxiv_search(query: str, limit: int) -> list[dict]:
     """arXiv search as records (the arXiv tool returned display text)."""
     import arxiv as _arxiv
     client = _arxiv.Client()
+    results: list = []
+    for q in _arxiv_queries(query):
+        results = list(client.results(
+            _arxiv.Search(query=q, max_results=int(limit))))
+        if results:
+            break
     out = []
-    for r in client.results(_arxiv.Search(query=query, max_results=int(limit))):
+    for r in results:
         m = _ARXIV_ABS.search(r.entry_id or "")
         out.append({
             "title": r.title, "year": r.published.year if r.published else "",
