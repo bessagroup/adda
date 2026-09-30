@@ -60,6 +60,9 @@ def build_graph(
     # ONE adapter per named node — shared across all orchestrating nodes.
     node_adapters = {n: make_adapter(n, spec.nodes[n]) for n in spec.nodes}
 
+    live_nodes: dict[str, Any] = (
+        node_registry if node_registry is not None else {})
+
     for name, agent in spec.nodes.items():
         adapter = node_adapters[name]  # shared instance, NOT make_adapter() again
         outgoing = spec.outgoing(name)
@@ -95,10 +98,15 @@ def build_graph(
             report_sections=getattr(agent, "report_sections", None),
             agent_tools=getattr(agent, "tools", None),
         )
-        if node_registry is not None:
-            node_registry[name] = node
+        live_nodes[name] = node
 
         builder.add_node(name, node)
+
+    # A delegation's registry entry lives in its DELEGATOR's Node, while the
+    # worker calls the tool closures bound to its OWN Node -- so every node
+    # must be able to find the others (Node._delegation_entry).
+    for node in live_nodes.values():
+        node._peers = live_nodes
 
     builder.set_entry_point(spec.entry)
 

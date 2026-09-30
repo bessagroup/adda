@@ -260,6 +260,14 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   real ablation arm kept for comparison, not a testing shortcut. `Wait` was
   also re-tightened to outgoing-edges-only in this same series (a separate
   commit, `1d7e14c`) — see BACKLOG's spec 12 entry.
+- **Cross-node lookup:** a delegation's registry entry lives in its
+  DELEGATOR's Node, but a worker calls the closure bound to its OWN Node.
+  `Node._delegation_entry` finds an entry across the graph's nodes
+  (`Node._peers`, set by `build_graph`), which is what the worker's
+  upward `SendMessage` and its pending-for-you notice both use. Before
+  this a worker could never reach its delegator (run 20260928T225501, D014:
+  "no live delegation found for 'strategizer'"). Test:
+  `tests/test_send_message_cross_node.py`.
 - **The review gate (spec 12 item 3).** With `peer_interaction` on, a
   worker's non-error report NEVER finalizes on its own: `WorkerSession.
   run()` calls `_open_for_review` instead of `_finish_ok`, moving the

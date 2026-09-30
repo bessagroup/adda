@@ -2971,11 +2971,12 @@ class DelegationTools:
         # -- resolved via my own entry's recorded parent, not by looking
         # `to` up a second time (a worker's delegator is never ambiguous).
         if my_id != "entry":
-            with node._registry_lock:
-                my_entry = node._registry.get(my_id)
-            if my_entry is not None:
+            owned = node._delegation_entry(my_id)
+            if owned is not None:
+                # The DELEGATOR's node owns the entry, its queues and the
+                # Condition its Wait() blocks on -- not this worker's own.
                 return self._send_upward(
-                    node, my_id, my_entry, msg, wait_for_reply)
+                    owned[0], my_id, owned[1], msg, wait_for_reply)
 
         # Neither: `to` did not resolve to a child of mine, and I have no
         # delegator of my own to fall back to (I am the entry node).

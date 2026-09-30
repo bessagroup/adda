@@ -490,6 +490,22 @@ class OrchestrationMixin:
             self._confer_seq += 1
             return self._confer_seq
 
+    def _delegation_entry(self, delegation_id: str) -> tuple[Any, dict] | None:
+        """``(owning node, registry entry)`` of a delegation, or None.
+
+        The entry lives in the registry of the node that DELEGATED (its
+        delegator), not of the node running the work; the tools a worker
+        calls are bound to the worker's own node, so a worker looking up its
+        own delegation must search across the graph's nodes. Delegation ids
+        come from one graph-wide log, so at most one node owns an id.
+        """
+        for n in (self, *getattr(self, "_peers", {}).values()):
+            with n._registry_lock:
+                entry = n._registry.get(delegation_id)
+            if entry is not None:
+                return n, entry
+        return None
+
     def _get_delegator_cond(self, identity: str) -> threading.Condition:
         """The one Condition a given delegator identity waits on and is
         woken through (SendMessage, spec 12). ``identity`` is a
@@ -539,7 +555,8 @@ class OrchestrationMixin:
                 (did, dict(e)) for did, e in self._registry.items()
                 if e.get("parent") == identity
             ]
-            my_own_entry = self._registry.get(identity)
+        _owned = self._delegation_entry(identity)
+        my_own_entry = _owned[1] if _owned else None
         reviews = sorted(
             did for did, e in mine if e.get("status") == "OpenForReview")
         followups = sorted(
