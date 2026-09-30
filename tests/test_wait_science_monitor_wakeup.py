@@ -111,3 +111,37 @@ def test_wait_drains_science_monitor_mid_poll(tmp_path):
     assert "DUPLICATE_EVALUATION" in result, (
         f"Wait() did not surface the science-monitor nudge mid-poll: {result!r}"
     )
+
+
+def test_an_unchanged_violation_wakes_the_wait_once_a_changed_one_again():
+    """drain() is level-triggered; Wait must redeliver only on a change."""
+    import threading
+
+    from adda._src.nodes.tools.routing.delegation import DelegationTools
+
+    class _Mon:
+        text = "UNSTAMPED_ROWS: 3"
+
+        def drain(self):
+            return self.text
+
+    class _N:
+        _notifications: list = []
+        _notifications_lock = threading.Lock()
+        _science_monitor = _Mon()
+
+        def _drain_operator_notes(self):
+            return ""
+
+    node = _N()
+    tools = type("T", (), {"node": node})()
+    wakes = [DelegationTools._drain_while_waiting(tools)[1] for _ in range(15)]
+    assert wakes == [True] + [False] * 14
+
+    node._science_monitor.text = "UNSTAMPED_ROWS: 5"
+    assert DelegationTools._drain_while_waiting(tools)[1] is True
+
+    node._science_monitor.text = ""
+    assert DelegationTools._drain_while_waiting(tools)[1] is False
+    node._science_monitor.text = "UNSTAMPED_ROWS: 5"
+    assert DelegationTools._drain_while_waiting(tools)[1] is True

@@ -146,7 +146,10 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   also RETURNS EARLY when an operator note or a science-monitor message
   arrives — delivered in-band with a "still in flight" line, nothing harvested
   — so a human's correction or a live nudge is never held unread behind a
-  long delegation; routine notices do not wake it. `Cancelled` is never harvested
+  long delegation; routine notices do not wake it. A science-monitor message
+  that is unchanged since the last one Wait delivered does not wake it again
+  (the monitor re-lists every live violation each poll); a changed or
+  re-appearing one does. `Cancelled` is never harvested
   (its result is excluded from the run). Naming an id keeps the original
   single-target behaviour.
   **Why:** dispatching a fan-out was already cheap (85% of real `Delegate`

@@ -2868,9 +2868,12 @@ class DelegationTools:
             wake = True
         if node._science_monitor is not None:
             drift = node._science_monitor.drain()
-            if drift:
+            # drain() re-emits every live violation on each call, so an
+            # unchanged one is delivered once per change, not once per poll.
+            if drift and drift != getattr(node, "_last_wait_drift", ""):
                 out += wrap_notice(drift)
                 wake = True
+            node._last_wait_drift = drift or ""
         return out, wake
 
     @tool_examples(

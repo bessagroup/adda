@@ -697,3 +697,12 @@ genuine stall past a configured `llm_tool_idle_timeout` still repeats the full
 restart. Open: resume the CLI session (`resume=`) instead of re-sending the
 task, or do not retry a timeout once a tool is known running. Judgment call, not
 changed.
+
+## 49. Monitor tool stays disabled in headless per-turn queries
+
+The SDK's native Bash description advertises a `Monitor` tool that this context
+does not enable; agents called it ~4x per run (D018/D029/D034/D042) and recovered
+from the CLI's clear error in one call. Left disabled (judgment call, no prompt
+line: that would be a workaround, not a principle). Option (b), enabling it, is
+gated on a live test that Monitor's async event notifications reach a headless
+per-turn query.
