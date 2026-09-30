@@ -891,3 +891,82 @@ def test_a_generation_stall_after_the_tool_returns_still_trips():
     with pytest.raises(TimeoutError, match="stalled"):
         adapter.invoke([{"role": "user", "content": "hi"}],
                        idle_timeout=0.3, retry_max=0)
+
+
+def _usage_events():
+    class _Ev(_StreamEvent):
+        def __init__(self, etype, **kw):
+            self.event = {"type": etype, **kw}
+    return _Ev
+
+
+def _usage_stream(Ev, mid, tin, tout):
+    return [
+        Ev("message_start", message={"id": mid, "usage": {"input_tokens": tin}}),
+        Ev("message_delta", usage={"output_tokens": tout}),
+    ]
+
+
+def test_usage_streamed_before_a_raise_is_still_recorded():
+    import asyncio
+
+    import pytest
+
+    Ev = _usage_events()
+
+    async def _gen(prompt, options):
+        for e in _usage_stream(Ev, "m1", 100, 40):
+            yield e
+        yield _AssistantMessage([_ToolUseBlockWithName("Bash", {})])
+        yield _UserMessage([])
+        yield Ev("message_start", message={"id": "m2", "usage": {"input_tokens": 7}})
+        await asyncio.sleep(3)  # generation stalls -> idle TimeoutError
+        yield _ResultMessage()
+
+    _install_fake_sdk(query=_gen, ToolUseBlock=_ToolUseBlockWithName,
+                      StreamEvent=Ev)
+    adapter = _get_adapter()("claude-3", "sys", None, [])
+    seen = []
+    with pytest.raises(TimeoutError):
+        adapter.invoke([{"role": "user", "content": "hi"}], idle_timeout=0.3,
+                       retry_max=0,
+                       on_session_end=lambda sid, u: seen.append(u))
+    (u,) = seen
+    assert u["input_tokens"] == 107 and u["output_tokens"] == 40
+    assert u["total_cost_usd"] is None
+
+
+def test_usage_sums_over_failed_and_retried_attempts(monkeypatch):
+    import asyncio
+
+    Ev = _usage_events()
+    calls = {"n": 0}
+
+    class _Res(_ResultMessage):
+        usage = {"input_tokens": 10, "output_tokens": 5}
+        total_cost_usd = 0.5
+
+    async def _gen(prompt, options):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            for e in _usage_stream(Ev, "m1", 100, 40):
+                yield e
+            yield _AssistantMessage([_ToolUseBlockWithName("Bash", {})])
+            yield _UserMessage([])
+            yield Ev("message_start", message={"id": "m2", "usage": {}})
+            await asyncio.sleep(3)
+        yield _AssistantMessage([_TextBlock("ok")])
+        yield _Res()
+
+    _install_fake_sdk(query=_gen, ToolUseBlock=_ToolUseBlockWithName,
+                      StreamEvent=Ev, ResultMessage=_Res)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    adapter = _get_adapter()("claude-3", "sys", None, [])
+    seen = []
+    out = adapter.invoke([{"role": "user", "content": "hi"}], idle_timeout=0.3,
+                         retry_max=3,
+                         on_session_end=lambda sid, u: seen.append(u))
+    assert out == "ok" and calls["n"] == 2
+    (u,) = seen
+    assert u["input_tokens"] == 110 and u["output_tokens"] == 45
+    assert u["total_cost_usd"] is None  # failed attempt's cost is unknown

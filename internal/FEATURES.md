@@ -1250,3 +1250,19 @@ against the SDK's cost on calls it did price.
 | `BashOutput` · `KillShell` | Bash companions: poll / stop a backgrounded shell (#24) |
 | `Read` · `Write` · `Edit` · `Bash` · `Glob` · `Grep` | Workspace file/shell primitives |
 | `Done` | Close the run for the gate |
+
+### Token usage survives a raised stream and sums over retried attempts
+- **What:** `ClaudeAdapter` folds each attempt's streamed usage
+  (`message_start`/`message_delta`, or the ResultMessage) in `ainvoke`'s
+  `finally`, so a stream that raises (idle TimeoutError, API error) still
+  reports the tokens it had streamed. `invoke` sums every attempt
+  (`_combine_attempt_usage`) and hands the total to `on_session_end`.
+  `total_cost_usd` is the sum of the known values, or None if any attempt
+  lacks one ("unknown, not zero"; a raised attempt has no ResultMessage, so
+  its cost is unknown).
+- **Reading older summaries:** before this change "tokens per delegation"
+  counted only the final SUCCESSFUL attempt, and a delegation whose every
+  attempt raised recorded 0 (run 20260928T225501, D035: 8 billed sessions,
+  $0). From now on it counts every billed attempt, failed and retried ones
+  included, so a delegation that retried reads higher than it would have.
+  **Status:** done.

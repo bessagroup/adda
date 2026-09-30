@@ -255,6 +255,35 @@ def _sum_message_usage(usages: Any) -> dict:
     return {**total, **split}
 
 
+def _combine_attempt_usage(attempts: list[dict] | None) -> dict:
+    """Sum the usage of every attempt of one ``invoke`` -- failed and retried
+    sessions were billed too. ``total_cost_usd`` is the sum of the known
+    values, None if any attempt lacks one ("unknown, not zero")."""
+    attempts = [a for a in (attempts or []) if a]
+    if not attempts:
+        return {}
+    if len(attempts) == 1:
+        return attempts[0]
+    out: dict = {}
+    for a in attempts:
+        for k, v in a.items():
+            if k == "total_cost_usd":
+                continue
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                out[k] = out.get(k, 0) + v
+            elif isinstance(v, dict) and isinstance(out.get(k, {}), dict):
+                d = out.setdefault(k, {})
+                for kk, vv in v.items():
+                    if isinstance(vv, (int, float)) and not isinstance(vv, bool):
+                        d[kk] = d.get(kk, 0) + vv
+            else:
+                out[k] = v
+    costs = [a.get("total_cost_usd") for a in attempts]
+    out["total_cost_usd"] = (
+        None if any(c is None for c in costs) else sum(costs))
+    return out
+
+
 async def _anext_or_done(ait: Any) -> Any:
     """Return the next item, or the _STREAM_DONE sentinel when exhausted.
 
@@ -459,6 +488,7 @@ class ClaudeAdapter:
         self.route_watcher: Any = None
         # Populated after each ainvoke() with token counts from ResultMessage.
         self.last_usage: dict = {}
+        self._attempt_usages: list[dict] | None = None
         # Populated after each ainvoke() with the CLI session id (spec 12
         # item 3: session-resumption plumbing, capture-only for now) --
         # ResultMessage's when the turn completed normally, else whatever
@@ -913,6 +943,7 @@ class ClaudeAdapter:
         finally:
             if _capture:
                 _flush_partial()  # disclose a stuck/torn-down turn's tail
+            self._settle_usage(last_result, _msg_usage, last_assistant)
             aclose = getattr(gen, "aclose", None)
             if aclose:
                 try:
@@ -948,6 +979,28 @@ class ClaudeAdapter:
                 cli_session_id=getattr(last_assistant, "session_id", None),
             )
 
+        text = ""
+        if last_assistant is not None:
+            for block in last_assistant.content:
+                if isinstance(block, TextBlock):
+                    text += block.text
+        if _buffer_overflowed:
+            _note = (
+                f"[STREAM NOTE: a tool returned more than {_max_buf_mb:.0f} MB "
+                "in a single result and overflowed the message buffer; that "
+                "result was dropped and this turn was cut short (the delegation "
+                "did NOT crash). Re-run the tool with a smaller/narrower request "
+                "— fewer items, or a summary/extract instead of full text.]"
+            )
+            text = (text + "\n\n" + _note) if text else _note
+        return text
+
+    def _settle_usage(self, last_result: Any, _msg_usage: dict,
+                      last_assistant: Any) -> None:
+        """Record this attempt's usage and session id. Runs from ainvoke's
+        ``finally`` so a stream that RAISES (idle TimeoutError, API error)
+        still reports the usage it had streamed; ``invoke`` sums the
+        attempts."""
         # Capture token usage from ResultMessage for run-level accounting.
         if last_result is not None:
             self.last_usage = {
@@ -982,22 +1035,8 @@ class ClaudeAdapter:
             getattr(last_result, "session_id", None)
             or getattr(last_assistant, "session_id", None)
         )
-
-        text = ""
-        if last_assistant is not None:
-            for block in last_assistant.content:
-                if isinstance(block, TextBlock):
-                    text += block.text
-        if _buffer_overflowed:
-            _note = (
-                f"[STREAM NOTE: a tool returned more than {_max_buf_mb:.0f} MB "
-                "in a single result and overflowed the message buffer; that "
-                "result was dropped and this turn was cut short (the delegation "
-                "did NOT crash). Re-run the tool with a smaller/narrower request "
-                "— fewer items, or a summary/extract instead of full text.]"
-            )
-            text = (text + "\n\n" + _note) if text else _note
-        return text
+        if self._attempt_usages is not None:
+            self._attempt_usages.append(dict(self.last_usage))
 
     def invoke(
         self, messages: list[dict], *,
@@ -1052,6 +1091,7 @@ class ClaudeAdapter:
             # hand its caller the PREVIOUS call's values.
             self.last_session_id = None
             self.last_usage = {}
+            self._attempt_usages = []
             try:
                 return retry_on_transient(
                     lambda: _run_async_safe(
@@ -1061,6 +1101,8 @@ class ClaudeAdapter:
                     max_attempts=retry_max,
                 )
             finally:
+                self.last_usage = _combine_attempt_usage(self._attempt_usages)
+                self._attempt_usages = None
                 if on_session_end is not None:
                     try:
                         on_session_end(
