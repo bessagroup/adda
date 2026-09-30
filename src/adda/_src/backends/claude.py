@@ -465,6 +465,21 @@ class ClaudeAdapter:
         # the last AssistantMessage carried.
         self.last_session_id: str | None = None
 
+    def _render_system_prompt(self) -> str:
+        """The system prompt exactly as the model sees it: base prompt plus
+        the ``<tools>`` catalog, with every tool the prose names rewritten to
+        the qualified name the SDK exposes (catalog and prose must agree)."""
+        from ..prompts.tool_catalog import (
+            qualify_tool_mentions,
+            system_prompt_with_catalog,
+        )
+        qualified = _qualify_closure_names(self.closure_tools)
+        rendered = system_prompt_with_catalog(self.system_prompt, qualified)
+        return qualify_tool_mentions(rendered, {
+            bare: f"mcp__{_CLOSURE_MCP_SERVER}__{bare}"
+            for bare in self.closure_tools
+        })
+
     def _compute_allowed_tools(self, qualified_mcp_tools) -> list[str]:
         """All allowed tool names, ALWAYS as a list (never None).
 
@@ -638,12 +653,8 @@ class ClaudeAdapter:
             except Exception:  # noqa: BLE001 — best-effort; spawn surfaces real errors
                 pass
 
-        from ..prompts.tool_catalog import system_prompt_with_catalog
-        # Catalog shows the QUALIFIED names (same helper as allowed_tools above),
-        # so the AUTHORITATIVE <tools> block matches what the model can call.
         options = ClaudeAgentOptions(
-            system_prompt=system_prompt_with_catalog(
-                self.system_prompt, _qualify_closure_names(self.closure_tools)),
+            system_prompt=self._render_system_prompt(),
             model=self.model,
             cwd=str(self.study_dir) if self.study_dir else None,
             tools=self.native_tools or [],

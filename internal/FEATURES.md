@@ -1213,6 +1213,16 @@ against the SDK's cost on calls it did price.
   `backends/openai_compatible.py` (`_context_hook`), `backends/claude.py`,
   `viewer/app.py` (`_compaction_facts`, `_compaction_html`). **Status:** done.
 
+### Prompt prose names tools the way the backend exposes them
+- **What:** on the Claude backend the SDK exposes closure tools only as
+  `mcp__f3dasm_agent_tools__<Tool>`, so `ClaudeAdapter._render_system_prompt`
+  rewrites every unambiguous tool reference in the assembled prompt (prose and
+  tool docstrings) to that name: `Name(`, `` `Name` `` and multi-word names
+  such as `ReportEvals`. A lone capitalised word without call syntax
+  (`Wait for...`) is left alone. Other backends are unchanged. Without it the
+  model called the bare name: "No such tool" (`ReportEvals`, `SendMessage`) or
+  the CLI's own disabled native `Write`.
+
 ### Store integrity guard (RunScratch / RunNotebook)
 - **What:** both tools run against a sandbox copy, and a guard fingerprints the
   real store around the call. Only a change that destroys existing content

@@ -23,9 +23,13 @@ ONE ROUTE, BOTH BACKENDS
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Mapping
 
-__all__ = ["tool_examples", "tool_summary", "render_tool_catalog"]
+__all__ = [
+    "tool_examples", "tool_summary", "render_tool_catalog",
+    "qualify_tool_mentions",
+]
 
 
 def tool_examples(*examples: str):
@@ -83,3 +87,36 @@ def system_prompt_with_catalog(base_prompt: str, closure_tools: dict) -> str:
     """Base prompt + the generated tool catalog. Computed at prompt-assembly
     time so it always reflects the current closures; never mutates state."""
     return base_prompt + render_tool_catalog(closure_tools)
+
+
+def qualify_tool_mentions(text: str, names: Mapping[str, str]) -> str:
+    """Rewrite bare tool names in ``text`` to their callable names.
+
+    ``names`` maps each bare closure name to the name the backend exposes it
+    under. A backend that exposes a tool only under a qualified name (the
+    Claude SDK: ``mcp__<server>__<tool>``) must not have prose that names it
+    bare: the model calls what the prose says, and a bare name is "No such
+    tool" — or, for ``Write``, the CLI's own disabled native tool.
+
+    Only occurrences that are unambiguously a tool reference are rewritten:
+    a name written as a call (``Name(``) or in backticks, or a multi-word
+    identifier (``ReportEvals``) that cannot be ordinary English. A lone
+    capitalised word without call syntax (``Wait for the reviewer``) is left
+    alone, since it is as likely a verb or a status as a tool. Names already
+    qualified (preceded by ``_``) and attribute access (``x.Name``) are never
+    touched.
+    """
+    if not names:
+        return text
+    alt = "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
+    pattern = re.compile(rf"(?<![\w.])({alt})(?![\w])")
+
+    def _sub(m: re.Match) -> str:
+        name = m.group(1)
+        before = text[m.start() - 1] if m.start() else ""
+        after = text[m.end()] if m.end() < len(text) else ""
+        call_shape = after == "(" or (before == "`" and after in "`(")
+        multi_word = re.search(r"[a-z][A-Z]", name) is not None
+        return names[name] if call_shape or multi_word else name
+
+    return pattern.sub(_sub, text)
