@@ -259,27 +259,83 @@ def _integrity_error_message(tool_name: str, changed: dict) -> str:
     return " ".join(parts)
 
 
+def _json_extends(before: Any, after: Any) -> bool:
+    """True when ``after`` only adds to ``before``: same values at every
+    existing dict key / list position, plus possibly new keys / trailing
+    items."""
+    if isinstance(before, dict):
+        return (isinstance(after, dict)
+                and all(k in after and _json_extends(v, after[k])
+                        for k, v in before.items()))
+    if isinstance(before, list):
+        return (isinstance(after, list) and len(after) >= len(before)
+                and all(_json_extends(b, a) for b, a in zip(before, after[:len(before)], strict=True)))
+    return before == after
+
+
+def _csv_extends(before: bytes, after: bytes) -> bool:
+    """True when the CSV ``after`` keeps every ``before`` row intact, by
+    column name, and only adds rows and/or columns (a schema-extending
+    append: f3dasm rewrites the whole file, header included, when a flush
+    declares a new column)."""
+    import csv
+    import io
+    b = list(csv.reader(io.StringIO(before.decode("utf-8"))))
+    a = list(csv.reader(io.StringIO(after.decode("utf-8"))))
+    if not b or not a or len(a) < len(b):
+        return False
+    pos = {name: i for i, name in enumerate(a[0])}
+    if any(name not in pos for name in b[0]):
+        return False
+    idx = [pos[name] for name in b[0]]
+    return all(
+        [arow[i] if i < len(arow) else "" for i in idx] == brow
+        for brow, arow in zip(b[1:], a[1:len(b)], strict=True)
+    )
+
+
 def _classify_file_change(before: bytes | None, after: bytes | None) -> str:
-    """'unchanged' | 'append' | 'other' (rewrite of existing bytes, or a
+    """'unchanged' | 'append' | 'other' (rewrite of existing content, or a
     deletion).
 
-    f3dasm's store append is exactly a bytes-level append (get_evaluator()
-    only ever grows output.csv/input.csv/jobs.csv), so "old content is an
-    exact prefix of new content" is sufficient to recognise a real evaluation
-    landing mid-call — no CSV row parsing needed. A brand-new file (``before``
-    is None) is ALSO an append — trivially, absent content is an exact
-    (empty) prefix of anything — because a late writer's FIRST evaluation in
-    a store, or a first write to a brand-new design-namespace store, creates
-    its files rather than growing them; deleting those is the same data-loss
-    case as reverting a normal append. Used by
-    ``NotebookTools._canonical_integrity_guard`` to tell a concurrent
+    A real evaluation landing mid-call only ever ADDS: rows at the end of
+    output.csv/input.csv/jobs.csv, and, when the flush declares a new column
+    (e.g. a provenance column), a rewritten header plus a rewritten
+    domain.json. So "append" means the old content survives inside the new:
+    as an exact byte prefix, or, for a ``.csv``/``.json`` file, as every old
+    row/key intact in the new one (see ``_csv_extends`` / ``_json_extends``).
+    A brand-new file (``before`` is None) is ALSO an append — trivially,
+    absent content is an exact (empty) prefix of anything — because a late
+    writer's FIRST evaluation in a store, or a first write to a brand-new
+    design-namespace store, creates its files rather than growing them;
+    deleting those is the same data-loss case as reverting a normal append.
+    Used by ``NotebookTools._canonical_integrity_guard`` to tell a concurrent
     delegation's legitimate write (report only, always) from snippet damage
     (revert candidate, but ONLY when no delegation was running — see the
     guard)."""
     if before == after:
         return "unchanged"
-    if after is not None and (before is None or after.startswith(before)):
+    if after is None:
+        return "other"
+    if before is None or after.startswith(before):
         return "append"
+    return "other"
+
+
+def _classify_store_file(path: Path, before: bytes | None,
+                         after: bytes | None) -> str:
+    kind = _classify_file_change(before, after)
+    if kind != "other" or before is None or after is None:
+        return kind
+    import json
+    try:
+        if path.suffix == ".csv" and _csv_extends(before, after):
+            return "append"
+        if path.suffix == ".json" and _json_extends(
+                json.loads(before), json.loads(after)):
+            return "append"
+    except (ValueError, UnicodeDecodeError):
+        pass
     return "other"
 
 
@@ -488,16 +544,22 @@ class NotebookTools:
             left_in_place: list[str] = []
             for p in set(before) | set(after):
                 b, a = before.get(p), after.get(p)
-                kind = _classify_file_change(b, a)
+                is_nb = any(str(p) == str(n) for n in nb_paths)
+                kind = (_classify_file_change(b, a) if is_nb
+                        else _classify_store_file(p, b, a))
                 if kind == "unchanged":
                     continue
-                is_nb = any(str(p) == str(n) for n in nb_paths)
                 if kind == "append" and not is_nb:
                     left_in_place.append(str(p))
                     continue
                 # 'other' (rewrite/delete/new-file), or ANY pipeline.ipynb
                 # change (never a legitimate concurrent writer).
-                if is_nb or not may_be_concurrent:
+                # A store file that moved again after the after-snapshot has
+                # a writer this call does not own: restoring ``b`` would
+                # erase its rows.
+                moved_since = (not is_nb
+                               and (p.read_bytes() if p.exists() else None) != a)
+                if is_nb or (not may_be_concurrent and not moved_since):
                     if b is None:
                         p.unlink(missing_ok=True)
                     else:

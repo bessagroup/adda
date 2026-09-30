@@ -1213,6 +1213,15 @@ against the SDK's cost on calls it did price.
   `backends/openai_compatible.py` (`_context_hook`), `backends/claude.py`,
   `viewer/app.py` (`_compaction_facts`, `_compaction_html`). **Status:** done.
 
+### Store integrity guard (RunScratch / RunNotebook)
+- **What:** both tools run against a sandbox copy, and a guard fingerprints the
+  real store around the call. Only a change that destroys existing content
+  (a rewritten row, a deletion) is reverted, and only when no delegation was
+  running and the file is still exactly as the call left it. A change that
+  keeps every old row/key and only adds rows or columns (a concurrent
+  campaign's flush, including one that declares a new provenance column and so
+  rewrites the header and domain.json) is an append: reported, never reverted.
+
 ## Tools (every one must be documented above; the test enforces it)
 
 | Tool | Feature |
