@@ -1297,3 +1297,13 @@ against the SDK's cost on calls it did price.
   `tool_use_id` (Claude backend) that the matching `tool_result` record cites,
   so a call and its result pair exactly instead of by position or name.
 - **Where:** `backends/claude.py::_record`. **Status:** done.
+
+### An errored delegation's traceback is capped for the delegator
+- **What:** `Wait()` / `Delegate(wait=True)` return an errored delegation's
+  traceback as its first 1500 and last 3500 chars, with the middle replaced by
+  a note naming `debug/delegations/<id>/error.txt`, which holds the full text.
+  The root exception is on the last line, so the tail stays whole.
+- **Why:** an exception carrying a huge payload came back as ~100k chars in
+  the delegator's context (run 20260928T225501).
+- **Where:** `WorkerSession._cap_traceback` in `routing/delegation.py`.
+  **Status:** done.

@@ -1347,10 +1347,41 @@ class WorkerSession:
         except Exception:  # noqa: BLE001
             pass
 
+    _TB_HEAD, _TB_TAIL = 1500, 3500
+
+    def _cap_traceback(self, tb: str) -> str:
+        """The traceback as shown to the delegator: head and tail, with the
+        middle replaced by a note naming the file that holds the full text.
+
+        A worker's exception can carry an enormous payload (a whole tool
+        result, a prompt); returned whole from Wait() it floods the
+        delegator's context. The root exception is on the last line, so the
+        tail is kept whole; the full text is written to
+        ``debug/delegations/<id>/error.txt`` before it is cut.
+        """
+        limit = self._TB_HEAD + self._TB_TAIL
+        if len(tb) <= limit:
+            return tb
+        where = "(not saved: no run directory)"
+        notes = self.node._current_notes_dir
+        if notes is not None:
+            path = (Path(notes).parent / "delegations" / self.delegation_id
+                    / "error.txt")
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(tb, encoding="utf-8")
+                where = str(path)
+            except OSError:
+                pass
+        return (tb[:self._TB_HEAD]
+                + f"\n\n[... {len(tb) - limit} chars omitted; full text: "
+                f"{where} ...]\n\n" + tb[-self._TB_TAIL:])
+
     def _finish_error(self, tb: str) -> None:
         """Record a delegation whose worker raised: registry + FAILED log row."""
         node, delegation_id, target = self.node, self.delegation_id, self.target
         usage = self._record_usage_once()
+        tb = self._cap_traceback(tb)
 
         # Durable before observable — the same ordering invariant as
         # _finish_ok. A poller watching Wait(block=False) leaves "Working" the
