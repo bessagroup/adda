@@ -463,6 +463,7 @@ class FeedbackTools:
 
     def _gate_task_msg(self, summary: str, snapshot: Any) -> str:
         """The GATE-mode brief: where to audit, what was spent, what to judge."""
+        from ....infra.evidence_index import evidence_index_block
         from ...critic_gate import problem_statement_block
         node = self.node
         _notes_dir = node._current_notes_dir
@@ -502,11 +503,12 @@ class FeedbackTools:
             "evals; the notebook's own markdown cells ARE the writeup — "
             "there is no solution.md, do NOT flag it as missing)\n"
             "</paths>\n\n"
+            + evidence_index_block(_debug_dir)
             # FULL conclusion — never truncate what the adversarial gate
             # must validate (a head-excerpt would let an over-claim in
             # the body pass unseen). A Done() summary is small; context
             # is not a concern, and final_summary.md is also available.
-            f"Proposed conclusion:\n{summary}"
+            + f"Proposed conclusion:\n{summary}"
         )
         return task_msg + (
             "\n\n<hypothesis_ledger>\n" + self._ledger_dump()

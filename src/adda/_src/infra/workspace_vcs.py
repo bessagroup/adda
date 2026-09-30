@@ -169,3 +169,18 @@ def commit_workspace(workspace: Path, message: str) -> str | None:
     # already pins --git-dir there, so this is a cheap assertion that the
     # pinning held rather than a second line of defence being relied upon.
     return sha or None
+
+
+def files_by_commit(workspace: Path) -> dict[str, list[str]]:
+    """``{sha: [paths the commit touched]}`` for the workspace repo.
+
+    Empty when there is no repo. Read-only.
+    """
+    done = _git(Path(workspace), "log", "--name-only", "--format=%x00%H")
+    if done is None or done.returncode != 0:
+        return {}
+    out: dict[str, list[str]] = {}
+    for chunk in done.stdout.split("\x00")[1:]:
+        sha, _, rest = chunk.partition("\n")
+        out[sha.strip()] = [p for p in rest.splitlines() if p.strip()]
+    return out

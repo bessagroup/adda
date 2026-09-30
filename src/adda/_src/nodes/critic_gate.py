@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..infra.evidence_index import evidence_index_block
 from .parsing import _extract_report_section, _parse_verdict
 
 # Bound on how many earlier reviews are echoed back to the critic, and the
@@ -457,5 +458,6 @@ class CriticGateMixin:
             "notebook's own markdown cells ARE the writeup — there is no "
             "solution.md, do NOT flag it as missing)\n"
             "</paths>\n\n"
-            f"Focus hypotheses: {h_ids if h_ids else 'all'}"
+            + evidence_index_block(_debug_dir)
+            + f"Focus hypotheses: {h_ids if h_ids else 'all'}"
         )

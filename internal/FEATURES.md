@@ -711,6 +711,22 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   already the intent section. See
   `internal/specs/11-delegation-bounded-version-control.md`. **Status:** core
 
+### The critic's brief carries a generated evidence index
+- **What:** every critic call (GATE and FEEDBACK) gets an `<evidence_index>`
+  block: per delegation its id, role, status, one-line intent, a report file
+  the critic can Read directly (`debug/delegation_reports/<id>.md`, written
+  from the delegation log, which keeps the report only inside one JSONL row)
+  and the files the delegation touched (from the workspace git history via
+  `workspace_sha`). Generated from the run's records, never hand-written; capped
+  inline with a pointer to the full `debug/evidence_index.md`. A reviewer gets
+  pointers to the evidence, not only the conclusions. Acceptance criteria
+  unchanged.
+- **Where:** `infra/evidence_index.py::evidence_index_block`,
+  `infra/workspace_vcs.py::files_by_commit`; injected next to `<paths>` in
+  `nodes/critic_gate.py::_build_feedback_task_msg` and
+  `nodes/tools/routing/feedback.py::_gate_task_msg`. Test:
+  `tests/test_evidence_index.py`.
+
 ### MathExpert — verified symbolic derivation
 - **What:** a specialist agent (NOT part of `_default_graph()` — opt-in via a
   custom `Graph`, same precedent as `DebuggerAgent`) that authors and runs a
