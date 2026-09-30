@@ -79,15 +79,28 @@ _SS_MIN_INTERVAL = 3.0
 _MAX_RESULT_CHARS: int = 6000
 
 
-def _cap_result(result) -> str:
-    """Truncate an oversized search/read payload with a clear marker."""
+def _cap_result(result, offset: int = 0, call: str = "",
+                size: int = _MAX_RESULT_CHARS) -> str:
+    """One page of an oversized payload: ``size`` chars from ``offset``.
+
+    A page that is not the last says how to fetch the next one (``call`` is
+    the tool call to repeat, ending in ``offset=``), so a long result is read
+    in pages rather than lost past the cap.
+    """
     s = str(result)
-    if len(s) <= _MAX_RESULT_CHARS:
+    start = max(int(offset or 0), 0)
+    if start == 0 and len(s) <= size:
         return s
-    return (s[:_MAX_RESULT_CHARS]
-            + f"\n\n[...truncated {len(s) - _MAX_RESULT_CHARS} chars — this "
-            "result was too large to return whole. Narrow the query, or read a "
-            "specific paper by id instead of bulk-searching.]")
+    if start >= len(s):
+        return f"[offset {start} is past the end of this result ({len(s)} chars).]"
+    page, end = s[start:start + size], min(start + size, len(s))
+    if end >= len(s):
+        return (page + f"\n\n[end of result: chars {start}-{end} of {len(s)}.]"
+                if start else page)
+    nxt = (f"Repeat the call with offset={end}" if not call
+           else f"Next page: {call}{end})")
+    return (page + f"\n\n[chars {start}-{end} of {len(s)}; {len(s) - end} more. "
+            f"{nxt}]")
 
 
 def _throttled_ss(fn, *args, **kwargs):

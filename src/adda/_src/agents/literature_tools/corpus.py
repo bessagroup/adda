@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from ...literature.http_client import SourceCooldownError, _robust_get
 from ...prompts.tool_catalog import tool_examples
+from .throttle import _cap_result
+
+# A paper read is paged at twice the search-result page: it is read straight through.
+_PAGE_CHARS = 12000
 
 
 def build_corpus_closures(corpus, cache_dir) -> dict:
@@ -110,7 +114,7 @@ def build_corpus_read_closures(corpus) -> dict:
         "ConsultLiterature('lattice buckling under axial compression', limit=5)",
         "ConsultLiterature('<a paper_id from the list>')",
     )
-    def ConsultLiterature(query: str = "", limit: int = 10):
+    def ConsultLiterature(query: str = "", limit: int = 10, offset: int = 0):
         """Read the study's literature corpus. It is shared across every run
         of the study, so it may already hold a prior run's answer — look here
         before searching the databases again.
@@ -122,8 +126,13 @@ def build_corpus_read_closures(corpus) -> dict:
         full-text papers, best match first, up to `limit`.
 
         Papers enter the corpus only when the literature reviewer adds them;
-        a search over a corpus with no full-text papers says so."""
-        return corpus.consult(query, int(limit))
+        a search over a corpus with no full-text papers says so.
+
+        A paper's text is returned in pages; the end of a page says the
+        `offset` to call again with for the next one."""
+        return _cap_result(corpus.consult(query, int(limit)), offset,
+                           f"ConsultLiterature({query!r}, limit={limit}, offset=",
+                           _PAGE_CHARS)
 
     # Lets orchestration.py's _wrap_closure (the one place with both a
     # per-run diagnostics path and a handle back here) notice, once per run,

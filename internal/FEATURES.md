@@ -526,6 +526,10 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   longest ~60% of the words and then the raw text if that returns
   nothing — `discovery._arxiv_queries`), `CitationGraph` (citing / references / similar,
   OpenAlex first with Semantic Scholar as fallback) and `PaperDetails`.
+  Every one of them (and `ConsultLiterature`, which reads a whole paper) takes
+  `offset` and returns a capped page (`throttle._cap_result`; 6000 chars, 12000
+  for a paper read) whose end names the exact call for the next page, so
+  nothing past the cap is lost.
   These replaced thirteen per-provider tools and the
   `wait=False` / `CollectSearches` async pool the agent used to fan them out by
   hand; the per-provider calls stay as plain functions with their own tests. Its

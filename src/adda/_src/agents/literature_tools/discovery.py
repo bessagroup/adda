@@ -219,7 +219,8 @@ def build_discovery_closures(providers: dict) -> dict:
         "SearchPapers('lattice metamaterial buckling under compression')",
         "SearchPapers('physics-informed neural networks', limit=5, sources='openalex,arxiv')",
     )
-    def SearchPapers(query: str, limit: int = 10, sources: str = "") -> str:
+    def SearchPapers(query: str, limit: int = 10, sources: str = "",
+                     offset: int = 0) -> str:
         """Search the literature databases -- arXiv, Semantic Scholar and
         OpenAlex -- at once, for papers you do not have yet.
 
@@ -233,7 +234,10 @@ def build_discovery_closures(providers: dict) -> dict:
         nothing about whether the paper exists; the others' results stand.
         Each entry's `paper_id` is what CitationGraph, PaperDetails and
         CorpusAdd(arxiv_id=...) take; `pdf_url`, when present, is what
-        CorpusAdd downloads."""
+        CorpusAdd downloads.
+
+        A long result is returned in pages; the end of a page says the
+        `offset` to call again with."""
         picked = [s.strip() for s in str(sources or "").split(",") if s.strip()]
         wanted = picked or list(searchers)
         unknown = [s for s in wanted if s not in _SOURCES]
@@ -262,14 +266,17 @@ def build_discovery_closures(providers: dict) -> dict:
                 log.warning("SearchPapers: %s %s", s, msg)
         header = "Searched: " + " · ".join(f"{s} {status[s]}" for s in wanted)
         papers = merge_records({s: results[s] for s in live if s in results})
-        return _cap_result(header + "\n" + json.dumps(papers, indent=2))
+        return _cap_result(header + "\n" + json.dumps(papers, indent=2), offset,
+                           f"SearchPapers({query!r}, limit={limit}, "
+                           f"sources={sources!r}, offset=")
 
     @tool_examples(
         "CitationGraph('1706.03762')",
         "CitationGraph('10.1016/j.cma.2020.113029', direction='references')",
         "CitationGraph('1706.03762', direction='similar', limit=10)",
     )
-    def CitationGraph(paper_id: str, direction: str = "citing", limit: int = 20) -> str:
+    def CitationGraph(paper_id: str, direction: str = "citing", limit: int = 20,
+                      offset: int = 0) -> str:
         """Walk the citation graph from one paper.
 
         direction='citing' → papers that cite it (most-cited first);
@@ -279,12 +286,16 @@ def build_discovery_closures(providers: dict) -> dict:
 
         OpenAlex answers citing/references first and Semantic Scholar is the
         fallback; 'similar' is Semantic Scholar only. The first line says
-        which provider answered, and why the other did not."""
+        which provider answered, and why the other did not. A long list is
+        returned in pages; the end of a page says the `offset` to call again
+        with."""
         direction = (direction or "").strip().lower()
         if direction not in ("citing", "references", "similar"):
             return ("ERROR: direction must be 'citing', 'references' or "
                     f"'similar', not {direction!r}.")
         n = int(limit)
+        _cg_call = (f"CitationGraph({paper_id!r}, direction={direction!r}, "
+                    f"limit={limit}, offset=")
         failures = []
         if direction == "similar":
             if "get_semantic_scholar_recommendations" not in providers:
@@ -296,7 +307,8 @@ def build_discovery_closures(providers: dict) -> dict:
             except Exception as exc:  # noqa: BLE001
                 return f"ERROR: semantic_scholar failed — {exc}"
             return _cap_result("Source: semantic_scholar\n"
-                               + json.dumps(merge_records({"semantic_scholar": _s2_records(rows)}), indent=2))
+                               + json.dumps(merge_records({"semantic_scholar": _s2_records(rows)}), indent=2),
+                               offset, _cg_call)
         if "resolve_openalex_id" in providers:
             try:
                 wid = _run("openalex", providers["resolve_openalex_id"], paper_id)
@@ -309,7 +321,8 @@ def build_discovery_closures(providers: dict) -> dict:
                 rows = [] if raw.startswith("No references") else _from_json(raw)
                 recs = _openalex_records(rows)[:n]
                 return _cap_result("Source: openalex\n"
-                                   + json.dumps(merge_records({"openalex": recs}), indent=2))
+                                   + json.dumps(merge_records({"openalex": recs}), indent=2),
+                                   offset, _cg_call)
             except Exception as exc:  # noqa: BLE001
                 failures.append(f"openalex failed — {exc}")
         if "get_semantic_scholar_citations_and_references" in providers:
@@ -323,7 +336,8 @@ def build_discovery_closures(providers: dict) -> dict:
                         for r in rows]
                 return _cap_result(
                     "Source: semantic_scholar (" + "; ".join(failures) + ")\n"
-                    + json.dumps(merge_records({"semantic_scholar": recs}), indent=2))
+                    + json.dumps(merge_records({"semantic_scholar": recs}), indent=2),
+                    offset, _cg_call)
             except Exception as exc:  # noqa: BLE001
                 failures.append(f"semantic_scholar failed — {exc}")
         return "ERROR: no provider could answer — " + "; ".join(failures or ["none available"])
@@ -332,26 +346,29 @@ def build_discovery_closures(providers: dict) -> dict:
         "PaperDetails('1706.03762')",
         "PaperDetails('10.1016/j.cma.2020.113029')",
     )
-    def PaperDetails(paper_id: str) -> str:
+    def PaperDetails(paper_id: str, offset: int = 0) -> str:
         """One paper's record: title, authors, venue, year, abstract, citation
         counts and its ids on each database, plus a one-sentence TL;DR when
         Semantic Scholar has one. paper_id is a `paper_id` from SearchPapers:
         an arXiv id, a DOI, or an OpenAlex W-id.
 
         Semantic Scholar answers first; OpenAlex is the fallback. The first
-        line says which answered."""
+        line says which answered. A long record is returned in pages; the
+        end of a page says the `offset` to call again with."""
+        _pd_call = f"PaperDetails({paper_id!r}, offset="
         failures = []
         if "get_semantic_scholar_paper_details" in providers:
             raw = _run("semantic_scholar",
                        providers["get_semantic_scholar_paper_details"], paper_id)
             if not raw.startswith("ERROR"):
-                return "Source: semantic_scholar\n" + raw
+                return _cap_result("Source: semantic_scholar\n" + raw, offset, _pd_call)
             failures.append("semantic_scholar failed — " + raw.removeprefix("ERROR: "))
         if "get_openalex_work" in providers:
             raw = _run("openalex", providers["get_openalex_work"], paper_id)
             if not raw.startswith("ERROR"):
-                return ("Source: openalex (" + "; ".join(failures) + ")\n" + raw
-                        if failures else "Source: openalex\n" + raw)
+                return _cap_result(
+                    "Source: openalex (" + "; ".join(failures) + ")\n" + raw
+                    if failures else "Source: openalex\n" + raw, offset, _pd_call)
             failures.append("openalex failed — " + raw.removeprefix("ERROR: "))
         return "ERROR: no provider could answer — " + "; ".join(failures or ["none available"])
 

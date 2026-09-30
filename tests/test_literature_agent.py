@@ -362,9 +362,26 @@ def test_cap_result_truncates_oversized_payloads():
     assert _cap_result(small) == small               # under cap: untouched
     big = "x" * (_MAX_RESULT_CHARS + 5000)
     out = _cap_result(big)
-    assert len(out) < len(big) and "truncated" in out
+    assert len(out) < len(big) and "more" in out
     assert out.startswith("x" * 100)                 # keeps the head
     assert _cap_result(12345) == "12345"             # coerces non-str
+
+
+def test_cap_result_pages_through_the_payload_by_offset():
+    """Nothing past the cap is lost: each page names the offset of the next, and
+    the pages concatenate back to the whole payload."""
+    from adda._src.agents.literature_tools.throttle import _MAX_RESULT_CHARS, _cap_result
+    body = "".join(chr(97 + i % 26) for i in range(2 * _MAX_RESULT_CHARS + 700))
+    got, offset = "", 0
+    while True:
+        page = _cap_result(body, offset, "Tool(offset=")
+        text = page.split("\n\n[", 1)[0]
+        got += text
+        if "Next page: Tool(offset=" not in page:
+            break
+        offset = int(page.rsplit("offset=", 1)[1].rstrip(")]"))
+    assert got == body
+    assert "past the end" in _cap_result(body, len(body) + 1)
 
 
 def test_consult_literature_lists_reads_and_searches(tmp_path):
