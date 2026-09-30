@@ -1307,3 +1307,14 @@ against the SDK's cost on calls it did price.
   the delegator's context (run 20260928T225501).
 - **Where:** `WorkerSession._cap_traceback` in `routing/delegation.py`.
   **Status:** done.
+
+### The delegation id stamped on ledger rows: env var first, cwd second
+- **What:** `get_evaluator()` stamps `F3DASM_DELEGATION_ID` when set (the
+  backend injects the session's own id; an agent may set another on purpose,
+  e.g. to re-ledger a predecessor's record) and falls back to a `D###` cwd
+  name only when it is unset.
+- **Why:** the cwd used to win, so a process standing in another delegation's
+  directory was stamped as that delegation (run 20260928T225501: env D035,
+  cwd D036, row stamped D036).
+- **Where:** `evaluation/oracle_resolution.py::_resolve_delegation_id`.
+  **Status:** done.

@@ -383,14 +383,20 @@ def get_evaluator(namespace: str | None = None) -> InstrumentedDataGenerator:
 
 
 def _resolve_delegation_id() -> str:
-    """Return delegation ID from cwd name or env var, or raise."""
-    cwd_name = Path.cwd().name
-    if _DELEGATION_ID_RE.match(cwd_name):
-        return cwd_name
+    """Return delegation ID from the env var or cwd name, or raise.
 
+    The env var is EXPLICIT (the backend injects the session's own id, and an
+    agent may set another on purpose), the cwd name is only an inference, so
+    the env var wins: an agent that stood in another delegation's directory
+    to read its files was otherwise stamped as that delegation.
+    """
     env_id = os.environ.get("F3DASM_DELEGATION_ID", "")
     if env_id and _DELEGATION_ID_RE.match(env_id):
         return env_id
+
+    cwd_name = Path.cwd().name
+    if _DELEGATION_ID_RE.match(cwd_name):
+        return cwd_name
 
     raise ValueError(
         "get_evaluator() needs a delegation id: either run inside a workspace "

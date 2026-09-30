@@ -663,3 +663,17 @@ def test_register_writes_back_to_config_yaml(tmp_path):
     assert json.loads(rc.read_text())["evaluator_output_names"] == ["y"]
     # config.yaml written back (no longer stale)
     assert "output_names: [y]" in (study / "config.yaml").read_text()
+
+
+def test_explicit_env_delegation_id_beats_the_cwd_name(tmp_path, monkeypatch):
+    """An explicit F3DASM_DELEGATION_ID is the stamp even when the process
+    stands in another delegation's directory (run 20260928T225501: env D035,
+    cwd D036, row stamped D036)."""
+    from adda._src.evaluation.oracle_resolution import _resolve_delegation_id
+
+    _, other = _make_delegation_dir(tmp_path, "D036")
+    monkeypatch.chdir(other)
+    monkeypatch.setenv("F3DASM_DELEGATION_ID", "D035")
+    assert _resolve_delegation_id() == "D035"
+    monkeypatch.delenv("F3DASM_DELEGATION_ID")
+    assert _resolve_delegation_id() == "D036"
