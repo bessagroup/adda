@@ -104,3 +104,38 @@ def test_claude_invoke_retries(monkeypatch):
     monkeypatch.setattr(a, "ainvoke", lambda _m, **_k: None)  # coro arg unused
     assert a.invoke([{"role": "user", "content": "hi"}]) == "done"
     assert calls["n"] == 2
+
+
+def test_every_retry_is_reported_with_attempt_exception_and_delay(monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda *_: None)
+    seen, calls = [], {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise RuntimeError("503 Service Unavailable")
+        return "ok"
+
+    out = retry_on_transient(
+        flaky, max_attempts=5, base_delay=1.0,
+        on_retry=lambda a, m, e, d: seen.append((a, m, type(e).__name__, d)))
+    assert out == "ok"
+    assert [s[:3] for s in seen] == [(1, 5, "RuntimeError"), (2, 5, "RuntimeError")]
+    assert all(s[3] >= 1.0 for s in seen)
+
+
+def test_a_retry_becomes_a_diagnostics_row_and_not_an_error_count(tmp_path):
+    import json
+
+    from adda._src.nodes.recording import RecordingMixin
+
+    class _N(RecordingMixin):
+        _name = "worker"
+        _current_notes_dir = tmp_path / "strategizer_notes"
+        _error_counts: dict = {}
+
+    _N()._record_llm_retry(2, 5, TimeoutError("timed out"), 4.5)
+    row = json.loads((tmp_path / "diagnostics.jsonl").read_text())
+    assert (row["event"], row["attempt"], row["max_attempts"], row["exception"],
+            row["delay_s"], row["node"]) == ("LLM_RETRY", 2, 5, "TimeoutError", 4.5, "worker")
+    assert _N._error_counts == {}

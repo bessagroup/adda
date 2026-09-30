@@ -1281,3 +1281,13 @@ against the SDK's cost on calls it did price.
   $0). From now on it counts every billed attempt, failed and retried ones
   included, so a delegation that retried reads higher than it would have.
   **Status:** done.
+
+### Every LLM retry leaves a diagnostics row
+- **What:** `retry_on_transient` reports each retry through an `on_retry`
+  callback; every node installs `Node._record_llm_retry` on its adapter, which
+  appends one `event: "LLM_RETRY"` row to `debug/diagnostics.jsonl` (node,
+  delegation_id, attempt, max_attempts, exception type, message, delay_s). A
+  retry is not an error, so it does not bump the node's error count.
+- **Why:** a run had 32 retries across 14 delegations and none was visible.
+- **Where:** `backends/base.py::retry_on_transient`,
+  `nodes/recording.py::_record_llm_retry`. **Status:** done.

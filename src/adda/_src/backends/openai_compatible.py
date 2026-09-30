@@ -1085,7 +1085,8 @@ class OpenAICompatibleAdapter:
             self.last_usage = {}
             try:
                 return retry_on_transient(
-                    lambda: self._invoke_once(messages), max_attempts=retry_max)
+                    lambda: self._invoke_once(messages), max_attempts=retry_max,
+                    on_retry=getattr(self, "on_retry", None))
             finally:
                 if on_session_end is not None:
                     try:

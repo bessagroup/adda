@@ -1100,6 +1100,7 @@ class ClaudeAdapter:
                             resume=resume)),
                     max_attempts=retry_max,
                 )
+                    on_retry=getattr(self, "on_retry", None),
             finally:
                 self.last_usage = _combine_attempt_usage(self._attempt_usages)
                 self._attempt_usages = None

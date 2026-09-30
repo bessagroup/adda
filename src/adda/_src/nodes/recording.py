@@ -118,6 +118,41 @@ class RecordingMixin:
         except Exception:  # noqa: BLE001
             pass
 
+    def _record_llm_retry(
+        self, attempt: int, max_attempts: int, exc: BaseException,
+        delay: float,
+    ) -> None:
+        """One diagnostics.jsonl row per transient-error retry of an LLM call.
+
+        Not an error (no ``_error_counts`` bump): the call is retried and may
+        succeed. The row exists so a retry is visible -- how often, which
+        exception, how long the backoff -- instead of silent.
+        """
+        import json as _json
+
+        from ..backends.base import get_delegation_id
+
+        notes = self._current_notes_dir
+        if notes is None:
+            return
+        record = {
+            "ts": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
+            "node": self._name,
+            "delegation_id": get_delegation_id(),
+            "event": "LLM_RETRY",
+            "attempt": attempt,
+            "max_attempts": max_attempts,
+            "exception": type(exc).__name__,
+            "message": str(exc)[:300],
+            "delay_s": round(delay, 2),
+        }
+        try:
+            with (Path(notes).parent / "diagnostics.jsonl").open(
+                    "a", encoding="utf-8") as f:
+                f.write(_json.dumps(record) + "\n")
+        except Exception:  # noqa: BLE001
+            pass
+
     def _record_retrospective(
         self, role: str, source_id: str, report_text: str
     ) -> None:

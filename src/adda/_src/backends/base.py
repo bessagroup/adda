@@ -545,12 +545,17 @@ def retry_on_transient(
     max_attempts: int | None = None,
     base_delay: float | None = None,
     max_delay: float = 60.0,
+    on_retry=None,
 ):
     """Call ``fn()`` retrying transient failures with backoff + jitter.
 
     Non-transient exceptions propagate immediately. Defaults come from the
     ``llm_retry_max`` (5) and ``llm_retry_base`` (2.0s) knobs (config.yaml
     runtime block; F3DASM_LLM_RETRY_MAX / F3DASM_LLM_RETRY_BASE override).
+
+    Each retry is reported to ``on_retry(attempt, max_attempts, exc, delay)``
+    (best-effort: a raising callback never breaks the retry), so a retry is
+    never silent.
     """
     from ..runtime.settings import get_float, get_int
     if max_attempts is None:
@@ -567,6 +572,11 @@ def retry_on_transient(
                 raise
             delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
             delay += random.uniform(0, delay * 0.5)
+            if on_retry is not None:
+                try:
+                    on_retry(attempt, max_attempts, exc, delay)
+                except Exception:  # noqa: BLE001
+                    pass
             time.sleep(delay)
 
 

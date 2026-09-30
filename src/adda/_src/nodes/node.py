@@ -110,6 +110,7 @@ class Node(
         agent_tools: frozenset[str] | None = None,
     ) -> None:
         self.adapter = adapter
+        self.adapter.on_retry = self._record_llm_retry
         self._name = name
         self._outgoing = list(outgoing)
         self._spec = spec
