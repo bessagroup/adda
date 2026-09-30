@@ -721,7 +721,18 @@ class ClaudeAdapter:
                 return any(
                     isinstance(b, ToolUseBlock) for b in msg.content
                 )
-            if isinstance(msg, (StreamEvent, UserMessage)):
+            if isinstance(msg, StreamEvent):
+                # Only message_start opens a new generation. The SDK emits
+                # content_block_stop / message_delta / message_stop AFTER the
+                # AssistantMessage that carries a ToolUseBlock, while the tool
+                # is still running; treating those as "generation resumed"
+                # re-armed the stall window mid-tool and killed a 91-minute
+                # delegation that was blocked in a long tool call.
+                ev = getattr(msg, "event", None)
+                if isinstance(ev, dict) and ev.get("type") == "message_start":
+                    return False
+                return None
+            if isinstance(msg, UserMessage):
                 return False
             return None
 

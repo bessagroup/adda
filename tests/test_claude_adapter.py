@@ -829,3 +829,65 @@ def test_transcript_counts_omitted_thinking_blocks(tmp_path, monkeypatch):
     a = [r for r in recs if r["type"] == "assistant"]
     assert [(r["thinking"], r["thinking_omitted"]) for r in a] == [
         ([], 1), (["real summary"], 0), ([], 0)]
+
+
+# ---------------------------------------------------------------------------
+# Stall window vs a running tool. The SDK emits content_block_stop /
+# message_delta / message_stop AFTER the AssistantMessage carrying the
+# ToolUseBlock; treating those as "generation resumed" re-armed the stall
+# window while the tool was still running (run 20260928T225501, D035).
+# ---------------------------------------------------------------------------
+
+def _stall_events():
+    class _Ev(_StreamEvent):
+        def __init__(self, etype):
+            self.event = {"type": etype}
+    return _Ev
+
+
+def test_trailing_stream_events_do_not_rearm_the_stall_window_during_a_tool():
+    import asyncio
+
+    Ev = _stall_events()
+
+    async def _gen(prompt, options):
+        yield Ev("message_start")
+        yield _AssistantMessage([_ToolUseBlockWithName("TaskOutput", {})])
+        yield Ev("content_block_stop")
+        yield Ev("message_delta")
+        yield Ev("message_stop")
+        await asyncio.sleep(0.8)  # the tool runs, far past the stall window
+        yield _UserMessage([])
+        yield Ev("message_start")
+        yield _AssistantMessage([_TextBlock("done")])
+        yield _ResultMessage()
+
+    _install_fake_sdk(query=_gen, ToolUseBlock=_ToolUseBlockWithName,
+                      StreamEvent=Ev)
+    adapter = _get_adapter()("claude-3", "sys", None, [])
+    out = adapter.invoke([{"role": "user", "content": "hi"}],
+                         idle_timeout=0.3, retry_max=0)
+    assert out == "done"
+
+
+def test_a_generation_stall_after_the_tool_returns_still_trips():
+    import asyncio
+
+    import pytest
+
+    Ev = _stall_events()
+
+    async def _gen(prompt, options):
+        yield _AssistantMessage([_ToolUseBlockWithName("Bash", {})])
+        yield Ev("message_stop")
+        yield _UserMessage([])
+        yield Ev("message_start")
+        await asyncio.sleep(3)  # model silent after the result: a real stall
+        yield _ResultMessage()
+
+    _install_fake_sdk(query=_gen, ToolUseBlock=_ToolUseBlockWithName,
+                      StreamEvent=Ev)
+    adapter = _get_adapter()("claude-3", "sys", None, [])
+    with pytest.raises(TimeoutError, match="stalled"):
+        adapter.invoke([{"role": "user", "content": "hi"}],
+                       idle_timeout=0.3, retry_max=0)
