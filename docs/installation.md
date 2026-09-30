@@ -9,7 +9,7 @@ Requires Python 3.10+. [f3dasm](https://github.com/bessagroup/f3dasm) comes
 along automatically from PyPI.
 
 ```bash
-pip install "adda @ git+https://github.com/elvis-aguero/adda.git"
+pip install "adda @ git+https://github.com/bessagroup/adda.git"
 ```
 
 (Not on PyPI yet, so it installs straight from the repository.)

@@ -26,8 +26,8 @@ site_name: adda
 site_description: The documentation for the adda library.
 site_author: Elvis Aguero
 
-repo_url: https://github.com/elvis-aguero/adda
-repo_name: elvis-aguero/adda
+repo_url: https://github.com/bessagroup/adda
+repo_name: bessagroup/adda
 edit_uri: ""
 
 strict: true

@@ -19,7 +19,7 @@ core.
 ## Install
 
 ```bash
-pip install "adda @ git+https://github.com/elvis-aguero/adda.git"
+pip install "adda @ git+https://github.com/bessagroup/adda.git"
 ```
 
 You'll also need a model to drive the agents — by default, the
@@ -44,12 +44,12 @@ report = AgenticRun(
 print(report)
 ```
 
-See the [Quickstart](https://elvis-aguero.github.io/adda/notebooks/quickstart/)
+See the [Quickstart](https://bessagroup.github.io/adda/notebooks/quickstart/)
 for a worked example, start to finish.
 
 ## Documentation
 
-<https://elvis-aguero.github.io/adda/> — or run `mkdocs serve` locally.
+<https://bessagroup.github.io/adda/> — or run `mkdocs serve` locally.
 
 ## License
 

@@ -111,8 +111,8 @@ viewer = [
 adda-docs = "adda.explain:main"
 
 [project.urls]
-Documentation = "https://elvis-aguero.github.io/adda/"
-Repository = "https://github.com/elvis-aguero/adda"
+Documentation = "https://bessagroup.github.io/adda/"
+Repository = "https://github.com/bessagroup/adda"
 
 [tool.coverage.report]
 exclude_lines = [
