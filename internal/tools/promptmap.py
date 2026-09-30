@@ -1765,6 +1765,20 @@ def build_reflection() -> dict:
 #: generated; this is the one place a reader learns what changed in the map
 #: itself (not in the prompts, which git history covers).
 CHANGELOG: list[dict] = [
+    dict(date="2026-09-30", text=(
+        "Checked for Elvis, at adda-boss-whopper's request, against the prompt changes "
+        "since the last campaign (the build stamp, top left, names the commit this page "
+        "reflects). ON THE MAP: 07f4f73 (critic reports every establishable finding in "
+        "one pass: critic operating principles), 767bf46 (critic criterion 5, run "
+        "adequacy: critic role), 98af9ef (runtime.thinking_display: Config knobs). NOT "
+        "SHOWN, by design of the map rather than staleness: 9f170a5 (the commit that "
+        "qualifies tool names; 546a861, cited for it, is a backlog note) rewrites bare "
+        "tool names in prompt prose to mcp__f3dasm_agent_tools__<Name> at run time on the "
+        "Claude backend only (backends/claude.py), so the map shows the bare names every "
+        "backend starts from; 6f33688's <evidence_index> is generated per review from the "
+        "run's own records and appended to the critic's gate and feedback briefs "
+        "(nodes/critic_gate.py, nodes/tools/routing/feedback.py), which this map does not "
+        "display.")),
     dict(date="2026-09-28", text=(
         "Reflection view added (requested by adda-boss-whopper for Elvis): per "
         "role, the text that asks for a ### Retrospective, when it fires, what "
