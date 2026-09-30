@@ -39,6 +39,16 @@ def test_index_lists_every_delegation_with_a_readable_report(tmp_path):
     assert "Build model 2" in block and "more detail" not in block
 
 
+def test_a_patch_row_does_not_replace_the_delegations_final_state(tmp_path):
+    debug = _run(tmp_path, 1)
+    with (debug / "delegation_log.jsonl").open("a") as f:
+        f.write(json.dumps({"id": "D001", "ts": "t",
+                            "patch": {"is_falsification_attempt": True}}) + "\n")
+    block = evidence_index_block(debug)
+    assert "D001 | implementer | DONE" in block
+    assert (debug / "delegation_reports" / "D001.md").read_text() == "report body 1"
+
+
 def test_a_long_index_is_capped_with_a_pointer_to_the_full_one(tmp_path):
     debug = _run(tmp_path, 40)
     block = evidence_index_block(debug)

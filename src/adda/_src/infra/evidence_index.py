@@ -31,8 +31,11 @@ def _rows(log_path: Path) -> dict[str, dict]:
             row = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if isinstance(row, dict) and row.get("id"):
-            rows[row["id"]] = row  # last row per id is its final state
+        if not isinstance(row, dict) or not row.get("id"):
+            continue
+        if "patch" in row:
+            continue  # a patch carries no status; it must not replace the row
+        rows[row["id"]] = row  # last status row per id is its final state
     return rows
 
 
