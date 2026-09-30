@@ -85,6 +85,7 @@ rather than silently reverting to the default.
 | `max_output_tokens` | tokens ONE model reply may generate. `0` derives it from the context window (a quarter of it, capped at 65536) — the same share the trim reserves for the reply; `-1` removes the cap. Bounds a looping turn that would otherwise generate for hours on a large-window server | `0` |
 | `debug` | capture full transcripts, diagnostics and per-delegation logs under `runs/<ts>/debug/`. Required for the run-analysis workflow | `false` |
 | `recursion_limit` | LangGraph step ceiling for one run | `2000` |
+| `max_awake_nodes` | how many nodes may be awake at once, the strategizer included (it always holds one reserved slot; workers share the rest). A delegation over the cap is reported `QUEUED: too many nodes working (N/N)` and starts, first come first served, when a slot frees. A node that blocks in `Wait` on its own queued child, or whose report awaits review, hands its slot back meanwhile. A critic call runs inside its caller's slot. **Memory scales with it: 5 awake nodes needs `--mem >= 32G` on Slurm** (run 20260928T225501 peaked at 16.76 of 16 GB with three awake) | `5` |
 | `max_consecutive_errors` | consecutive failures to one target before the run halts | `12` |
 | `run_backstop_multiple` | multiple of the wall budget after which the run is force-closed | `2.0` |
 | `delegate_cutoff_multiple` | multiple of the wall budget past which NEW delegations are refused (in-flight ones are never touched); must stay below `run_backstop_multiple` or it can never fire. `0` disables | `1.5` |

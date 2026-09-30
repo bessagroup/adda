@@ -1,17 +1,11 @@
-"""Same-role delegations serialize on the shared worker adapter's own lock
-(ClaudeAdapter/OpenAICompatibleAdapter.copy() returns self), but Delegate()
-used to reply "Delegation started" and log a RUNNING row with started_at =
-DISPATCH time regardless -- silently misrepresenting a delegation that will
-actually sit blocked behind another same-role delegation as having started
-immediately (run 20260928T141126: D003 dispatched at 14:14:38 while D002 --
-same role -- was still running; D003's session only began a second after
-D002's ended).
+"""Delegate() must be truthful at dispatch time: a delegation that has to wait
+for an awake-node slot (runtime.max_awake_nodes) is reported QUEUED, with the
+reason, and its registry/log session_started_at stays None until it starts.
+(Run 20260928T141126: D003 was logged as started while it sat blocked behind
+another same-role delegation.)
 
-This suite exercises Delegate()'s own truthfulness at dispatch time and Wait
-(block=False)'s status report while queued -- both driven purely from the
-delegation REGISTRY (status=="Working" for the same target), independent of
-any real backend lock, so a slow/blocking stub worker is enough to reproduce
-the scenario headlessly.
+Driven from the delegation REGISTRY with a slow stub worker; see also
+tests/test_max_awake_nodes.py for the cap itself.
 """
 from __future__ import annotations
 
@@ -71,7 +65,7 @@ class _BlockingWorker:
             return "## Report\n### Actions taken\nnone\n### Conclusions\nok\n### Numbers\nn: 0"
 
 
-def _node(tmp_path, worker):
+def _node(tmp_path, worker, max_awake=None):
     class A(Agent):
         role = "strategizer"
         tools = frozenset({"Done", "Wait"})
@@ -86,15 +80,19 @@ def _node(tmp_path, worker):
         edges=(Edge("strategizer", "implementer"),), entry="strategizer")
     notes = tmp_path / "debug" / "strategizer_notes"
     notes.mkdir(parents=True)
-    return Node(
+    node = Node(
         _Stub(), name="strategizer", outgoing=["implementer"], spec=spec,
         worker_adapters={"implementer": worker}, notes_dir=notes,
         delegation_log=DelegationLog(tmp_path / "dlog.jsonl"))
+    if max_awake is not None:
+        from adda._src.nodes.slots import AwakeSlots
+        node._awake_slots = AwakeSlots(max_awake)
+    return node
 
 
 def test_second_same_role_delegation_is_reported_queued(tmp_path):
     worker = _BlockingWorker()
-    n = _node(tmp_path, worker)
+    n = _node(tmp_path, worker, max_awake=2)
     tools = n.adapter.closure_tools
 
     out1 = tools["Delegate"]("implementer", "task A", "a report")
@@ -104,15 +102,14 @@ def test_second_same_role_delegation_is_reported_queued(tmp_path):
     # D001 is genuinely inside invoke() (blocked), still "Working" in the
     # registry -- a second dispatch to the SAME role must be truthful.
     out2 = tools["Delegate"]("implementer", "task B", "a report")
-    assert "QUEUED behind D001" in out2, out2
-    assert "same-role delegations run one at a time" in out2
+    assert "QUEUED: too many nodes working" in out2, out2
 
     worker.release.set()
 
 
 def test_queued_delegations_registry_entry_has_no_session_start_yet(tmp_path):
     worker = _BlockingWorker()
-    n = _node(tmp_path, worker)
+    n = _node(tmp_path, worker, max_awake=2)
     tools = n.adapter.closure_tools
 
     tools["Delegate"]("implementer", "task A", "a report")
@@ -121,7 +118,7 @@ def test_queued_delegations_registry_entry_has_no_session_start_yet(tmp_path):
 
     entry = n._registry["D002"]
     assert entry["session_started_at"] is None
-    assert entry["queued_behind"] == ["D001"]
+    assert "too many nodes working" in entry["queue_reason"]
     # started_at (dispatch time) is still recorded -- only session_started_at
     # is withheld until the session actually begins.
     assert entry["started_at"] is not None
@@ -131,7 +128,7 @@ def test_queued_delegations_registry_entry_has_no_session_start_yet(tmp_path):
 
 def test_wait_block_false_reports_queued_state(tmp_path):
     worker = _BlockingWorker()
-    n = _node(tmp_path, worker)
+    n = _node(tmp_path, worker, max_awake=2)
     tools = n.adapter.closure_tools
 
     tools["Delegate"]("implementer", "task A", "a report")
@@ -139,7 +136,7 @@ def test_wait_block_false_reports_queued_state(tmp_path):
     tools["Delegate"]("implementer", "task B", "a report")
 
     status = tools["Wait"]("D002", block=False)
-    assert status.startswith("QUEUED behind D001"), status
+    assert status.startswith("QUEUED: too many nodes working"), status
     assert "has not actually started yet" in status
 
     worker.release.set()
@@ -150,7 +147,7 @@ def test_session_started_at_is_patched_once_the_queued_delegation_actually_runs(
     _mark_session_started_if_queued patches session_started_at (registry AND
     delegation_log) even though it was None at dispatch."""
     worker = _BlockingWorker()
-    n = _node(tmp_path, worker)
+    n = _node(tmp_path, worker, max_awake=2)
     tools = n.adapter.closure_tools
 
     tools["Delegate"]("implementer", "task A", "a report")

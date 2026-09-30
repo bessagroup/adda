@@ -36,9 +36,9 @@ regardless of ``outgoing`` — sandboxed ``Write``, ``ReportEvals``,
 (:meth:`Node._init_capabilities`). This matters even for a node that never
 takes a turn of its own: ``runtime/graph_builder.py`` hands every named node's
 adapter to whichever OTHER node may ``Delegate()`` to it
-(``worker_adapters``), and ``ClaudeAdapter.copy()`` returns ``self`` — so a
-dispatched worker's ``closure_tools`` dict IS the same one this construction-
-time setup populated. Losing it here would be a silent regression for every
+(``worker_adapters``), and each dispatch takes ``adapter.copy()``, whose
+``closure_tools`` starts as a copy of the dict this construction-time setup
+populated. Losing it here would be a silent regression for every
 delegated specialist, not just the rare standalone leaf.
 """
 
@@ -91,6 +91,8 @@ class Node(
         ``report_sections`` is retained for callers that validate a worker's
         report against its own contract (``parsing._classify_response``).
     """
+
+    _awake_slots = None  # run-wide AwakeSlots, set by graph_builder
 
     def __init__(
         self,
@@ -184,8 +186,8 @@ class Node(
 
         Runs for EVERY node, not only one reachable as a standalone entry
         point — see the module docstring: whichever node ends up as someone
-        else's ``Delegate()`` target is dispatched through THIS SAME adapter
-        object (``ClaudeAdapter.copy()`` returns ``self``), so this is where a
+        else's ``Delegate()`` target is dispatched through a copy of THIS adapter
+        (``adapter.copy()`` carries the ``closure_tools`` set here), so this is where a
         dispatched specialist's baseline capabilities actually come from,
         before ``WorkerSession.install_worker_tools``/``_sandbox_worker_writes``
         layer the per-delegation overrides (ReportEvals's own record callback,

@@ -552,10 +552,32 @@ class WorkerSession:
 
     # ── The thread body ──────────────────────────────────────────────────────
 
+    def _slots(self):
+        return getattr(self.node, "_awake_slots", None)
+
     def run(self) -> None:
-        """Run the delegation to completion and record its outcome."""
+        """Run the delegation to completion and record its outcome.
+
+        The awake-node slot (``runtime.max_awake_nodes``) was reserved at
+        dispatch; this thread waits until it is granted, and gives it back
+        when the session ends, whatever the outcome (an OPEN-FOR-REVIEW
+        session has ended too -- a resume re-takes a slot).
+        """
+        slots = self._slots()
+        try:
+            if slots is not None:
+                slots.wait_granted(self.delegation_id)
+            self._run_granted()
+        finally:
+            if slots is not None:
+                slots.release(self.delegation_id)
+
+    def _run_granted(self) -> None:
         try:
             self._bind_backend_context()
+            self._mark_session_started_if_queued()
+            if self._cancelled_while_queued():
+                return
             text = self._invoke_with_report_retry()
             self._record_oracle_nudges()
             usage = self._record_usage_once()
@@ -575,6 +597,12 @@ class WorkerSession:
                 self._finish_ok(text, evals, usage, off_ledger, stamped)
         except Exception:  # noqa: BLE001
             self._finish_error(traceback.format_exc())
+
+    def _cancelled_while_queued(self) -> bool:
+        node = self.node
+        with node._registry_lock:
+            return (node._registry.get(self.delegation_id) or {}
+                    ).get("status") == "Cancelled"
 
     def _bind_backend_context(self) -> None:
         """Bind this worker thread's backend context before it is invoked.
@@ -658,8 +686,7 @@ class WorkerSession:
         over every worker.invoke it made (first attempt, report-retry, resume).
 
         Taken from the per-call reports, never from ``worker.last_usage``:
-        that is shared adapter state a queued same-role delegation
-        overwrites, and it holds only the LAST invoke anyway, so a report
+        it holds only the LAST invoke anyway, so a report
         retry dropped the first attempt's spend. Falls back to
         ``last_usage`` only for an adapter that reports nothing.
         """
@@ -712,9 +739,7 @@ class WorkerSession:
         was dispatched QUEUED (registry/log session_started_at is None).
 
         Passed to worker.invoke() as ``on_session_start`` -- the backend
-        calls it the INSTANT its serializing lock is actually acquired, so
-        this fires exactly when this delegation's real work begins, not
-        when it merely asked to start. A worker whose adapter doesn't accept
+        calls it the INSTANT the call's real work begins. A worker whose adapter doesn't accept
         ``on_session_start`` (an older/custom stub) never calls this at all,
         which is safe: session_started_at then simply stays whatever
         dispatch set it to. No-op if this delegation wasn't queued
@@ -963,8 +988,7 @@ class WorkerSession:
         """
         node, delegation_id = self.node, self.delegation_id
         # This delegation's own id, captured inside the adapter's lock. NOT
-        # worker.last_session_id: that is shared adapter state a queued
-        # same-role delegation can overwrite once the lock is released.
+        # worker.last_session_id.
         session_id = (
             self._own_session_id
             if self._own_session_id is not _NO_SESSION_REPORT
@@ -1065,6 +1089,17 @@ class WorkerSession:
         unavailable or fails, recording that fallback as a diagnostic
         every time — never silently.
         """
+        slots = self._slots()
+        if slots is not None:
+            slots.reserve(self.delegation_id)
+            slots.wait_granted(self.delegation_id)
+        try:
+            self._resume_and_revise(message, sender_label)
+        finally:
+            if slots is not None:
+                slots.release(self.delegation_id)
+
+    def _resume_and_revise(self, message: str, sender_label: str) -> None:
         node, delegation_id = self.node, self.delegation_id
         try:
             with node._registry_lock:
@@ -1723,21 +1758,16 @@ class DelegationTools:
 
         delegation_id = self._allocate_delegation_id()
         started_at = datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
-        # ClaudeAdapter/OpenAICompatibleAdapter.copy() returns self -- every
-        # delegation to the SAME role shares the literal same adapter object,
-        # serialized by that adapter's own _lock (invoke() acquires it for
-        # the whole turn). A same-role delegation already Working WILL block
-        # this one behind it the moment its thread calls worker.invoke(); this
-        # is real serialization, not a race — surface it truthfully instead
-        # of the prior "Delegation started" implying it runs right away (run
-        # 20260928T141126: D003 dispatched at 14:14:38 while D002 -- same
-        # role -- was still running; D003's session only began a second
-        # after D002's ended, though Delegate()'s own reply and the RUNNING
-        # log row both said D003 started at 14:14:38).
-        queued_behind = self._same_role_running(target)
+        # Each delegation runs on its OWN adapter copy, so same-role
+        # delegations run concurrently. What bounds concurrency is the
+        # run-wide awake-node cap (runtime.max_awake_nodes): over it, this
+        # delegation is QUEUED, FIFO, until a slot frees.
+        _slots = getattr(node, "_awake_slots", None)
+        queue_reason = (
+            _slots.reserve(delegation_id) if _slots is not None else None)
         self._register_dispatch(
             delegation_id, target, h_ids, is_falsification_attempt,
-            _phase, namespace, started_at, queued_behind,
+            _phase, namespace, started_at, queue_reason,
         )
 
         # Constraint snapshot NOW, at dispatch — single source of truth (see
@@ -1764,7 +1794,7 @@ class DelegationTools:
                 is_falsification_attempt=bool(is_falsification_attempt),
                 phase=_phase,
                 constraints=_snapshot.as_dict(),
-                session_started_at=None if queued_behind else started_at,
+                session_started_at=None if queue_reason else started_at,
             )
 
         task_msg = self._compose_task_message(
@@ -1806,7 +1836,8 @@ class DelegationTools:
 
         if wait:
             # Synchronous mode: block until the delegation finishes.
-            t.join()
+            with self._yield_slot_if_child_queued():
+                t.join()
             with node._registry_lock:
                 entry = dict(node._registry.get(delegation_id, {}))
             status = entry.get("status", "Errored")
@@ -1833,13 +1864,11 @@ class DelegationTools:
                 )
             return f"Errored:\n{entry.get('result', '(no details)')}"
 
-        if queued_behind:
+        if queue_reason:
             return (
-                f"Delegation {delegation_id!r} QUEUED behind "
-                f"{', '.join(queued_behind)} ({target!r} already has a "
-                "delegation running — same-role delegations run one at a "
-                "time, never in parallel). It will actually start once "
-                f"that finishes. Collect it with Wait('{delegation_id}'), "
+                f"Delegation {delegation_id!r} QUEUED: {queue_reason}. "
+                "It starts, in order, once a working node finishes. "
+                f"Collect it with Wait('{delegation_id}'), "
                 f"or check on it with Wait('{delegation_id}', block=False)."
             )
         return (
@@ -2053,17 +2082,6 @@ class DelegationTools:
                 pass
         return delegation_id
 
-    def _same_role_running(self, target: str) -> list[str]:
-        """IDs of this node's OWN OTHER delegations to ``target`` that are
-        still Working -- i.e. delegations a NEW dispatch to the same role
-        will be serialized behind (see Delegate()'s call site for why)."""
-        node = self.node
-        with node._registry_lock:
-            return [
-                d_id for d_id, e in node._registry.items()
-                if e.get("target") == target and e.get("status") == "Working"
-            ]
-
     def _register_dispatch(
         self,
         delegation_id: str,
@@ -2073,7 +2091,7 @@ class DelegationTools:
         phase: str | None,
         namespace: str | None,
         started_at: str,
-        queued_behind: list[str] | None = None,
+        queue_reason: str | None = None,
     ) -> None:
         """Open this delegation's registry entry."""
         from ....backends.base import get_delegation_id
@@ -2101,8 +2119,8 @@ class DelegationTools:
                 # set once this delegation's thread actually calls
                 # worker.invoke() (_invoke_with_report_retry). Not queued at
                 # dispatch: same as started_at, no wait to record.
-                "session_started_at": None if queued_behind else started_at,
-                "queued_behind": list(queued_behind or []),
+                "session_started_at": None if queue_reason else started_at,
+                "queue_reason": queue_reason,
                 "target": target,
                 "namespace": (namespace or None),
                 "followup_question": None,
@@ -2280,11 +2298,9 @@ class DelegationTools:
         if status not in ("Working", "FollowUp"):
             return f"Errored:\n{entry['result']}" + _tail
         if "session_started_at" in entry and entry["session_started_at"] is None:
-            _behind = entry.get("queued_behind") or []
             return (
-                f"QUEUED behind {', '.join(_behind) or 'another delegation'} "
-                f"-- {entry.get('target')!r} runs one same-role delegation "
-                "at a time; it has not actually started yet."
+                f"QUEUED: {entry.get('queue_reason') or 'too many nodes working'}"
+                " -- it has not actually started yet."
             ) + _tail
         return self._working_report(delegation_id, poll) + _tail
 
@@ -2620,9 +2636,33 @@ class DelegationTools:
         # the Wait blocks.
         operator = self.node._drain_operator_notes()
         prefix = operator + self.node._drain_notifications()
-        if delegation_id is None:
-            return self._wait_for_any(prefix, wake=bool(operator))
-        return self._wait_for_one(delegation_id, prefix, wake=bool(operator))
+        with self._yield_slot_if_child_queued():
+            if delegation_id is None:
+                return self._wait_for_any(prefix, wake=bool(operator))
+            return self._wait_for_one(
+                delegation_id, prefix, wake=bool(operator))
+
+    def _yield_slot_if_child_queued(self):
+        """While this caller blocks on children, give its awake slot back if
+        any of them is itself QUEUED for one -- otherwise a parent holding a
+        slot while it waits on a child that needs one is a deadlock. A caller
+        whose children are all running keeps its slot (its process is alive
+        and the children hold their own)."""
+        from contextlib import nullcontext
+
+        from ....backends.base import get_delegation_id
+        node = self.node
+        slots = getattr(node, "_awake_slots", None)
+        me = get_delegation_id()
+        if slots is None or me is None:
+            return nullcontext()
+        with node._registry_lock:
+            queued = any(
+                e.get("parent") == me and e.get("status") == "Working"
+                and "session_started_at" in e
+                and e["session_started_at"] is None
+                for e in node._registry.values())
+        return slots.yielded(me) if queued else nullcontext()
 
     def _wait_for_any(self, prefix: str, wake: bool = False) -> str:
         """Wait for whichever delegation finishes first -- OR (spec 12,

@@ -750,7 +750,7 @@ class OpenAICompatibleAdapter:
         # in the core invocation path (history is demand-driven via DelegationLog).
         self.persistent: bool = persistent
         self.max_history_pairs: int = max_history_pairs
-        # Lock serializes concurrent delegations to the same shared adapter.
+        # Serialises calls on THIS adapter object; each delegation runs on its own copy().
         self._lock: threading.Lock = threading.Lock()
         # Summaries, keyed by the span they were built from. The pre_model_hook
         # runs on every model call inside a turn and usually wants to compact
@@ -778,13 +778,24 @@ class OpenAICompatibleAdapter:
         self.last_session_id: str | None = None
 
     def copy(self) -> OpenAICompatibleAdapter:
-        """Always return self.
+        """An independent adapter for ONE delegation (see ClaudeAdapter.copy):
+        own ``closure_tools``, ``_lock``, built agent, oracle-nudge budget,
+        summary cache and per-call ``last_*`` state."""
+        import copy as _copy
 
-        Concurrent delegations share this adapter instance and are serialized
-        via _lock in invoke(). Episodic memory is demand-driven via RecallHistory
-        (backed by DelegationLog) rather than per-adapter history injection.
-        """
-        return self
+        from .base import OracleNudgeBudget
+        twin = _copy.copy(self)
+        twin.closure_tools = dict(self.closure_tools)
+        twin.native_tools = list(self.native_tools)
+        twin.extra_allowed_tools = list(self.extra_allowed_tools)
+        twin.extra_mcp_servers = dict(self.extra_mcp_servers)
+        twin._lock = threading.Lock()
+        twin._summary_cache = {}
+        twin._agent = None
+        twin._oracle_nudge = OracleNudgeBudget()
+        twin.last_usage = {}
+        twin.last_session_id = None
+        return twin
 
     def _build_tools(self) -> list[Any]:
         import functools
@@ -1053,8 +1064,8 @@ class OpenAICompatibleAdapter:
     ) -> str:
         """Run one full agent turn; return final assistant text.
 
-        Acquires _lock to serialize concurrent callers (e.g. parallel
-        delegations to the same shared worker adapter). Transient API/network
+        Acquires _lock to serialize concurrent callers of this adapter object
+        (each delegation has its own copy(), so they do not contend). Transient API/network
         failures are retried with exponential backoff (see retry_on_transient).
 
         ``idle_timeout`` / ``retry_max`` give short advisory side-calls a tight

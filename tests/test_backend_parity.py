@@ -181,7 +181,10 @@ def test_runtime_contract_types(backend):
     assert "probe" in a.closure_tools
     # token accounting + parallel-delegation identity + routing hook
     assert isinstance(a.last_usage, dict)
-    assert a.copy() is a
+    twin = a.copy()
+    assert twin is not a and twin._lock is not a._lock
+    assert twin.closure_tools == a.closure_tools
+    assert twin.closure_tools is not a.closure_tools
     assert a.route_watcher is None
     assert isinstance(a._lock, type(threading.Lock()))
     # passthrough fields

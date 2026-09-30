@@ -296,9 +296,13 @@ def test_total_cost_usd_stays_none_never_zero():
     assert a.last_usage["total_cost_usd"] is None
 
 
-def test_copy_returns_self():
+def test_copy_is_independent():
     a = VLLMAdapter(model="m", system_prompt="s")
-    assert a.copy() is a
+    b = a.copy()
+    assert b is not a and b._lock is not a._lock
+    assert b._oracle_nudge is not a._oracle_nudge
+    b.closure_tools["X"] = 1
+    assert "X" not in a.closure_tools
 
 
 def test_select_native_tools_excludes_closures():

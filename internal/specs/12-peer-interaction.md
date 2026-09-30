@@ -635,3 +635,10 @@ does the review measurably change the gate outcome or hypothesis
 confidence versus the same study's one-shot (feature-off) arm? This is
 the comparison the ablation exists to make possible — it is not evidence
 until it is measured.
+
+## Addendum (2026-09-30) — concurrency is bounded by `runtime.max_awake_nodes`
+
+Delegations no longer serialise per role: each runs on its own adapter copy.
+A run-wide cap (default 5, strategizer's slot reserved) queues the surplus;
+a node blocked on its own queued child, or OPEN_FOR_REVIEW, yields its slot.
+See FEATURES.md "Parallel nodes".

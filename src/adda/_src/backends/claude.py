@@ -481,7 +481,7 @@ class ClaudeAdapter:
         # in the core invocation path (history is demand-driven via DelegationLog).
         self.persistent: bool = persistent
         self.max_history_pairs: int = max_history_pairs
-        # Lock serializes concurrent delegations to the same shared adapter.
+        # Serialises calls on THIS adapter object; each delegation runs on its own copy().
         self._lock: threading.Lock = threading.Lock()
         # Set by an orchestrating node; when truthy, the generator is closed after
         # the next AssistantMessage so the session ends on a routing decision.
@@ -525,13 +525,25 @@ class ClaudeAdapter:
         )
 
     def copy(self) -> ClaudeAdapter:
-        """Always return self.
+        """An independent adapter for ONE delegation.
 
-        Concurrent delegations share this adapter instance and are serialized
-        via _lock in invoke(). Episodic memory is demand-driven via RecallHistory
-        (backed by DelegationLog) rather than per-adapter history injection.
+        Shares configuration; owns everything a delegation mutates: its own
+        ``closure_tools`` (dispatch binds ReportEvals / Write / FollowUp to
+        that delegation's id), its own ``_lock`` and its own per-call
+        ``last_*`` state. Same-role delegations therefore run concurrently
+        instead of queueing behind one shared lock.
         """
-        return self
+        import copy as _copy
+        twin = _copy.copy(self)
+        twin.closure_tools = dict(self.closure_tools)
+        twin.native_tools = list(self.native_tools)
+        twin.extra_allowed_tools = list(self.extra_allowed_tools)
+        twin.extra_mcp_servers = dict(self.extra_mcp_servers)
+        twin._lock = threading.Lock()
+        twin.last_usage = {}
+        twin._attempt_usages = None
+        twin.last_session_id = None
+        return twin
 
     async def ainvoke(
         self, messages: list[dict], *, idle_timeout: float | None = None,
@@ -1048,8 +1060,8 @@ class ClaudeAdapter:
     ) -> str:
         """Synchronous wrapper around :meth:`ainvoke`.
 
-        Acquires _lock to serialize concurrent callers (e.g. parallel
-        delegations to the same shared worker adapter). Transient API/network
+        Acquires _lock to serialize concurrent callers of this adapter object
+        (each delegation has its own copy(), so they do not contend). Transient API/network
         failures are retried with exponential backoff (see retry_on_transient).
 
         ``idle_timeout`` / ``retry_max`` override the run-wide stream-idle and
@@ -1062,11 +1074,8 @@ class ClaudeAdapter:
 
         ``on_session_start``: called with no arguments the instant ``_lock``
         is actually acquired -- i.e. when this call's real work begins, not
-        when it was merely requested. A caller queued behind another
-        delegation to this same shared adapter can be blocked here for as
-        long as that other call takes; this is the one point that tells the
-        caller its wait is actually over, distinct from when it was asked to
-        start (delegation.py's same-role queueing report depends on this).
+        when it was merely requested. This is the point at which the call's real work begins,
+        distinct from when it was asked to start.
         Best-effort: swallows any exception so a broken callback never
         breaks the real turn.
 
@@ -1074,11 +1083,8 @@ class ClaudeAdapter:
         with THIS call's own session id and token usage while ``_lock`` is
         still held, once the turn is over (also when it raised, with
         whatever it produced: ``None`` / ``{}`` if nothing). Both are
-        per-call output, but ``last_session_id`` / ``last_usage`` are shared
-        adapter state: the moment the lock releases, a same-role delegation
-        queued behind this one may start (and overwrite them) before the
-        caller reads them, so a caller that needs ITS OWN values must take
-        them from here, never from those attributes afterwards. Best-effort
+        per-call output; a caller that needs ITS OWN values takes them from
+        here rather than from ``last_session_id`` / ``last_usage``. Best-effort
         like ``on_session_start``.
         """
         from .base import retry_on_transient

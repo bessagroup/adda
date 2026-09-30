@@ -829,6 +829,26 @@ against the SDK's cost on calls it did price.
   `ledger_summary.py` `delegation_footer` peak-RAM line.
 - **Status:** awareness only — the hard memory cap stays the one enforced boundary.
 
+### Parallel nodes: `runtime.max_awake_nodes` (2026-09-30)
+- **What:** every delegation runs on its OWN adapter (`adapter.copy()` with its
+  own `closure_tools`, lock and `last_*`), so same-role delegations run
+  concurrently instead of serialising behind one lock (run 20260928T225501:
+  D022 queued 2h08m behind D021). What bounds concurrency is an explicit
+  config knob, `runtime.max_awake_nodes` (default 5, strategizer included).
+  The strategizer holds one reserved slot for the whole run and is never
+  queued; workers share `max_awake_nodes - 1`. Over the cap a delegation is
+  QUEUED with "too many nodes working (N/N)" and starts FIFO when a slot frees.
+  A worker gives its slot back only while blocked in `Wait`/`Delegate(wait=True)`
+  on its own QUEUED child or while OPEN_FOR_REVIEW (a resume re-acquires ahead
+  of new spawns); it keeps it in `FollowUp` and while waiting on running
+  children. A critic call (gate or feedback) runs inside its caller's slot, the
+  caller being blocked on it, so it needs no slot of its own and cannot
+  deadlock the pool. Verdict-validator side-calls are NOT counted.
+- **Where:** `nodes/slots.py` (`AwakeSlots`), `nodes/tools/routing/delegation.py`,
+  `backends/{claude,openai_compatible}.py::copy`, `runtime/graph_builder.py`.
+- **Launch guidance:** 5 awake needs `--mem >= 32G`.
+- **Status:** done. Not handled: a cancelled/detached delegation still holds its slot until its thread ends.
+
 ### `mode="parallel"` host-safety hard cap
 - **What:** `InstrumentedDataGenerator.call()` refuses `mode="parallel"`
   outright (raises `ValueError` before f3dasm's `DataGenerator.call()` ever

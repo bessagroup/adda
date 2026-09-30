@@ -216,12 +216,12 @@ def test_build_arxiv_closures_returns_empty_when_arxiv_missing():
 # ---------------------------------------------------------------------------
 
 
-def test_ollama_adapter_copy_returns_self():
-    """OllamaAdapter.copy() returns self (serialization via lock, not copies)."""
+def test_ollama_adapter_copy_is_independent():
+    """OllamaAdapter.copy() is an independent per-delegation adapter."""
     from adda._src.backends.ollama import OllamaAdapter
 
     adapter = OllamaAdapter(model="llama3.2", system_prompt="You are helpful.")
-    # copy() returns self by design — concurrent callers share the same instance
-    # and are serialized via the internal _lock
     copy = adapter.copy()
-    assert copy is adapter
+    assert copy is not adapter and copy._lock is not adapter._lock
+    copy.closure_tools["X"] = 1
+    assert "X" not in adapter.closure_tools

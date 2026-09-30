@@ -105,8 +105,12 @@ def build_graph(
     # A delegation's registry entry lives in its DELEGATOR's Node, while the
     # worker calls the tool closures bound to its OWN Node -- so every node
     # must be able to find the others (Node._delegation_entry).
+    from ..nodes.slots import AwakeSlots
+    from . import settings
+    awake_slots = AwakeSlots(settings.get_int("max_awake_nodes", 5))
     for node in live_nodes.values():
         node._peers = live_nodes
+        node._awake_slots = awake_slots
 
     builder.set_entry_point(spec.entry)
 
