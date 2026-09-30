@@ -681,3 +681,19 @@ Unexplained: what the extra SDK spend is. The transcripts of that run have no
 `model_usage`; the transcript `result` record now records it, so the next real
 run shows whether a second model entry (a CLI auxiliary call) carries the gap.
 Read it from a `result` record's `model_usage` vs `usage`.
+
+## 48. A stall timeout mid-tool restarts the delegation from the top
+
+`retry_on_transient` re-runs the whole `ainvoke` after a `TimeoutError`, so a
+delegation that trips `llm_stream_idle_timeout` or `llm_tool_idle_timeout`
+(default 0, uncapped) while a tool runs is re-sent its original task as a fresh
+CLI session, not resumed. Evidence, run 20260928T225501 D035: 8 fresh sessions
+(`F3DASM_LLM_RETRY_MAX=8` in the run's orchestrator.sbatch, one retry layer),
+each ~30-40 s of state rediscovery, ~10.7 min apart, then a false FAILED. The
+background campaign survived every teardown (no orphan, no second campaign), so
+the cost was tokens and the status, not compute. 0630d5e removes the trigger
+that fired here (trailing stream events re-arming the window during a tool); a
+genuine stall past a configured `llm_tool_idle_timeout` still repeats the full
+restart. Open: resume the CLI session (`resume=`) instead of re-sending the
+task, or do not retry a timeout once a tool is known running. Judgment call, not
+changed.
