@@ -789,7 +789,8 @@ class ClaudeAdapter:
                     if isinstance(b, TextBlock):
                         texts.append(b.text)
                     elif isinstance(b, ToolUseBlock):
-                        tools.append({"name": b.name, "input": b.input})
+                        tools.append({"name": b.name, "input": b.input,
+                                      "tool_use_id": getattr(b, "id", None)})
                     else:
                         t = (getattr(b, "thinking", None)
                              or getattr(b, "text", None))
@@ -1099,8 +1100,8 @@ class ClaudeAdapter:
                             messages, idle_timeout=idle_timeout,
                             resume=resume)),
                     max_attempts=retry_max,
-                )
                     on_retry=getattr(self, "on_retry", None),
+                )
             finally:
                 self.last_usage = _combine_attempt_usage(self._attempt_usages)
                 self._attempt_usages = None

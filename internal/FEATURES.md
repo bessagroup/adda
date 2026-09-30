@@ -1291,3 +1291,9 @@ against the SDK's cost on calls it did price.
 - **Why:** a run had 32 retries across 14 delegations and none was visible.
 - **Where:** `backends/base.py::retry_on_transient`,
   `nodes/recording.py::_record_llm_retry`. **Status:** done.
+
+### Transcript tool calls carry their `tool_use_id`
+- **What:** each entry of an `assistant` transcript record's `tools[]` has the
+  `tool_use_id` (Claude backend) that the matching `tool_result` record cites,
+  so a call and its result pair exactly instead of by position or name.
+- **Where:** `backends/claude.py::_record`. **Status:** done.

@@ -970,3 +970,33 @@ def test_usage_sums_over_failed_and_retried_attempts(monkeypatch):
     (u,) = seen
     assert u["input_tokens"] == 110 and u["output_tokens"] == 45
     assert u["total_cost_usd"] is None  # failed attempt's cost is unknown
+
+
+def test_transcript_tool_call_carries_the_id_its_result_will_cite(tmp_path, monkeypatch):
+    """A call and its result pair by tool_use_id, not by position or name."""
+    import json
+    from adda._src.backends.base import set_transcript_sink
+
+    class _Use(_ToolUseBlockType):
+        name, input, id = "Bash", {"command": "ls"}, "toolu_42"
+
+    class _Res:
+        tool_use_id, content = "toolu_42", "a.txt"
+
+    async def _gen(prompt, options):
+        yield _AssistantMessage([_Use()])
+        yield _UserMessage([_Res()])
+        yield _ResultMessage()
+
+    monkeypatch.setenv("F3DASM_DEBUG", "1")
+    _install_fake_sdk(query=_gen)
+    adapter = _get_adapter()("claude-3", "sys", None, [])
+    sink = tmp_path / "D001.jsonl"
+    set_transcript_sink(str(sink))
+    adapter.invoke([{"role": "user", "content": "hi"}])
+    set_transcript_sink(None)
+
+    recs = [json.loads(x) for x in sink.read_text().strip().splitlines()]
+    call = next(r for r in recs if r["type"] == "assistant")["tools"][0]
+    result = next(r for r in recs if r["type"] == "tool_result")["results"][0]
+    assert call["tool_use_id"] == result["tool_use_id"] == "toolu_42"
