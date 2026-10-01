@@ -197,9 +197,8 @@ class RecordingMixin:
             now = datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
             if parse_failed:
                 body = (
-                    "PARSE FAILURE: a retrospective turn arrived but its "
-                    "### Retrospective section could not be parsed. Raw "
-                    f"text follows.\n\n{report_text}"
+                    "PARSE FAILURE: the response contained no ### Retrospective "
+                    f"section. Raw text follows.\n\n{report_text}"
                 )
             else:
                 body = retro

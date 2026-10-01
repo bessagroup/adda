@@ -365,7 +365,7 @@ class TestRetrospectiveParseFailureIsHonest:
         assert rec["parse_failed"] is True
         assert not rec["source_id"].startswith("SYNTHESIZED:")
         assert raw in rec["text"]
-        assert "could not be parsed" in rec["text"]
+        assert "contained no ### Retrospective section" in rec["text"]
 
     def test_genuinely_empty_summary_records_nothing(self, tmp_path):
         node = self._node(tmp_path)
