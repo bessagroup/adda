@@ -966,6 +966,32 @@ def test_read_oracle_on_a_run_with_no_oracle(tmp_path):
     assert o["stores"] == [] and o["total_evals"] == 0
 
 
+def test_an_unreachable_store_is_not_reported_as_zero_evals(tmp_path):
+    """A run mirrored off a cluster has a store_dir that does not exist here.
+    Absence of the data is not a count of zero."""
+    run = tmp_path / "runs" / "R1"
+    (run / "debug").mkdir(parents=True)
+    (run / "debug" / "run_config.json").write_text(json.dumps({
+        "store_dir": str(tmp_path / "not-on-this-host"),
+        "evaluator_entrypoint": "m:f",
+    }), encoding="utf-8")
+    o = read_oracle(run)
+    assert o["registered"] and o["store_found"] is False
+    assert o["total_evals"] is None
+
+
+def test_a_store_that_exists_but_is_empty_is_a_real_zero(tmp_path):
+    run = tmp_path / "runs" / "R1"
+    (run / "debug").mkdir(parents=True)
+    store = tmp_path / "store"
+    store.mkdir()
+    (run / "debug" / "run_config.json").write_text(json.dumps({
+        "store_dir": str(store), "evaluator_entrypoint": "m:f",
+    }), encoding="utf-8")
+    o = read_oracle(run)
+    assert o["store_found"] is True and o["total_evals"] == 0
+
+
 def test_read_vitals_start_survives_a_rewritten_run_config(tmp_path):
     """The wall clock anchors on the EARLIEST start-file mtime.
 

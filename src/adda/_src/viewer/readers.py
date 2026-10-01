@@ -631,10 +631,15 @@ def read_oracle(run_dir: Path | str) -> dict[str, Any]:
         "entrypoint": cfg.get("evaluator_entrypoint") or "",
         "eval_budget": cfg.get("eval_budget"),
         "store_dir": str(base_path),
+        # A store path that does not exist on THIS host (a run mirrored from
+        # a cluster) says nothing about how many evaluations happened, so the
+        # count is None then, never 0.
+        "store_found": base_path.is_dir(),
         "stores": stores,
         # Summed across canonical AND namespaces, for the same reason the
         # runtime's own accounting does.
-        "total_evals": sum(s["n_evals"] for s in stores),
+        "total_evals": (sum(s["n_evals"] for s in stores)
+                        if base_path.is_dir() or not registered else None),
     }
 
 

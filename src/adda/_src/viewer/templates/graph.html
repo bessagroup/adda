@@ -1137,7 +1137,8 @@
           <span class="label">cost</span>
         </div>
         <div>
-          <b class="m" x-text="evalsLabel()"></b>
+          <b class="m" x-text="evalsLabel()"
+             :title="oracle && oracle.total_evals === null ? 'Store not found on this machine: ' + oracle.store_dir : ''"></b>
           <span class="label">evals</span>
         </div>
       </div>
@@ -1651,9 +1652,13 @@
             </p>
             <template x-if="oracle.registered">
               <div style="display:flex; flex-direction:column; gap:14px">
-                <p style="margin:0; font-size:16px">
+                <p style="margin:0; font-size:16px" x-show="oracle.store_found">
                   An oracle is registered, but nothing has been evaluated
                   through it.
+                </p>
+                <p style="margin:0; font-size:16px" x-show="!oracle.store_found">
+                  An oracle is registered, but its store was not found on this
+                  machine, so the evaluations cannot be counted here.
                 </p>
                 <div class="facts" style="grid-template-columns:100px minmax(0,1fr)">
                   <span>evaluator</span><span x-text="oracle.evaluator_name || '—'"></span>
@@ -2475,6 +2480,7 @@
         // first rather than the run's.
         evalsLabel() {
           if (this.oracle) {
+            if (this.oracle.total_evals === null) return '—';
             const used = this.oracle.total_evals || 0;
             return this.oracle.eval_budget
               ? `${used}/${this.oracle.eval_budget}` : `${used}`;
