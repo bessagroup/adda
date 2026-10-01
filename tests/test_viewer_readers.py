@@ -12,6 +12,7 @@ import pytest
 from adda._src.viewer.readers import (
     read_artifacts,
     read_oracle,
+    read_trajectory,
     read_vitals,
     graph_spec_json,
     list_node_transcripts,
@@ -1184,3 +1185,24 @@ def test_hypotheses_and_milestones_are_in_numeric_id_order(tmp_path):
             json.dumps({i: {"id": i} for i in ids}), encoding="utf-8")
         assert [x["id"] for x in reader(run)] == [
             "H1", "H2", "H3", "H9", "H10", "H11"]
+
+
+def test_read_trajectory_returns_columns_with_a_kind_and_never_ranks(tmp_path):
+    run = tmp_path / "runs" / "R1"
+    (run / "debug").mkdir(parents=True)
+    data = run / "experiment_data" / "experiment_data"
+    data.mkdir(parents=True)
+    (data / "domain.json").write_text(json.dumps({"input_space": {"x": {}}}), encoding="utf-8")
+    (data / "input.csv").write_text(",x\n0,1\n1,2\n2,3\n", encoding="utf-8")
+    (data / "output.csv").write_text(
+        ",sigma,feasible,label,_delegation_id,_ts\n"
+        "0,5.0,True,a,D001,2026-09-06T12:00:00+00:00\n"
+        "1,3.0,False,b,D001,2026-09-06T12:01:00+00:00\n"
+        "2,,True,c,D002,2026-09-06T12:02:00+00:00\n", encoding="utf-8")
+    (data / "jobs.csv").write_text(",0\n0,FINISHED\n1,FINISHED\n2,FINISHED\n", encoding="utf-8")
+    t = read_trajectory(run)
+    (st,) = t["stores"]
+    assert st["n"] == 3 and st["delegation"] == ["D001", "D001", "D002"]
+    assert st["columns"]["sigma"] == {"kind": "numeric", "values": [5.0, 3.0, None]}
+    assert st["columns"]["feasible"] == {"kind": "binary", "values": [1.0, 0.0, 1.0]}
+    assert "label" not in st["columns"] and "_ts" not in st["columns"]

@@ -402,3 +402,24 @@ def test_hovering_a_hypothesis_highlights_the_delegations_that_carry_it(tmp_path
         page.wait_for_selector(".vcard.hl", state="attached")
         assert page.locator(".vcard.hl").count() == 1
         assert page.locator(".vcard.dim").count() == 1
+
+
+def test_the_oracle_tab_draws_best_so_far_for_the_chosen_objective(tmp_path, page):
+    study, run_id = _run_with_delegations(tmp_path, [_delegation("D001", "implementer")])
+    data = study / "runs" / run_id / "experiment_data" / "experiment_data"
+    data.mkdir(parents=True)
+    (data / "domain.json").write_text('{"input_space": {"x": {}}}', encoding="utf-8")
+    (data / "input.csv").write_text(",x\n0,1\n1,2\n2,3\n", encoding="utf-8")
+    (data / "output.csv").write_text(
+        ",sigma,feasible,_delegation_id,_ts\n"
+        "0,5.0,True,D001,2026-09-17T12:00:00+00:00\n"
+        "1,1.0,False,D001,2026-09-17T12:01:00+00:00\n"
+        "2,3.0,True,D001,2026-09-17T12:02:00+00:00\n", encoding="utf-8")
+    (data / "jobs.csv").write_text(",0\n0,FINISHED\n1,FINISHED\n2,FINISHED\n", encoding="utf-8")
+    with _LiveServer(create_app(study)) as server:
+        _open(page, server, run_id)
+        page.click("text=Oracle")
+        page.wait_for_selector(".traj-svg", timeout=10_000)
+        assert page.locator(".traj-ok").count() == 2
+        assert page.locator(".traj-no").count() == 1
+        assert "best 3 at #2" in page.locator(".traj-sum").inner_text()

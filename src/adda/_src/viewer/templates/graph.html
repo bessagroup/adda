@@ -429,6 +429,18 @@
       color: var(--text);
     }
 
+    .traj { display: flex; flex-direction: column; gap: 8px; }
+    .traj-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    .traj-ctl select { font: inherit; font-size: var(--fs-meta); background: var(--mantle); color: var(--text); border: 1px solid var(--surface1); border-radius: 4px; padding: 2px 6px; }
+    .traj-log { font-size: var(--fs-meta); color: var(--subtext0); display: inline-flex; gap: 4px; align-items: center; }
+    .traj-sum { font-size: var(--fs-meta); color: var(--subtext0); }
+    .traj-svg { width: 100%; height: auto; max-width: 820px; }
+    .traj-grid { stroke: var(--surface0); stroke-width: 1; }
+    .traj-ax { fill: var(--subtext0); font-size: 11px; font-family: var(--mono); }
+    .traj-ok { fill: var(--green); opacity: .8; }
+    .traj-no { fill: none; stroke: var(--overlay1); stroke-width: 1; }
+    .traj-best { fill: none; stroke: var(--id1); stroke-width: 2; }
+    .traj-star { fill: var(--base); stroke: var(--id1); stroke-width: 2.5; }
     .deleg { flex: 1; min-height: 0; display: flex; flex-direction: column; }
     .deleg-head {
       flex: none;
@@ -1880,6 +1892,31 @@
                   </template>
                 </div>
 
+                <template x-if="trajStore(st) && Object.keys(trajStore(st).columns).length">
+                  <div class="traj">
+                    <div class="traj-ctl">
+                      <span class="label">Best so far</span>
+                      <select x-model="trajSelFor(st).obj" aria-label="objective column">
+                        <template x-for="c in trajColumns(st, 'numeric').concat(trajColumns(st, 'binary'))" :key="c">
+                          <option :value="c" x-text="c"></option>
+                        </template>
+                      </select>
+                      <select x-model="trajSelFor(st).dir" aria-label="direction">
+                        <option value="min">minimise</option>
+                        <option value="max">maximise</option>
+                      </select>
+                      <select x-model="trajSelFor(st).feas" aria-label="feasibility column">
+                        <option value="">all rows count</option>
+                        <template x-for="c in trajColumns(st, 'binary')" :key="c">
+                          <option :value="c" x-text="'feasible: ' + c"></option>
+                        </template>
+                      </select>
+                      <label class="traj-log"><input type="checkbox" x-model="trajSelFor(st).log"> log y</label>
+                    </div>
+                    <div x-html="trajChart(st)"></div>
+                  </div>
+                </template>
+
                 <p class="empty" x-show="!st.evals.length"
                    style="font-size:var(--fs-ui)">Nothing evaluated yet.</p>
 
@@ -2107,6 +2144,9 @@
         notebook: null,
         vitals: null,
         oracle: null,
+        trajectory: null,
+        trajSel: {},
+        _trajCache: {},
         monitor: [],
         evalOpen: null,
         questions: [],
@@ -2229,6 +2269,7 @@
             this.loadLedger();
             this.loadVitals();
             this.loadOracle();
+            if (this.tab === 'oracle') this.loadTrajectory();
             this.loadMonitor();
           }, 5000);
 
@@ -2253,6 +2294,105 @@
             .then(r => r.ok ? r.json() : null)
             .then(o => { if (o) this.oracle = o; })
             .catch(() => {});
+        },
+
+        loadTrajectory() {
+          fetch(`/api/runs/${this.runId}/trajectory`)
+            .then(r => r.ok ? r.json() : null)
+            .then(t => {
+              if (!t) return;
+              for (const st of t.stores) {
+                if (this.trajSel[st.path]) continue;
+                const cols = Object.entries(st.columns);
+                const obj = cols.find(([, c]) => c.kind === 'numeric');
+                const feas = cols.find(([n, c]) => c.kind === 'binary' && /feas/i.test(n));
+                this.trajSel[st.path] = {
+                  obj: obj ? obj[0] : '', dir: 'min',
+                  feas: feas ? feas[0] : '', log: false,
+                };
+              }
+              this.trajectory = t;
+            })
+            .catch(() => {});
+        },
+
+        trajStore(st) {
+          return this.trajectory
+            ? this.trajectory.stores.find(x => x.path === st.path) || null : null;
+        },
+        trajColumns(st, kind) {
+          const t = this.trajStore(st);
+          return t ? Object.entries(t.columns).filter(([, c]) => c.kind === kind).map(([n]) => n) : [];
+        },
+        trajSelFor(st) { return this.trajSel[st.path] || { obj: '', dir: 'min', feas: '', log: false }; },
+
+        // Best-so-far of one output against wall time, as an SVG string
+        // (a <template> inside <svg> is not a template to the HTML parser).
+        trajChart(st) {
+          const t = this.trajStore(st), sel = this.trajSel[st.path];
+          if (!t || !sel || !t.columns[sel.obj]) return '';
+          const ck = [st.path, t.n, sel.obj, sel.dir, sel.feas, sel.log].join('|');
+          if (this._trajCache[ck]) return this._trajCache[ck];
+          const obj = t.columns[sel.obj].values;
+          const feas = sel.feas && t.columns[sel.feas] ? t.columns[sel.feas].values : null;
+          const stamps = t.ts.map(x => Date.parse(x));
+          const byTime = stamps.some(x => !isNaN(x)) && stamps.every((x, i) => !isNaN(x) || obj[i] === null);
+          const xs = byTime ? stamps : stamps.map((_, i) => i);
+          const idx = obj.map((v, i) => i).filter(i => obj[i] !== null && !isNaN(xs[i]));
+          if (!idx.length) return '';
+          const sign = sel.dir === 'min' ? 1 : -1;
+          const logy = sel.log && idx.every(i => obj[i] > 0);
+          const fy = v => logy ? Math.log10(v) : v;
+          const x0 = Math.min(...idx.map(i => xs[i])), x1 = Math.max(...idx.map(i => xs[i]), x0 + 1);
+          const vs = idx.map(i => fy(obj[i]));
+          let y0 = Math.min(...vs), y1 = Math.max(...vs);
+          if (y1 - y0 < 1e-12) { y0 -= 1; y1 += 1; }
+          const W = 720, H = 250, L = 58, R = 14, T = 12, B = 28;
+          const px = x => L + (x - x0) / (x1 - x0) * (W - L - R);
+          const py = v => T + (1 - (fy(v) - y0) / (y1 - y0)) * (H - T - B);
+          const num = v => Math.abs(v) >= 1e4 || (v !== 0 && Math.abs(v) < 1e-2)
+            ? v.toExponential(2) : String(+v.toPrecision(4));
+          const esc = x => String(x).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+          let out = `<svg viewBox="0 0 ${W} ${H}" class="traj-svg" role="img" aria-label="best so far of ${esc(sel.obj)}">`;
+          for (let k = 0; k <= 4; k++) {
+            const yy = T + k / 4 * (H - T - B);
+            const v = y1 - k / 4 * (y1 - y0);
+            out += `<line x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" class="traj-grid"/>` +
+                   `<text x="${L - 6}" y="${yy + 4}" text-anchor="end" class="traj-ax">${num(logy ? Math.pow(10, v) : v)}</text>`;
+          }
+          for (let k = 0; k <= 4; k++) {
+            const xv = x0 + k / 4 * (x1 - x0);
+            const lab = byTime ? this.humanDur(xv - x0) : `#${Math.round(xv)}`;
+            out += `<text x="${px(xv)}" y="${H - 8}" text-anchor="${k === 0 ? 'start' : k === 4 ? 'end' : 'middle'}" class="traj-ax">${lab}</text>`;
+          }
+          let best = null, path = '', nOk = 0, bestI = -1;
+          const ordered = idx.slice().sort((a, b) => xs[a] - xs[b] || a - b);
+          for (const i of ordered) {
+            const ok = feas ? feas[i] === 1 : true;
+            if (ok) nOk++;
+            if (ok && (best === null || sign * obj[i] < sign * best)) {
+              best = obj[i]; bestI = i;
+              const X = px(xs[i]), Y = py(best);
+              path += path ? ` H${X} V${Y}` : `M${X} ${Y}`;
+            }
+          }
+          if (path) path += ` H${px(x1)}`;
+          for (const i of ordered) {
+            const ok = feas ? feas[i] === 1 : true;
+            const tip = `#${i} ${esc(t.delegation[i] || '')} · ${esc(sel.obj)} = ${num(obj[i])}` +
+              (feas ? (ok ? ' · feasible' : ' · not feasible') : '');
+            out += `<circle cx="${px(xs[i])}" cy="${py(obj[i])}" r="${ok ? 2.6 : 2.2}" class="${ok ? 'traj-ok' : 'traj-no'}"><title>${tip}</title></circle>`;
+          }
+          if (path) out += `<path d="${path}" class="traj-best"/>`;
+          if (bestI >= 0) out += `<circle cx="${px(xs[bestI])}" cy="${py(obj[bestI])}" r="4.5" class="traj-star"><title>best ${num(obj[bestI])} at #${bestI} ${esc(t.delegation[bestI] || '')}</title></circle>`;
+          out += '</svg>';
+          const summary = best === null
+            ? (feas ? 'No feasible row yet.' : 'No rows yet.')
+            : `best ${num(best)} at #${bestI}${t.delegation[bestI] ? ' (' + esc(t.delegation[bestI]) + ')' : ''}` +
+              (feas ? ` · ${nOk} of ${idx.length} rows feasible` : ` · ${idx.length} rows`);
+          out = `<div class="traj-sum m">${summary}</div>` + out;
+          this._trajCache[ck] = out;
+          return out;
         },
 
         // Which agent produced an eval — the ledger records the delegation
@@ -2973,7 +3113,7 @@
           this.tab = t;
           if (t === 'brief' && this.briefText === null) this.loadBrief();
           if (t === 'result') { this.loadNotebook(); this.loadArtifacts(); }
-          if (t === 'oracle') this.loadOracle();
+          if (t === 'oracle') { this.loadOracle(); this.loadTrajectory(); }
         },
 
         // Re-read on every visit rather than caching: the implementer

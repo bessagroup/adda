@@ -778,6 +778,13 @@ def create_app(
             return _not_found(f"no such run {run_id!r}")
         return JSONResponse(readers.read_oracle(run_dir))
 
+    async def get_trajectory(request):
+        run_id = request.path_params["run_id"]
+        run_dir = _run_dir(study_dir, run_id)
+        if run_dir is None:
+            return _not_found(f"no such run {run_id!r}")
+        return JSONResponse(readers.read_trajectory(run_dir))
+
     async def get_monitor(request):
         run_id = request.path_params["run_id"]
         run_dir = _run_dir(study_dir, run_id)
@@ -1003,6 +1010,7 @@ def create_app(
         Route("/api/runs/{run_id}/note", post_note, methods=["POST"]),
         Route("/api/runs/{run_id}/vitals", get_vitals),
         Route("/api/runs/{run_id}/oracle", get_oracle),
+        Route("/api/runs/{run_id}/trajectory", get_trajectory),
         Route("/api/runs/{run_id}/monitor", get_monitor),
         Route("/api/runs/{run_id}/artifacts", get_artifacts),
         Route("/api/runs/{run_id}/artifact", get_artifact),

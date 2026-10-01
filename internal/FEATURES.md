@@ -1178,6 +1178,12 @@ against the SDK's cost on calls it did price.
   between a card and the hypotheses it carries (`hypothesis_ids`). The ledger shows
   prior to posterior, the falsification criterion, the whole status history
   (a verdict retracted to OPEN is visible) and open/closed/reopened filters. Header
+  The Oracle tab draws a best-so-far chart per store (`/api/runs/<id>/trajectory`,
+  read from output.csv + `_ts`): the reader returns each numeric/binary output column and
+  ranks nothing; the reader of the page picks the objective, min/max, the 0/1 feasible
+  column and log-y. Feasible rows are filled, others hollow, the step line is the best
+  feasible so far.
+  Header
   vitals add wall against the budget with 1x/1.5x/2x marks, awake worker slots
   N/max with the queue length, and cost as a lower bound ("≥$") when any call
   recorded none (unknown, never 0). Orchestrator RSS is not shown: no record holds it.

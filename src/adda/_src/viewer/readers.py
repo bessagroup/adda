@@ -590,6 +590,93 @@ def _read_one_store(store: Path, namespace: str | None) -> dict[str, Any]:
     }
 
 
+def _oracle_stores(run_dir: Path) -> tuple[dict[str, Any], Path, list[tuple[str | None, Path]]]:
+    """Run config, store root, and every (namespace, store path) on disk."""
+    cfg = _read_json_object(run_dir / "debug" / "run_config.json")
+    base = cfg.get("store_dir")
+    base_path = Path(base) if base else run_dir / _DATA_DIR
+
+    found: list[tuple[str | None, Path]] = []
+    if (base_path / _DATA_DIR).is_dir():
+        found.append((None, base_path))
+    seen = {str(p) for _, p in found}
+    names = set((cfg.get("oracles") or {}).keys())
+    if base_path.is_dir():
+        for entry in sorted(base_path.iterdir()):
+            if entry.is_dir() and entry.name != _DATA_DIR:
+                names.add(entry.name)
+    for name in sorted(names):
+        ns_store = base_path / name
+        if str(ns_store) in seen or not (ns_store / _DATA_DIR).is_dir():
+            continue
+        found.append((name, ns_store))
+    return cfg, base_path, found
+
+
+_MAX_TRAJECTORY_ROWS = 20000
+
+
+def _as_number(v: str) -> float | None:
+    if v in ("True", "False"):
+        return 1.0 if v == "True" else 0.0
+    try:
+        x = float(v)
+    except ValueError:
+        return None
+    return x if x == x and abs(x) != float("inf") else None
+
+
+def read_trajectory(run_dir: Path | str) -> dict[str, Any]:
+    """Every ledgered row of each store as parallel columns, oldest first.
+
+    The page draws best-so-far from these. Which output is the objective,
+    whether to minimise it, and which 0/1 column means "feasible" are the
+    study's, not the viewer's, so each numeric column is returned with its
+    ``kind`` ("binary" when every value is 0/1/True/False) and the reader
+    ranks nothing.
+    """
+    cfg, base_path, found = _oracle_stores(Path(run_dir))
+    stores = []
+    for name, path in found:
+        data = path / _DATA_DIR
+        head, rows = _read_csv_rows(data / "output.csv")
+        _, job_rows = _read_csv_rows(data / "jobs.csv")
+        rows = rows[:_MAX_TRAJECTORY_ROWS]
+        names = head[1:]
+        cols: dict[str, dict[str, Any]] = {}
+        for j, col in enumerate(names):
+            if col in _PROVENANCE_COLS:
+                continue
+            vals = [_as_number(r[j + 1]) if j + 1 < len(r) and r[j + 1] != ""
+                    else None for r in rows]
+            if not any(v is not None for v in vals):
+                continue
+            # A column with any non-numeric entry is a label, not a measure.
+            if any(j + 1 < len(r) and r[j + 1] != "" and _as_number(r[j + 1]) is None
+                   for r in rows):
+                continue
+            kind = ("binary" if all(v in (None, 0.0, 1.0) for v in vals)
+                    else "numeric")
+            cols[col] = {"kind": kind, "values": vals}
+
+        def prov(key: str, names: list[str] = names, rows: list = rows) -> list[str]:
+            if key not in names:
+                return [""] * len(rows)
+            j = names.index(key)
+            return [r[j + 1] if j + 1 < len(r) else "" for r in rows]
+
+        stores.append({
+            "namespace": name,
+            "path": str(path),
+            "n": len(rows),
+            "ts": prov("_ts"),
+            "delegation": prov("_delegation_id"),
+            "status": [r[1] if len(r) > 1 else "" for r in job_rows][:len(rows)],
+            "columns": cols,
+        })
+    return {"store_found": base_path.is_dir(), "stores": stores}
+
+
 def read_oracle(run_dir: Path | str) -> dict[str, Any]:
     """What the run's oracle is, and every evaluation it has ledgered.
 
@@ -601,26 +688,8 @@ def read_oracle(run_dir: Path | str) -> dict[str, Any]:
     reported 100 evals against 200 real ones because it counted the
     canonical store only).
     """
-    run_dir = Path(run_dir)
-    cfg = _read_json_object(run_dir / "debug" / "run_config.json")
-    base = cfg.get("store_dir")
-    base_path = Path(base) if base else run_dir / _DATA_DIR
-
-    stores: list[dict[str, Any]] = []
-    if (base_path / _DATA_DIR).is_dir():
-        stores.append(_read_one_store(base_path, None))
-
-    seen = {s["path"] for s in stores}
-    names = set((cfg.get("oracles") or {}).keys())
-    if base_path.is_dir():
-        for entry in sorted(base_path.iterdir()):
-            if entry.is_dir() and entry.name != _DATA_DIR:
-                names.add(entry.name)
-    for name in sorted(names):
-        ns_store = base_path / name
-        if str(ns_store) in seen or not (ns_store / _DATA_DIR).is_dir():
-            continue
-        stores.append(_read_one_store(ns_store, name))
+    cfg, base_path, found = _oracle_stores(Path(run_dir))
+    stores = [_read_one_store(path, name) for name, path in found]
 
     # "No oracle registered" and "an oracle is registered but was never
     # called" are different facts about a run, and only the second one was
