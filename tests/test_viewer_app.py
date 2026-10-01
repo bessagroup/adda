@@ -630,6 +630,14 @@ def test_operator_endpoint_reports_pending_questions_and_beats_the_heartbeat(tmp
     assert oc.is_watched(run) is True
 
 
+
+def _writer(study):
+    """A client holding the session cookie the printed URL would set."""
+    client = TestClient(create_app(study, token="t0k3n"))
+    assert client.get("/session?token=t0k3n", follow_redirects=False).status_code == 303
+    return client
+
+
 def test_answering_reaches_the_run(tmp_path):
     from adda._src.infra import operator_channel as oc
 
@@ -637,7 +645,7 @@ def test_answering_reaches_the_run(tmp_path):
     run = _make_run(study, "20260904T120000")
     qid = oc.ask_question(run, "strategizer", "?")
 
-    client = TestClient(create_app(study))
+    client = _writer(study)
     resp = client.post("/api/runs/20260904T120000/answer",
                        json={"id": qid, "answer": "advisory"})
     assert resp.status_code == 200
@@ -653,7 +661,7 @@ def test_answering_a_question_the_run_gave_up_on_is_a_conflict(tmp_path):
     qid = oc.ask_question(run, "strategizer", "?")
     oc.close_question(run, qid, "timeout")
 
-    client = TestClient(create_app(study))
+    client = _writer(study)
     resp = client.post("/api/runs/20260904T120000/answer",
                        json={"id": qid, "answer": "too late"})
     assert resp.status_code == 409
@@ -665,7 +673,7 @@ def test_queueing_a_note_puts_it_where_the_node_drains_it(tmp_path):
     study = _make_study(tmp_path)
     run = _make_run(study, "20260904T120000")
 
-    client = TestClient(create_app(study))
+    client = _writer(study)
     resp = client.post("/api/runs/20260904T120000/note",
                        json={"text": "re-run shell_05 first"})
     assert resp.status_code == 200
@@ -675,7 +683,7 @@ def test_queueing_a_note_puts_it_where_the_node_drains_it(tmp_path):
 def test_an_empty_note_is_rejected_by_the_endpoint(tmp_path):
     study = _make_study(tmp_path)
     _make_run(study, "20260904T120000")
-    client = TestClient(create_app(study))
+    client = _writer(study)
     assert client.post("/api/runs/20260904T120000/note",
                        json={"text": "   "}).status_code == 400
 
@@ -800,7 +808,7 @@ def test_malformed_client_input_does_not_500(tmp_path):
     run = _make_run(study, "20260904T120000")
     _write_jsonl(run / "debug" / "transcripts" / "D001.jsonl",
                  [{"type": "assistant", "text": "x"}])
-    client = TestClient(create_app(study))
+    client = _writer(study)
 
     for bad in ("abc", "-5", "1e9999"):
         r = client.get(
@@ -808,7 +816,8 @@ def test_malformed_client_input_does_not_500(tmp_path):
         assert r.status_code < 500, f"after={bad} -> {r.status_code}"
 
     for route in ("note", "answer"):
-        r = client.post(f"/api/runs/20260904T120000/{route}", content="notjson")
+        r = client.post(f"/api/runs/20260904T120000/{route}", content="notjson",
+                        headers={"content-type": "application/json"})
         assert r.status_code == 400
 
 
@@ -1140,3 +1149,95 @@ def test_bundled_fonts_are_served_locally(tmp_path):
     client = TestClient(create_app(study))
     r = client.get("/static/fonts/ibm-plex-sans-latin-400-normal.woff2")
     assert r.status_code == 200 and len(r.content) > 1000
+
+
+# ---- write endpoints: only the page this viewer served may write ----------
+
+_NOTE = "/api/runs/20260904T120000/note"
+
+
+def _note_study(tmp_path):
+    study = _make_study(tmp_path)
+    run = _make_run(study, "20260904T120000")
+    return study, run
+
+
+def test_a_cross_origin_simple_request_cannot_inject_a_note(tmp_path):
+    """text/plain is a CORS "simple request": no preflight, so a page the
+    operator merely visits can send it. It must be refused on content type
+    alone, even with a valid cookie."""
+    from adda._src.infra import operator_channel as oc
+
+    study, run = _note_study(tmp_path)
+    client = _writer(study)
+    r = client.post(_NOTE, content='{"text": "owned"}',
+                    headers={"content-type": "text/plain",
+                             "origin": "https://evil.example"})
+    assert r.status_code == 415
+    assert oc.drain_notes(run) == []
+
+
+def test_a_json_write_from_another_origin_is_refused(tmp_path):
+    from adda._src.infra import operator_channel as oc
+
+    study, run = _note_study(tmp_path)
+    client = _writer(study)
+    r = client.post(_NOTE, json={"text": "owned"},
+                    headers={"origin": "https://evil.example"})
+    assert r.status_code == 403
+    assert oc.drain_notes(run) == []
+
+
+def test_a_write_from_the_viewers_own_origin_is_accepted(tmp_path):
+    study, _ = _note_study(tmp_path)
+    client = _writer(study)
+    r = client.post(_NOTE, json={"text": "ok"},
+                    headers={"origin": "http://testserver"})
+    assert r.status_code == 200
+
+
+def test_a_cross_site_fetch_is_refused_even_without_an_origin(tmp_path):
+    study, _ = _note_study(tmp_path)
+    client = _writer(study)
+    r = client.post(_NOTE, json={"text": "x"},
+                    headers={"sec-fetch-site": "cross-site"})
+    assert r.status_code == 403
+
+
+def test_a_write_without_the_session_token_is_refused(tmp_path):
+    from adda._src.infra import operator_channel as oc
+
+    study, run = _note_study(tmp_path)
+    client = TestClient(create_app(study, token="t0k3n"))
+    r = client.post(_NOTE, json={"text": "x"})
+    assert r.status_code == 403
+    assert oc.drain_notes(run) == []
+
+
+def test_a_wrong_token_does_not_start_a_session(tmp_path):
+    study, _ = _note_study(tmp_path)
+    client = TestClient(create_app(study, token="t0k3n"))
+    client.get("/session?token=wrong", follow_redirects=False)
+    assert client.get("/api/session").json() == {"can_write": False}
+    assert client.post(_NOTE, json={"text": "x"}).status_code == 403
+
+
+def test_the_session_url_grants_write_and_reads_stay_open(tmp_path):
+    study, _ = _note_study(tmp_path)
+    client = TestClient(create_app(study, token="t0k3n"))
+    assert client.get("/api/runs").status_code == 200
+    assert client.get("/api/session").json() == {"can_write": False}
+    r = client.get("/session?token=t0k3n", follow_redirects=False)
+    assert r.status_code == 303
+    assert "httponly" in r.headers["set-cookie"].lower()
+    assert "samesite=strict" in r.headers["set-cookie"].lower()
+    assert client.get("/api/session").json() == {"can_write": True}
+
+
+def test_session_redirect_stays_on_this_site(tmp_path):
+    study, _ = _note_study(tmp_path)
+    client = TestClient(create_app(study, token="t0k3n"))
+    r = client.get("/session?token=t0k3n&next=//evil.example/x",
+                   follow_redirects=False)
+    assert r.headers["location"].startswith("/")
+    assert not r.headers["location"].startswith("//")

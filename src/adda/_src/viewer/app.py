@@ -7,14 +7,22 @@ lazily by every caller (``agent_runtime.py``'s ``serve_viewer()``,
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import queue
 import re
+import secrets
 import threading
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from starlette.applications import Starlette
-from starlette.responses import HTMLResponse, JSONResponse, StreamingResponse
+from starlette.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
@@ -34,6 +42,41 @@ def _run_dir(study_dir: Path, run_id: str) -> Path | None:
     if not (run_dir / "debug").is_dir():
         return None
     return run_dir
+
+
+TOKEN_COOKIE = "adda_viewer_token"
+
+
+def _check_write(request, token: str) -> JSONResponse | None:
+    """Refuse a write that did not come from a page this viewer served.
+
+    Reads stay open on the bound interface; a write changes a live run, so
+    it must carry (1) a JSON Content-Type, which a cross-origin "simple"
+    form or text/plain POST cannot set without a CORS preflight the viewer
+    never answers, (2) an Origin that is the viewer's own, and (3) the
+    per-launch token, held in an HttpOnly SameSite=Strict cookie that only
+    the printed session URL sets.
+    """
+    ctype = request.headers.get("content-type", "").split(";")[0].strip()
+    if ctype.lower() != "application/json":
+        return JSONResponse(
+            {"error": "writes require Content-Type: application/json"},
+            status_code=415)
+    origin = request.headers.get("origin")
+    if origin is not None:
+        if urlsplit(origin).netloc != request.headers.get("host", ""):
+            return JSONResponse(
+                {"error": "cross-origin write refused"}, status_code=403)
+    if request.headers.get("sec-fetch-site") == "cross-site":
+        return JSONResponse(
+            {"error": "cross-origin write refused"}, status_code=403)
+    given = request.cookies.get(TOKEN_COOKIE, "")
+    if not hmac.compare_digest(given.encode(), token.encode()):
+        return JSONResponse(
+            {"error": "read-only session: open the session URL printed at "
+                      "viewer launch to be allowed to write"},
+            status_code=403)
+    return None
 
 
 def _not_found(message: str) -> JSONResponse:
@@ -558,15 +601,21 @@ def _esc(s: str) -> str:
     )
 
 
-def create_app(study_dir: Path | str, graph=None) -> Starlette:
+def create_app(
+    study_dir: Path | str, graph=None, token: str | None = None,
+) -> Starlette:
     """*graph*: pass the study's real, already-in-memory ``Graph`` when one
     is available (``AgenticRun.serve_viewer()`` always has it — the same
     object ``self._graph_spec`` holds, no need to reconstruct anything).
     Left as ``None`` for the standalone CLI path (a separate process from
     the run itself, with no in-memory Graph to hand over), which falls back
     to ``readers.load_graph_for_study()`` instead.
+
+    *token*: the per-launch write token (random when omitted, readable as
+    ``app.state.token``). Writes are refused without it; see ``_check_write``.
     """
     study_dir = Path(study_dir)
+    token = token or secrets.token_urlsafe(24)
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
     # The Graph is the same for every run of one study — resolved once at
     # app construction, not per-request.
@@ -678,6 +727,9 @@ def create_app(study_dir: Path | str, graph=None) -> Starlette:
         })
 
     async def post_answer(request):
+        refused = _check_write(request, token)
+        if refused is not None:
+            return refused
         run_id = request.path_params["run_id"]
         run_dir = _run_dir(study_dir, run_id)
         if run_dir is None:
@@ -695,6 +747,9 @@ def create_app(study_dir: Path | str, graph=None) -> Starlette:
         return JSONResponse({"ok": True})
 
     async def post_note(request):
+        refused = _check_write(request, token)
+        if refused is not None:
+            return refused
         run_id = request.path_params["run_id"]
         run_dir = _run_dir(study_dir, run_id)
         if run_dir is None:
@@ -904,7 +959,35 @@ def create_app(study_dir: Path | str, graph=None) -> Starlette:
             request, "graph.html",
             {"run_id": run_id, "study_name": Path(study_dir).name})
 
+    async def session(request):
+        """Set the write cookie when the launch token is presented, then go
+        on to the requested page (a same-site path only)."""
+        nxt = request.query_params.get("next", "/")
+        if not nxt.startswith("/") or nxt.startswith("//"):
+            nxt = "/"
+        resp = RedirectResponse(nxt, status_code=303)
+        given = request.query_params.get("token", "")
+        if hmac.compare_digest(given.encode(), token.encode()):
+            resp.set_cookie(
+                TOKEN_COOKIE, token, httponly=True, samesite="strict",
+                path="/")
+        return resp
+
+    async def session_state(request):
+        given = request.cookies.get(TOKEN_COOKIE, "")
+        return JSONResponse({"can_write": hmac.compare_digest(
+            given.encode(), token.encode())})
+
+    async def index(request):
+        runs = readers.read_runs(study_dir)
+        if not runs:
+            return _not_found("no runs in this study yet")
+        return RedirectResponse(f"/runs/{runs[0]['run_id']}", status_code=303)
+
     routes = [
+        Route("/", index),
+        Route("/session", session),
+        Route("/api/session", session_state),
         Route("/api/runs", list_runs),
         Route("/api/runs/{run_id}/graph", get_graph),
         Route("/api/runs/{run_id}/delegations", get_delegations),
@@ -929,7 +1012,9 @@ def create_app(study_dir: Path | str, graph=None) -> Starlette:
         Route("/runs/{run_id}", graph_page),
         Mount("/static", StaticFiles(directory=_STATIC_DIR), name="static"),
     ]
-    return Starlette(routes=routes)
+    app = Starlette(routes=routes)
+    app.state.token = token
+    return app
 
 
 def run_viewer(
@@ -939,4 +1024,11 @@ def run_viewer(
     """Launch the viewer web server (blocking). Requires ``uvicorn``."""
     import uvicorn
 
-    uvicorn.run(create_app(study_dir, graph=graph), host=host, port=port)
+    app = create_app(study_dir, graph=graph)
+    shown = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+    print(
+        "adda viewer: reads are open on this interface; writes (notes, "
+        "answers) need this session URL once per browser:\n"
+        f"  http://{shown}:{port}/session?token={app.state.token}",
+        flush=True)
+    uvicorn.run(app, host=host, port=port)

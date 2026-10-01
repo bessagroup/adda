@@ -9,8 +9,12 @@ Requires the ``viewer`` optional-dependency group
 
 Options
 -------
---host HOST   Interface to bind (default: 127.0.0.1 — local-only, no auth).
+--host HOST   Interface to bind (default: 127.0.0.1 — local-only).
 --port PORT   Port to bind (default: 8765).
+
+The viewer prints a ``/session?token=...`` URL at start. Reads are open; opening
+that URL once lets the browser write (notes, answers). Without it the page is
+read-only.
 """
 from __future__ import annotations
 

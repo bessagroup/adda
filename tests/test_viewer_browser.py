@@ -171,8 +171,9 @@ def test_an_answer_typed_in_the_browser_reaches_the_run(tmp_path, page):
         run_dir, "strategizer", "Which objective should I minimise?")
     assert qid, "fixture failed to record a question"
 
-    with _LiveServer(create_app(study)) as server:
-        _open(page, server, run_id)
+    with _LiveServer(create_app(study, token="t0k3n")) as server:
+        page.goto(f"{server.url}/session?token=t0k3n&next=/runs/{run_id}")
+        page.wait_for_selector("text=strategizer", timeout=15_000)
         page.wait_for_selector("text=Which objective", timeout=15_000)
 
         box = page.locator("textarea, input[type=text]").filter(visible=True)

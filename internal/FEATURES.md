@@ -1160,7 +1160,13 @@ against the SDK's cost on calls it did price.
   `FollowUp`/`Cancelled` are never persisted) — a delegation blocked on a
   human follow-up question is indistinguishable on disk from one simply
   still running. No build step: Tailwind CDN + htmx + Alpine.js, one static
-  HTML template. Binds to `127.0.0.1`, no auth. No longer read-only: see
+  HTML template. Binds to `127.0.0.1`. Reads are open on the bound
+  interface; writes (note, answer) need a per-launch random token, set as an
+  HttpOnly SameSite=Strict cookie by the `/session?token=…` URL the viewer prints
+  at start, a same-origin `Origin`, no cross-site `Sec-Fetch-Site`, and
+  `Content-Type: application/json` (so a cross-origin `text/plain` "simple
+  request" is refused). `GET /api/session` reports `can_write`; the page shows
+  a read-only hint instead of failing silently. No longer read-only: see
   **Operator channel** below for the write path (answering a `FollowUp`,
   queueing a note, nudging a running delegation).
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,

@@ -1328,6 +1328,9 @@
                           :disabled="!nudgeDraft.trim()"
                           x-text="nudgeSent ? 'Sent' : 'Send'"></button>
                 </div>
+                <span x-show="writeError || canWrite === false"
+                      style="display:block; font-size:var(--fs-meta); color:var(--red)"
+                      x-text="writeError || readOnlyMessage()"></span>
                 <span style="font-size:var(--fs-meta); color:var(--overlay0)">
                   Delivered at its next tool call.
                 </span>
@@ -1554,6 +1557,9 @@
           <span style="font-size:var(--fs-meta); color:var(--overlay0)">
             Delivered at its next action.
           </span>
+          <span x-show="writeError || canWrite === false"
+                style="display:block; font-size:var(--fs-meta); color:var(--red)"
+                x-text="writeError || readOnlyMessage()"></span>
         </div>
       </div>
     </div>
@@ -1925,6 +1931,8 @@
         answerError: {},
         noteDraft: '',
         noteSent: false,
+        canWrite: null,
+        writeError: '',
         nudgeDraft: '',
         nudgeSent: false,
         _operatorPoll: null,
@@ -1973,6 +1981,11 @@
         _hoverHideTimer: null,
 
         init() {
+          // Writes need the per-launch session cookie; without it the server
+          // refuses them, so say so up front instead of failing per click.
+          fetch('/api/session').then(r => r.json())
+            .then(d => { this.canWrite = !!d.can_write; })
+            .catch(() => { this.canWrite = null; });
           fetch(`/api/runs/${this.runId}/graph`)
             .then(r => r.json())
             .then(spec => {
@@ -2111,6 +2124,11 @@
             body: JSON.stringify({ id: q.id, answer: text }),
           })
             .then(r => {
+              if (r.status === 403 || r.status === 415) {
+                this.canWrite = false;
+                this.answerError[q.id] = this.readOnlyMessage();
+                return;
+              }
               if (!r.ok) {
                 // 409: the run stopped waiting before this arrived. Say so
                 // and KEEP what was typed — silently clearing a long answer
@@ -2137,6 +2155,20 @@
         // Notes go to the entry node only: FollowUp routes to the operator
         // solely when the asker IS the entry node, so it is the one agent
         // in a position to hold a conversation with a human.
+        readOnlyMessage() {
+          return 'This page is read-only: open the /session?token=… URL ' +
+                 'printed when the viewer started to be allowed to write.';
+        },
+
+        writeFailed(r) {
+          if (r.status === 403 || r.status === 415) {
+            this.canWrite = false;
+            this.writeError = this.readOnlyMessage();
+          } else {
+            this.writeError = 'The note was not accepted (' + r.status + ').';
+          }
+        },
+
         canQueueNote() {
           if (!this.spec || !this.selectedNode || this.runStatus !== null) return false;
           const n = this.spec.nodes.find(x => x.name === this.selectedNode);
@@ -2162,7 +2194,8 @@
             body: JSON.stringify({ text, delegation_id: d.id }),
           })
             .then(r => {
-              if (!r.ok) return;
+              if (!r.ok) { this.writeFailed(r); return; }
+              this.writeError = '';
               this.nudgeDraft = '';
               this.nudgeSent = true;
               setTimeout(() => { this.nudgeSent = false; }, 1600);
@@ -2179,7 +2212,8 @@
             body: JSON.stringify({ text }),
           })
             .then(r => {
-              if (!r.ok) return;
+              if (!r.ok) { this.writeFailed(r); return; }
+              this.writeError = '';
               this.noteDraft = '';
               this.noteSent = true;
               setTimeout(() => { this.noteSent = false; }, 1600);
