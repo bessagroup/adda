@@ -1105,3 +1105,15 @@ def test_graph_spec_json_survives_a_corrupt_model_record(tmp_path):
 
     spec = graph_spec_json(graph, tmp_path, run_dir)
     assert spec["nodes"][0]["model"] == "(backend default)"
+
+
+def test_hypotheses_and_milestones_are_in_numeric_id_order(tmp_path):
+    """Plain string order put H10 and H11 before H2; ids are read as numbers."""
+    run = tmp_path / "runs" / "r1"
+    ids = ["H1", "H10", "H11", "H2", "H3", "H9"]
+    for name, reader in (("hypotheses.json", read_hypotheses),
+                         ("milestones.json", read_milestones)):
+        (_notes(run) / name).write_text(
+            json.dumps({i: {"id": i} for i in ids}), encoding="utf-8")
+        assert [x["id"] for x in reader(run)] == [
+            "H1", "H2", "H3", "H9", "H10", "H11"]

@@ -437,6 +437,12 @@ def _read_json_object(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _natural_key(item: tuple[str, Any]) -> list[Any]:
+    """Sort key putting H2 before H10: digit runs compare as numbers."""
+    return [int(t) if t.isdigit() else t
+            for t in re.split(r"(\d+)", str(item[0]))]
+
+
 def read_hypotheses(run_dir: Path | str) -> list[dict[str, Any]]:
     """Hypotheses with their CURRENT status already resolved.
 
@@ -451,7 +457,7 @@ def read_hypotheses(run_dir: Path | str) -> list[dict[str, Any]]:
     """
     path = Path(run_dir) / "debug" / _NOTES_DIR / "hypotheses.json"
     out = []
-    for hid, h in sorted(_read_json_object(path).items()):
+    for hid, h in sorted(_read_json_object(path).items(), key=_natural_key):
         if not isinstance(h, dict):
             continue
         log = [e for e in h.get("status_log") or [] if isinstance(e, dict)]
@@ -484,7 +490,7 @@ def read_milestones(run_dir: Path | str) -> list[dict[str, Any]]:
     """
     path = Path(run_dir) / "debug" / _NOTES_DIR / "milestones.json"
     out = []
-    for mid, m in sorted(_read_json_object(path).items()):
+    for mid, m in sorted(_read_json_object(path).items(), key=_natural_key):
         if not isinstance(m, dict):
             continue
         out.append({
