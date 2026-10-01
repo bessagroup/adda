@@ -1166,7 +1166,9 @@ against the SDK's cost on calls it did price.
   at start, a same-origin `Origin`, no cross-site `Sec-Fetch-Site`, and
   `Content-Type: application/json` (so a cross-origin `text/plain` "simple
   request" is refused). `GET /api/session` reports `can_write`; the page shows
-  a read-only hint instead of failing silently. No longer read-only: see
+  a read-only hint instead of failing silently.
+  Markdown (notebook, Brief, reports) renders `$…$` / `$$…$$` math with KaTeX
+  (cdnjs), lifted out before parsing so `*` and `_` in a formula are not emphasis. No longer read-only: see
   **Operator channel** below for the write path (answering a `FollowUp`,
   queueing a note, nudging a running delegation).
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,

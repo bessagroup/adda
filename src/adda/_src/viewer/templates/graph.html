@@ -6,6 +6,8 @@
   <title>adda — {{ run_id }}</title>
   <script defer src="https://unpkg.com/alpinejs@3.14.3/dist/cdn.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.js"></script>
   <style>
     /* Bundled locally (viewer/static/fonts, IBM Plex, SIL OFL): body copy is
        Plex Sans, machine text is Plex Mono. Chosen as one family so the two
@@ -2796,10 +2798,53 @@
         //
         // Parsing happens in an inert DOMParser document, so nothing loads
         // or executes even while being cleaned.
+        //
+        // Math ($…$, $$…$$) is lifted out BEFORE parsing, because markdown
+        // reads the `*` and `_` of a formula as emphasis ("P_max*1000/(pi*D1^2"
+        // came out as "P_max1000/(piD1^2"). Code spans and fences are left
+        // alone. The spans come back after sanitising, rendered by KaTeX as
+        // HTML-only output (no MathML, which the sanitiser bans); if KaTeX
+        // did not load, or rejects the formula, the source shows as text.
+        _liftMath(text) {
+          const spans = [];
+          const keep = (tex, display) => {
+            spans.push({ tex, display });
+            return `ADDAMATH${spans.length - 1}X`;
+          };
+          const parts = String(text).split(/(```[\s\S]*?```|`[^`\n]*`)/g);
+          const out = parts.map((seg, i) => {
+            if (i % 2 === 1) return seg;
+            return seg
+              .replace(/\$\$([\s\S]+?)\$\$/g, (_, t) => keep(t, true))
+              .replace(/\$(?=\S)([^$\n]*?\S)\$(?!\d)/g, (_, t) => keep(t, false));
+          });
+          return { text: out.join(''), spans };
+        },
+
+        _restoreMath(html, spans) {
+          const esc = t => t.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                            .replace(/>/g, '&gt;');
+          return html.replace(/ADDAMATH(\d+)X/g, (m, n) => {
+            const sp = spans[+n];
+            if (!sp) return m;
+            try {
+              if (typeof katex === 'undefined') throw new Error('no katex');
+              return katex.renderToString(sp.tex, {
+                displayMode: sp.display, output: 'html',
+                throwOnError: true, trust: false,
+              });
+            } catch (e) {
+              return `<code>${sp.display ? '$$' : '$'}${esc(sp.tex)}` +
+                     `${sp.display ? '$$' : '$'}</code>`;
+            }
+          });
+        },
+
         renderMarkdown(text) {
           if (!text) return '';
+          const lifted = this._liftMath(text);
           const doc = new DOMParser().parseFromString(
-            marked.parse(String(text)), 'text/html');
+            marked.parse(lifted.text), 'text/html');
 
           const BANNED = new Set([
             'SCRIPT', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'STYLE',
@@ -2825,7 +2870,7 @@
               }
             }
           }
-          return doc.body.innerHTML;
+          return this._restoreMath(doc.body.innerHTML, lifted.spans);
         },
 
         // ---- graph edges --------------------------------------------------

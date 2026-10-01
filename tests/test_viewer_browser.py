@@ -247,3 +247,30 @@ def test_the_viewer_needs_the_internet_to_work(tmp_path, page):
     assert "strategizer" not in body, (
         "the viewer now renders without its CDN scripts -- if they were "
         "vendored, delete this test and drop the route blocking above")
+
+
+# --- markdown with math ------------------------------------------------------
+
+def _render(page, text: str) -> str:
+    return page.evaluate(
+        "t => Alpine.$data(document.querySelector('[x-data]')).renderMarkdown(t)",
+        text)
+
+
+def test_a_formula_is_not_eaten_as_markdown_emphasis(tmp_path, page):
+    """`*` and `_` inside $…$ are formula, not emphasis: the Result tab used to
+    show "P_max*1000/(pi*D1^2" as "P_max1000/(piD1^2"."""
+    study, run_id = _run_with_delegations(tmp_path, [])
+    with _LiveServer(create_app(study)) as server:
+        _open(page, server, run_id)
+        html = _render(page, "so $P_max*1000/(pi*D1^2/4) + a*b$ holds, *really*")
+        assert "<em>really</em>" in html          # real emphasis still works
+        assert "<em>" not in html.replace("<em>really</em>", "")
+        text = page.evaluate(
+            "h => new DOMParser().parseFromString(h, 'text/html').body.textContent",
+            html)
+        assert "1000" in text and "D1" in text and "a∗b" in text and "pi∗D1" in text
+        # a currency amount is not a formula
+        assert "$5" in _render(page, "costs $5 and $6 each")
+        # code spans are left alone
+        assert "$a*b$" in _render(page, "run `$a*b$` now")
