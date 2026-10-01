@@ -175,6 +175,7 @@
     .dot.failed { background: var(--red); }
     .dot.queued { background: var(--overlay1); }
     .dot.review { background: var(--sapphire); }
+    .dot.revise { background: var(--yellow); }
     .dot.running {
       width: 7px; height: 7px;
       background: var(--text);
@@ -331,7 +332,7 @@
     }
     .timeline-head { display: flex; align-items: baseline; gap: 12px; }
     .tl-range { font-size: var(--fs-meta); color: var(--subtext0); }
-    .vtl-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 0 28px; }
+    .vtl-scroll { flex: 1; min-height: 0; overflow: auto; padding: 12px 0 28px; }
     .vtl { position: relative; margin-left: 52px; }
     .vtl-tick {
       position: absolute; left: -52px; right: 0; height: 0;
@@ -356,16 +357,26 @@
       display: flex; flex-direction: column; gap: 3px;
       min-width: 0;
     }
+    .vcard { container-type: inline-size; }
+    @container (max-width: 125px) {
+      .vcard .chip { padding: 0 4px; }
+      .vcard .chip > span:not(.chip-glyph) { display: none; }
+      .vcard .vcard-role, .vcard .hchip { display: none; }
+    }
     .vcard:hover, .vcard.selected { background: var(--surface0); }
     .vcard.selected { border-color: var(--surface2); }
     .vcard.dim { opacity: .35; }
     .vcard.hl { outline: 2px solid var(--id1); outline-offset: -1px; }
     .vcard:focus-visible, .vgate:focus-visible { outline: 2px solid var(--id1); }
-    .vcard-top { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+    .vcard-top { display: flex; align-items: baseline; gap: 6px; min-width: 0; justify-content: space-between; }
     .vcard-id { font-size: 12px; flex: none; }
-    .vcard-role { font-size: var(--fs-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .vcard-intent { font-size: var(--fs-meta); color: var(--subtext1); line-height: 1.35; overflow: hidden; }
-    .vcard-foot { display: flex; gap: 6px; align-items: baseline; font-size: var(--fs-meta); color: var(--subtext0); flex-wrap: wrap; }
+    .vcard-sub { display: flex; gap: 8px; align-items: baseline; font-size: var(--fs-meta); min-width: 0; }
+    .vcard-role { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .vcard-dur { color: var(--subtext0); flex: none; }
+    .vcard-intent {
+      font-size: var(--fs-meta); color: var(--subtext1); line-height: 1.35;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
     .hchip {
       font-size: 11px; padding: 0 5px; border-radius: 3px;
       border: 1px solid var(--surface2); color: var(--subtext1);
@@ -379,6 +390,7 @@
     .chip.running { color: var(--green); }
     .chip.done { color: var(--subtext0); }
     .chip.failed { color: var(--red); }
+    .chip.revise { color: var(--yellow); }
     .chip.review { color: var(--sapphire); }
     .chip.queued { color: var(--overlay1); border-style: dashed; }
     .vtl-queued {
@@ -393,6 +405,7 @@
       cursor: pointer; z-index: 3;
     }
     .vgate.failed { border-top-color: var(--red); }
+    .vgate.revise { border-top-color: var(--yellow); }
     .vgate-label {
       position: absolute; right: 0; top: -1px;
       font-size: var(--fs-meta);
@@ -455,6 +468,7 @@
     .pill.failed { color: var(--red); }
     .pill.queued { color: var(--overlay1); }
     .pill.review { color: var(--sapphire); }
+    .pill.revise { color: var(--yellow); }
 
     /* ---- ledger -------------------------------------------------------- */
     .ledger {
@@ -923,7 +937,8 @@
       .numbers { padding-left: 0; border-left: none; flex-wrap: wrap; gap: 10px 18px; }
       .agent-strip { padding-left: 0; border-left: none; width: 100%; height: auto; }
       .tabs { padding: 0 12px; overflow-x: auto; }
-      .tab { flex: none; }
+      .tab { flex: none; padding: 0 9px; font-size: 13px; }
+      .tabs { gap: 0; }
       main { overflow-y: auto; }
       .view { flex-direction: column; min-height: min-content; }
       .overview { flex-direction: column; flex: none; }
@@ -1300,7 +1315,7 @@
                work sits side by side instead of being drawn on top of itself.
                Gate reviews are run-level events and cross every column. -->
           <div class="vtl-scroll" x-show="rows().length > 0">
-            <div class="vtl" :style="`height:${vtl().h}px`">
+            <div class="vtl" :style="`height:${vtl().h}px; min-width:${52 + vtl().cols * 92}px`">
               <template x-for="t in vtl().ticks" :key="t.y">
                 <div class="vtl-tick" :style="`top:${t.y}px`">
                   <span class="m" x-text="t.label"></span>
@@ -1326,20 +1341,20 @@
                        @mouseenter="hoverHyp = c.hyps" @mouseleave="hoverHyp = []">
                     <div class="vcard-top">
                       <span class="m vcard-id" x-text="c.id"></span>
-                      <span class="vcard-role" :style="`color:${identityColorFor(c.node)}`"
-                            x-text="c.node"></span>
                       <span class="chip" :class="c.key">
                         <span class="chip-glyph" x-text="c.glyph"></span>
                         <span x-text="c.label"></span>
                       </span>
                     </div>
-                    <div class="vcard-intent" x-show="c.height >= 62" x-text="c.intent"></div>
-                    <div class="vcard-foot" x-show="c.height >= 84">
-                      <span class="m" x-text="c.dur"></span>
+                    <div class="vcard-sub">
+                      <span class="vcard-role" :style="`color:${identityColorFor(c.node)}`"
+                            x-text="c.node"></span>
+                      <span class="m vcard-dur" x-text="c.dur"></span>
                       <template x-for="h in c.hyps" :key="h">
                         <span class="m hchip" x-text="h"></span>
                       </template>
                     </div>
+                    <div class="vcard-intent" x-text="c.intent"></div>
                   </div>
                 </template>
               </div>
@@ -1378,7 +1393,7 @@
         <div class="deleg">
           <template x-if="!currentDelegation()">
             <div class="deleg-body">
-              <p class="empty">Pick a delegation above.</p>
+              <p class="empty">No delegation yet.</p>
             </div>
           </template>
 
@@ -2428,7 +2443,7 @@
           const s = (row.status || '').toUpperCase();
           if (s.startsWith('GATE:')) {
             const o = this.gateOutcome(row);
-            return { key: o === 'passed' ? 'done' : 'failed',
+            return { key: this.verdictKey(o),
                      label: `gate ${o}`,
                      detail: `Reproduction/critic gate: ${o}.` };
           }
@@ -2716,9 +2731,8 @@
           const empty = { h: 0, cols: 0, cards: [], queued: [], gates: [], ticks: [] };
           const s = this._span();
           if (!s || !this.spec) return empty;
-          const MIN = 46;
-          const h = Math.round(Math.min(9000, Math.max(640, (s.dur / 60000) * 1.5)));
-          const k = h / s.dur;
+          const MIN = 80;
+          const k = 1.5 / 60000;                       // px per ms: 1.5 px/min, linear
           const y = t => Math.round((t - s.t0) * k);
           const isGate = d => String(d.status || '').toUpperCase().startsWith('GATE:');
           const items = this.rows().filter(d => !isGate(d))
@@ -2756,12 +2770,12 @@
                             left, width,
                             title: `${d.id} queued ${this.humanDur(p.real - p.disp)}` });
             }
-            const glyph = { running: '●', queued: '◐', done: '✓',
+            const glyph = { running: '●', queued: '◐', done: '✓', revise: '↻',
                             failed: '✕', review: '◇' }[life.key] || '•';
             cards.push({
               id: d.id, node: d.to_node, key: life.key, label: life.label,
               glyph, left, width, top: p.cardTop, height: p.bottom - p.cardTop,
-              intent: this.firstClause(d.task),
+              intent: this.firstClause(d.task) || '(no task text)',
               hyps: d.hypothesis_ids || [],
               dur: p.real === null ? `queued ${this.humanDur(this.now - p.disp)}`
                 : this.humanDur(Math.max(0, p.end - p.real)),
@@ -2771,9 +2785,9 @@
           const gates = this.rows().filter(isGate).map(d => {
             const t = Date.parse(d.completed_at || d.started_at);
             const o = this.gateOutcome(d);
-            return { id: d.id, y: y(isNaN(t) ? s.t0 : t), label: o,
-                     key: o === 'passed' ? 'done' : 'failed',
-                     glyph: o === 'passed' ? '✓' : '✕',
+            const key = this.verdictKey(o);
+            return { id: d.id, y: y(isNaN(t) ? s.t0 : t), label: o, key,
+                     glyph: this.verdictGlyph(key),
                      title: `${d.id} · gate ${o}` };
           });
           const steps = [1, 5, 10, 15, 30, 60, 120, 360, 720];
@@ -2784,6 +2798,7 @@
             ticks.push({ y: Math.round(m * 60000 * k),
                          label: hh ? `${hh}h${mm ? ' ' + mm + 'm' : ''}` : `${mm}m` });
           }
+          const h = Math.round(Math.max(s.dur * k, ...cards.map(c => c.top + c.height)) + 8);
           return { h, cols: n, cards, queued, gates, ticks };
         },
 
@@ -2823,9 +2838,15 @@
         pct(p) { return Math.round(Math.max(0, Math.min(1, Number(p) || 0)) * 100); },
         fmtP(p) { return p === null || p === undefined ? '—' : Number(p).toFixed(2); },
 
+        // One vocabulary for a critic verdict: pass / revise / reject.
+        verdictKey(o) {
+          return o === 'passed' ? 'done' : o === 'revise' ? 'revise' : 'failed';
+        },
+        verdictGlyph(key) { return { done: '✓', revise: '↻', failed: '✕' }[key]; },
+
         cardClass(c) {
           const cls = [c.key];
-          if (c.id === this.selectedDelegation) cls.push('selected');
+          if (c.id === this.effectiveDelegationId()) cls.push('selected');
           if (this.hoverHyp.length) {
             cls.push(c.hyps.some(h => this.hoverHyp.includes(h)) ? 'hl' : 'dim');
           }
@@ -2872,8 +2893,20 @@
         },
 
         selectDelegation(id) { this.selectedDelegation = id; },
+        // Until the reader picks one, the pane shows the most recently
+        // dispatched real delegation, so it is never an empty canvas.
+        effectiveDelegationId() {
+          if (this.selectedDelegation && this.delegations[this.selectedDelegation]) {
+            return this.selectedDelegation;
+          }
+          const real = this.rows().filter(d =>
+            !String(d.status || '').toUpperCase().startsWith('GATE:'));
+          real.sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at)
+            || String(a.id).localeCompare(String(b.id)));
+          return real.length ? real[real.length - 1].id : null;
+        },
         currentDelegation() {
-          return this.delegations[this.selectedDelegation] || null;
+          return this.delegations[this.effectiveDelegationId()] || null;
         },
 
         identityColorFor(name) {

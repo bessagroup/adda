@@ -292,11 +292,11 @@ def test_overlapping_delegations_get_their_own_columns(tmp_path, page):
          "started_at": "2026-09-17T12:01:00+00:00",
          "completed_at": "2026-09-17T12:06:00+00:00", "hypothesis_ids": ["H1"]}
     c = {**_delegation("D003", "implementer"),
-         "started_at": "2026-09-17T12:20:00+00:00",
-         "completed_at": "2026-09-17T12:25:00+00:00"}
+         "started_at": "2026-09-17T13:20:00+00:00",
+         "completed_at": "2026-09-17T13:25:00+00:00"}
     gate = {**_delegation("GATE-1", "critic", "GATE:PASS"),
-            "started_at": "2026-09-17T12:26:00+00:00",
-            "completed_at": "2026-09-17T12:27:00+00:00"}
+            "started_at": "2026-09-17T13:26:00+00:00",
+            "completed_at": "2026-09-17T13:27:00+00:00"}
     study, run_id = _run_with_delegations(tmp_path, [a, b, c, gate])
     with _LiveServer(create_app(study)) as server:
         _open(page, server, run_id)
@@ -309,6 +309,24 @@ def test_overlapping_delegations_get_their_own_columns(tmp_path, page):
         assert [g["id"] for g in tl["gates"]] == ["GATE-1"]
         assert tl["gates"][0]["label"] == "passed"
         assert tl["gates"][0]["y"] > cards["D003"]["top"]
+
+
+def test_revise_and_reject_gates_are_told_apart_and_a_delegation_is_open_by_default(tmp_path, page):
+    a = _delegation("D001", "implementer")
+    rev = {**_delegation("GATE-1", "critic", "GATE:REVISE"),
+           "started_at": "2026-09-17T12:30:00+00:00",
+           "completed_at": "2026-09-17T12:31:00+00:00"}
+    rej = {**_delegation("GATE-2", "critic", "GATE:REJECT"),
+           "started_at": "2026-09-17T12:40:00+00:00",
+           "completed_at": "2026-09-17T12:41:00+00:00"}
+    study, run_id = _run_with_delegations(tmp_path, [a, rev, rej])
+    with _LiveServer(create_app(study)) as server:
+        _open(page, server, run_id)
+        tl = _timeline(page)
+        assert [g["label"] for g in tl["gates"]] == ["revise", "reject"]
+        assert page.locator(".vgate.revise").count() == 1
+        assert page.locator(".vgate.failed").count() == 1
+        assert "Pick a delegation" not in page.content()
 
 
 def test_a_queued_delegation_is_a_hatched_wait_before_its_card(tmp_path, page):
