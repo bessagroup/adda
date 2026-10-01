@@ -1206,3 +1206,4 @@ def test_read_trajectory_returns_columns_with_a_kind_and_never_ranks(tmp_path):
     assert st["columns"]["sigma"] == {"kind": "numeric", "values": [5.0, 3.0, None]}
     assert st["columns"]["feasible"] == {"kind": "binary", "values": [1.0, 0.0, 1.0]}
     assert "label" not in st["columns"] and "_ts" not in st["columns"]
+    assert t["declared_outputs"] == []

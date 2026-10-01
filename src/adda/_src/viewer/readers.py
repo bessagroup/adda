@@ -595,6 +595,10 @@ def _oracle_stores(run_dir: Path) -> tuple[dict[str, Any], Path, list[tuple[str 
     cfg = _read_json_object(run_dir / "debug" / "run_config.json")
     base = cfg.get("store_dir")
     base_path = Path(base) if base else run_dir / _DATA_DIR
+    # A run copied off the machine it ran on keeps the absolute path it was
+    # configured with; the store that travelled with the run is the evidence.
+    if not base_path.is_dir() and (run_dir / _DATA_DIR).is_dir():
+        base_path = run_dir / _DATA_DIR
 
     found: list[tuple[str | None, Path]] = []
     if (base_path / _DATA_DIR).is_dir():
@@ -674,7 +678,14 @@ def read_trajectory(run_dir: Path | str) -> dict[str, Any]:
             "status": [r[1] if len(r) > 1 else "" for r in job_rows][:len(rows)],
             "columns": cols,
         })
-    return {"store_found": base_path.is_dir(), "stores": stores}
+    declared: list[str] = []
+    for src in [cfg, *(cfg.get("oracles") or {}).values()]:
+        names_ = src.get("evaluator_output_names") if isinstance(src, dict) else None
+        for n in names_ or []:
+            if isinstance(n, str) and n not in declared:
+                declared.append(n)
+    return {"store_found": base_path.is_dir(), "declared_outputs": declared,
+            "stores": stores}
 
 
 def read_oracle(run_dir: Path | str) -> dict[str, Any]:

@@ -422,4 +422,40 @@ def test_the_oracle_tab_draws_best_so_far_for_the_chosen_objective(tmp_path, pag
         page.wait_for_selector(".traj-svg", timeout=10_000)
         assert page.locator(".traj-ok").count() == 2
         assert page.locator(".traj-no").count() == 1
-        assert "best 3 at #2" in page.locator(".traj-sum").inner_text()
+        assert "best 5 in canonical store at #0" in page.locator(".traj-sum").inner_text()
+        page.select_option("select[aria-label='direction']", "min")
+        assert "best 3 in canonical store at #2" in page.locator(".traj-sum").inner_text()
+
+
+def test_the_oracle_chart_overlays_namespaces_and_marks_salvaged_rows(tmp_path, page):
+    study, run_id = _run_with_delegations(tmp_path, [_delegation("D001", "implementer")])
+    exp = study / "runs" / run_id / "experiment_data"
+    (study / "runs" / run_id / "debug" / "run_config.json").write_text(
+        json.dumps({"store_dir": str(exp), "oracles": {"freeform": {
+            "evaluator_output_names": ["sigma_peak", "feasible", "salvaged"]}}}),
+        encoding="utf-8")
+    for ns, rows in (("experiment_data", "0,1.0,True,0,D001,2026-09-17T12:00:00+00:00\n"
+                                          "1,4.0,False,0,D001,2026-09-17T12:01:00+00:00\n"),
+                     ("freeform", "0,2.0,True,1,D001,2026-09-17T12:02:00+00:00\n"
+                                  "1,6.0,True,0,D001,2026-09-17T12:03:00+00:00\n")):
+        data = exp / ns if ns == "experiment_data" else exp / ns / "experiment_data"
+        if ns == "experiment_data":
+            data = exp / "experiment_data"
+        data.mkdir(parents=True, exist_ok=True)
+        (data / "domain.json").write_text('{"input_space": {"x": {}}}', encoding="utf-8")
+        (data / "input.csv").write_text(",x\n0,1\n1,2\n", encoding="utf-8")
+        (data / "output.csv").write_text(
+            ",sigma_peak,feasible,salvaged,_delegation_id,_ts\n" + rows, encoding="utf-8")
+        (data / "jobs.csv").write_text(",0\n0,FINISHED\n1,FINISHED\n", encoding="utf-8")
+    with _LiveServer(create_app(study)) as server:
+        _open(page, server, run_id)
+        page.click("text=Oracle")
+        page.wait_for_selector(".traj-svg", timeout=10_000)
+        assert page.locator("select[aria-label='objective column']").input_value() == "sigma_peak"
+        assert page.locator("select[aria-label='direction']").input_value() == "max"
+        assert page.locator("path.traj-ok, path.traj-no").count() == 1  # one salvaged diamond
+        assert page.locator("circle.traj-ok, circle.traj-no").count() == 3
+        assert page.locator(".traj-best").count() == 2  # a line per namespace
+        legend = page.locator(".traj-legend").inner_text()
+        assert "freeform" in legend and "canonical store" in legend
+        assert "best 6 in freeform" in page.locator(".traj-sum").inner_text()

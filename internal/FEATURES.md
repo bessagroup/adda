@@ -1178,11 +1178,6 @@ against the SDK's cost on calls it did price.
   between a card and the hypotheses it carries (`hypothesis_ids`). The ledger shows
   prior to posterior, the falsification criterion, the whole status history
   (a verdict retracted to OPEN is visible) and open/closed/reopened filters. Header
-  The Oracle tab draws a best-so-far chart per store (`/api/runs/<id>/trajectory`,
-  read from output.csv + `_ts`): the reader returns each numeric/binary output column and
-  ranks nothing; the reader of the page picks the objective, min/max, the 0/1 feasible
-  column and log-y. Feasible rows are filled, others hollow, the step line is the best
-  feasible so far.
   Header
   vitals add wall against the budget with 1x/1.5x/2x marks, awake worker slots
   N/max with the queue length, and cost as a lower bound ("≥$") when any call
@@ -1190,6 +1185,14 @@ against the SDK's cost on calls it did price.
   Narrow screens stack the panes instead of overlaying them. No longer read-only: see
   **Operator channel** below for the write path (answering a `FollowUp`,
   queueing a note, nudging a running delegation).
+  The Oracle tab draws one best-so-far chart over every store (`/api/runs/<id>/trajectory`,
+  read from output.csv `_ts` plus run_config's declared output names). The reader returns each
+  numeric/binary output column and ranks nothing. The default objective is the study's first
+  declared output; min/max, the 0/1 feasible column, the 0/1 salvaged column ("count salvaged
+  rows" toggles whether they enter the best) and log-y are the page reader's choice, with
+  `feasible`/`salvaged` pre-picked by name. One colour per namespace, circle = row, diamond =
+  salvaged, filled = feasible, hollow = not; a run copied off its machine falls back to the
+  store beside it. No reference line: no record carries a machine-readable target.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);
   `agent_runtime.py`'s `AgenticRun.serve_viewer`; `pyproject.toml`'s `viewer`

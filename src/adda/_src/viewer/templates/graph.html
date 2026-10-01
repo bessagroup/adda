@@ -437,9 +437,12 @@
     .traj-svg { width: 100%; height: auto; max-width: 820px; }
     .traj-grid { stroke: var(--surface0); stroke-width: 1; }
     .traj-ax { fill: var(--subtext0); font-size: 11px; font-family: var(--mono); }
-    .traj-ok { fill: var(--green); opacity: .8; }
-    .traj-no { fill: none; stroke: var(--overlay1); stroke-width: 1; }
-    .traj-best { fill: none; stroke: var(--id1); stroke-width: 2; }
+    .traj-ok { fill: var(--c); opacity: .85; }
+    .traj-no { fill: none; stroke: var(--c); stroke-width: 1; opacity: .7; }
+    .traj-best { fill: none; stroke: var(--c); stroke-width: 2; }
+    .traj-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: var(--fs-meta); color: var(--subtext0); }
+    .traj-key { display: inline-flex; align-items: center; gap: 6px; }
+    .traj-key i { width: 10px; height: 10px; border-radius: 2px; flex: none; }
     .traj-star { fill: var(--base); stroke: var(--id1); stroke-width: 2.5; }
     .deleg { flex: 1; min-height: 0; display: flex; flex-direction: column; }
     .deleg-head {
@@ -1873,6 +1876,38 @@
                     x-text="oracle.store_dir"></span>
             </div>
 
+            <template x-if="trajectory && trajectory.stores.some(t => Object.keys(t.columns).length)">
+              <div class="traj">
+                <div class="traj-ctl">
+                  <span class="label">Best so far</span>
+                  <select x-model="trajSel.obj" aria-label="objective column">
+                    <template x-for="c in trajAllColumns()" :key="c">
+                      <option :value="c" :selected="c === trajSel.obj" x-text="c"></option>
+                    </template>
+                  </select>
+                  <select x-model="trajSel.dir" aria-label="direction">
+                    <option value="min">minimise</option>
+                    <option value="max">maximise</option>
+                  </select>
+                  <select x-model="trajSel.feas" aria-label="feasibility column">
+                    <option value="">all rows count</option>
+                    <template x-for="c in trajAllColumns('binary')" :key="c">
+                      <option :value="c" :selected="c === trajSel.feas" x-text="'feasible: ' + c"></option>
+                    </template>
+                  </select>
+                  <select x-model="trajSel.salv" aria-label="salvaged column">
+                    <option value="">no salvaged marker</option>
+                    <template x-for="c in trajAllColumns('binary')" :key="c">
+                      <option :value="c" :selected="c === trajSel.salv" x-text="'salvaged: ' + c"></option>
+                    </template>
+                  </select>
+                  <label class="traj-log" x-show="trajSel.salv"><input type="checkbox" x-model="trajSel.countSalv"> salvaged rows count</label>
+                  <label class="traj-log"><input type="checkbox" x-model="trajSel.log"> log y</label>
+                </div>
+                <div x-html="trajChart()"></div>
+              </div>
+            </template>
+
             <template x-for="st in oracle.stores" :key="st.path">
               <div style="display:flex; flex-direction:column; gap:12px">
                 <div style="display:flex; align-items:baseline; gap:10px">
@@ -1891,31 +1926,6 @@
                           padding:3px 8px" x-text="v"></span>
                   </template>
                 </div>
-
-                <template x-if="trajStore(st) && Object.keys(trajStore(st).columns).length">
-                  <div class="traj">
-                    <div class="traj-ctl">
-                      <span class="label">Best so far</span>
-                      <select x-model="trajSelFor(st).obj" aria-label="objective column">
-                        <template x-for="c in trajColumns(st, 'numeric').concat(trajColumns(st, 'binary'))" :key="c">
-                          <option :value="c" x-text="c"></option>
-                        </template>
-                      </select>
-                      <select x-model="trajSelFor(st).dir" aria-label="direction">
-                        <option value="min">minimise</option>
-                        <option value="max">maximise</option>
-                      </select>
-                      <select x-model="trajSelFor(st).feas" aria-label="feasibility column">
-                        <option value="">all rows count</option>
-                        <template x-for="c in trajColumns(st, 'binary')" :key="c">
-                          <option :value="c" x-text="'feasible: ' + c"></option>
-                        </template>
-                      </select>
-                      <label class="traj-log"><input type="checkbox" x-model="trajSelFor(st).log"> log y</label>
-                    </div>
-                    <div x-html="trajChart(st)"></div>
-                  </div>
-                </template>
 
                 <p class="empty" x-show="!st.evals.length"
                    style="font-size:var(--fs-ui)">Nothing evaluated yet.</p>
@@ -2145,7 +2155,7 @@
         vitals: null,
         oracle: null,
         trajectory: null,
-        trajSel: {},
+        trajSel: { obj: '' },
         _trajCache: {},
         monitor: [],
         evalOpen: null,
@@ -2301,96 +2311,129 @@
             .then(r => r.ok ? r.json() : null)
             .then(t => {
               if (!t) return;
-              for (const st of t.stores) {
-                if (this.trajSel[st.path]) continue;
-                const cols = Object.entries(st.columns);
-                const obj = cols.find(([, c]) => c.kind === 'numeric');
-                const feas = cols.find(([n, c]) => c.kind === 'binary' && /feas/i.test(n));
-                this.trajSel[st.path] = {
-                  obj: obj ? obj[0] : '', dir: 'min',
-                  feas: feas ? feas[0] : '', log: false,
-                };
-              }
               this.trajectory = t;
+              if (this.trajSel.obj) return;
+              const kinds = this.trajKinds(), names = Object.keys(kinds);
+              // The study's own first declared output, else the first numeric column.
+              const obj = (t.declared_outputs || []).find(n => kinds[n] === 'numeric')
+                || names.find(n => kinds[n] === 'numeric') || names[0] || '';
+              const bin = names.filter(n => kinds[n] === 'binary');
+              this.trajSel = {
+                obj, dir: 'max',
+                feas: bin.find(n => /feas/i.test(n)) || '',
+                salv: bin.find(n => /salvag/i.test(n)) || '',
+                countSalv: true, log: false,
+              };
             })
             .catch(() => {});
         },
 
-        trajStore(st) {
-          return this.trajectory
-            ? this.trajectory.stores.find(x => x.path === st.path) || null : null;
+        trajKinds() {
+          const k = {};
+          for (const st of (this.trajectory ? this.trajectory.stores : []))
+            for (const [n, c] of Object.entries(st.columns))
+              k[n] = (k[n] === 'numeric' || c.kind === 'numeric') ? 'numeric' : 'binary';
+          return k;
         },
-        trajColumns(st, kind) {
-          const t = this.trajStore(st);
-          return t ? Object.entries(t.columns).filter(([, c]) => c.kind === kind).map(([n]) => n) : [];
+        trajAllColumns(kind) {
+          const k = this.trajKinds();
+          return Object.keys(k).filter(n => !kind || k[n] === kind);
         },
-        trajSelFor(st) { return this.trajSel[st.path] || { obj: '', dir: 'min', feas: '', log: false }; },
+        trajColor(i) { return ['var(--id1)', 'var(--peach)', 'var(--id3)', 'var(--sapphire)', 'var(--id4)', 'var(--maroon)'][i % 6]; },
 
-        // Best-so-far of one output against wall time, as an SVG string
-        // (a <template> inside <svg> is not a template to the HTML parser).
-        trajChart(st) {
-          const t = this.trajStore(st), sel = this.trajSel[st.path];
-          if (!t || !sel || !t.columns[sel.obj]) return '';
-          const ck = [st.path, t.n, sel.obj, sel.dir, sel.feas, sel.log].join('|');
+        // One best-so-far line per store (namespace) against wall time, as an
+        // SVG string (a <template> inside <svg> is not a template to the
+        // HTML parser). Shape says what a row is: circle = ordinary,
+        // diamond = salvaged; filled = feasible, hollow = not.
+        trajChart() {
+          const T0 = this.trajectory, sel = this.trajSel;
+          if (!T0 || !sel.obj) return '';
+          const stores = T0.stores.map((t, k) => ({ t, k })).filter(({ t }) => t.columns[sel.obj]);
+          if (!stores.length) return '';
+          const ck = [stores.map(({ t }) => t.path + ':' + t.n).join(','), sel.obj, sel.dir, sel.feas, sel.salv, sel.countSalv, sel.log].join('|');
           if (this._trajCache[ck]) return this._trajCache[ck];
-          const obj = t.columns[sel.obj].values;
-          const feas = sel.feas && t.columns[sel.feas] ? t.columns[sel.feas].values : null;
-          const stamps = t.ts.map(x => Date.parse(x));
-          const byTime = stamps.some(x => !isNaN(x)) && stamps.every((x, i) => !isNaN(x) || obj[i] === null);
-          const xs = byTime ? stamps : stamps.map((_, i) => i);
-          const idx = obj.map((v, i) => i).filter(i => obj[i] !== null && !isNaN(xs[i]));
-          if (!idx.length) return '';
-          const sign = sel.dir === 'min' ? 1 : -1;
-          const logy = sel.log && idx.every(i => obj[i] > 0);
-          const fy = v => logy ? Math.log10(v) : v;
-          const x0 = Math.min(...idx.map(i => xs[i])), x1 = Math.max(...idx.map(i => xs[i]), x0 + 1);
-          const vs = idx.map(i => fy(obj[i]));
-          let y0 = Math.min(...vs), y1 = Math.max(...vs);
-          if (y1 - y0 < 1e-12) { y0 -= 1; y1 += 1; }
-          const W = 720, H = 250, L = 58, R = 14, T = 12, B = 28;
-          const px = x => L + (x - x0) / (x1 - x0) * (W - L - R);
-          const py = v => T + (1 - (fy(v) - y0) / (y1 - y0)) * (H - T - B);
+          const esc = x => String(x).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
           const num = v => Math.abs(v) >= 1e4 || (v !== 0 && Math.abs(v) < 1e-2)
             ? v.toExponential(2) : String(+v.toPrecision(4));
-          const esc = x => String(x).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+          const series = stores.map(({ t, k }) => {
+            const obj = t.columns[sel.obj].values;
+            const feas = sel.feas && t.columns[sel.feas] ? t.columns[sel.feas].values : null;
+            const salv = sel.salv && t.columns[sel.salv] ? t.columns[sel.salv].values : null;
+            const stamps = t.ts.map(x => Date.parse(x));
+            const rows = [];
+            obj.forEach((v, i) => { if (v !== null && !isNaN(stamps[i])) rows.push({
+              i, v, x: stamps[i],
+              ok: feas ? feas[i] === 1 : true,
+              sv: salv ? salv[i] === 1 : false,
+            }); });
+            rows.sort((a, b) => a.x - b.x || a.i - b.i);
+            return { t, k, rows, name: t.namespace || 'canonical store', color: this.trajColor(k) };
+          }).filter(s => s.rows.length);
+          if (!series.length) return '';
+          const all = series.flatMap(s => s.rows);
+          const sign = sel.dir === 'min' ? 1 : -1;
+          const logy = sel.log && all.every(r => r.v > 0);
+          const fy = v => logy ? Math.log10(v) : v;
+          const x0 = Math.min(...all.map(r => r.x)), x1 = Math.max(...all.map(r => r.x), x0 + 1);
+          const vs = all.map(r => fy(r.v));
+          let y0 = Math.min(...vs), y1 = Math.max(...vs);
+          if (y1 - y0 < 1e-12) { y0 -= 1; y1 += 1; }
+          const W = 720, H = 270, L = 58, R = 14, T = 12, B = 28;
+          const px = x => L + (x - x0) / (x1 - x0) * (W - L - R);
+          const py = v => T + (1 - (fy(v) - y0) / (y1 - y0)) * (H - T - B);
           let out = `<svg viewBox="0 0 ${W} ${H}" class="traj-svg" role="img" aria-label="best so far of ${esc(sel.obj)}">`;
           for (let k = 0; k <= 4; k++) {
-            const yy = T + k / 4 * (H - T - B);
-            const v = y1 - k / 4 * (y1 - y0);
+            const yy = T + k / 4 * (H - T - B), v = y1 - k / 4 * (y1 - y0);
             out += `<line x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" class="traj-grid"/>` +
                    `<text x="${L - 6}" y="${yy + 4}" text-anchor="end" class="traj-ax">${num(logy ? Math.pow(10, v) : v)}</text>`;
           }
           for (let k = 0; k <= 4; k++) {
             const xv = x0 + k / 4 * (x1 - x0);
-            const lab = byTime ? this.humanDur(xv - x0) : `#${Math.round(xv)}`;
-            out += `<text x="${px(xv)}" y="${H - 8}" text-anchor="${k === 0 ? 'start' : k === 4 ? 'end' : 'middle'}" class="traj-ax">${lab}</text>`;
+            out += `<text x="${px(xv)}" y="${H - 8}" text-anchor="${k === 0 ? 'start' : k === 4 ? 'end' : 'middle'}" class="traj-ax">${this.humanDur(xv - x0)}</text>`;
           }
-          let best = null, path = '', nOk = 0, bestI = -1;
-          const ordered = idx.slice().sort((a, b) => xs[a] - xs[b] || a - b);
-          for (const i of ordered) {
-            const ok = feas ? feas[i] === 1 : true;
-            if (ok) nOk++;
-            if (ok && (best === null || sign * obj[i] < sign * best)) {
-              best = obj[i]; bestI = i;
-              const X = px(xs[i]), Y = py(best);
-              path += path ? ` H${X} V${Y}` : `M${X} ${Y}`;
+          const counts = r => (!r.sv || sel.countSalv) && r.ok;
+          let gBest = null, gS = null, gR = null;
+          const sumParts = [];
+          for (const s of series) {
+            let best = null, path = '', nOk = 0, nSv = 0, bestR = null;
+            for (const r of s.rows) {
+              if (r.ok) nOk++;
+              if (r.sv) nSv++;
+              if (counts(r) && (best === null || sign * r.v < sign * best)) {
+                best = r.v; bestR = r;
+                path += path ? ` H${px(r.x)} V${py(best)}` : `M${px(r.x)} ${py(best)}`;
+              }
+            }
+            if (path) path += ` H${px(x1)}`;
+            s.best = best; s.bestR = bestR; s.nOk = nOk; s.nSv = nSv; s.path = path;
+            if (best !== null && (gBest === null || sign * best < sign * gBest)) { gBest = best; gS = s; gR = bestR; }
+          }
+          for (const s of series) {
+            for (const r of s.rows) {
+              const cx = px(r.x), cy = py(r.v);
+              const tip = `${esc(s.name)} #${r.i} ${esc(s.t.delegation[r.i] || '')} · ${esc(sel.obj)} = ${num(r.v)}` +
+                (sel.feas ? (r.ok ? ' · feasible' : ' · not feasible') : '') + (r.sv ? ' · salvaged' : '');
+              const cls = r.ok ? 'traj-ok' : 'traj-no';
+              const shape = r.sv
+                ? `<path d="M${cx} ${cy - 3.6} L${cx + 3.6} ${cy} L${cx} ${cy + 3.6} L${cx - 3.6} ${cy} Z" class="${cls}" style="--c:${s.color}"><title>${tip}</title></path>`
+                : `<circle cx="${cx}" cy="${cy}" r="2.6" class="${cls}" style="--c:${s.color}"><title>${tip}</title></circle>`;
+              out += shape;
             }
           }
-          if (path) path += ` H${px(x1)}`;
-          for (const i of ordered) {
-            const ok = feas ? feas[i] === 1 : true;
-            const tip = `#${i} ${esc(t.delegation[i] || '')} · ${esc(sel.obj)} = ${num(obj[i])}` +
-              (feas ? (ok ? ' · feasible' : ' · not feasible') : '');
-            out += `<circle cx="${px(xs[i])}" cy="${py(obj[i])}" r="${ok ? 2.6 : 2.2}" class="${ok ? 'traj-ok' : 'traj-no'}"><title>${tip}</title></circle>`;
-          }
-          if (path) out += `<path d="${path}" class="traj-best"/>`;
-          if (bestI >= 0) out += `<circle cx="${px(xs[bestI])}" cy="${py(obj[bestI])}" r="4.5" class="traj-star"><title>best ${num(obj[bestI])} at #${bestI} ${esc(t.delegation[bestI] || '')}</title></circle>`;
+          for (const s of series)
+            if (s.path) out += `<path d="${s.path}" class="traj-best" style="--c:${s.color}"><title>${esc(s.name)}: best so far</title></path>`;
+          if (gR) out += `<circle cx="${px(gR.x)}" cy="${py(gR.v)}" r="4.5" class="traj-star"><title>best ${num(gBest)} · ${esc(gS.name)} #${gR.i} ${esc(gS.t.delegation[gR.i] || '')}</title></circle>`;
           out += '</svg>';
-          const summary = best === null
-            ? (feas ? 'No feasible row yet.' : 'No rows yet.')
-            : `best ${num(best)} at #${bestI}${t.delegation[bestI] ? ' (' + esc(t.delegation[bestI]) + ')' : ''}` +
-              (feas ? ` · ${nOk} of ${idx.length} rows feasible` : ` · ${idx.length} rows`);
-          out = `<div class="traj-sum m">${summary}</div>` + out;
+          const legend = '<div class="traj-legend">' + series.map(s =>
+            `<span class="traj-key"><i style="background:${s.color}"></i><b>${esc(s.name)}</b> ` +
+            `${s.rows.length} rows` + (sel.feas ? ` · ${s.nOk} feasible` : '') +
+            (sel.salv ? ` · ${s.nSv} salvaged` : '') +
+            (s.best !== null ? ` · best ${num(s.best)}` : '') + '</span>').join('') +
+            '<span class="traj-key m">● row · ◆ salvaged · filled = feasible, hollow = not</span></div>';
+          const summary = gBest === null
+            ? (sel.feas ? 'No feasible row yet.' : 'No rows yet.')
+            : `best ${num(gBest)} in ${esc(gS.name)} at #${gR.i}${gS.t.delegation[gR.i] ? ' (' + esc(gS.t.delegation[gR.i]) + ')' : ''}`;
+          out = `<div class="traj-sum m">${summary}</div>` + out + legend;
           this._trajCache[ck] = out;
           return out;
         },

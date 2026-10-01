@@ -67,9 +67,11 @@ default graph).
 - **Vitals** — wall clock against its budget (marks at 1.5× and 2×), awake
   worker slots, spend (shown as "≥" when some call recorded no cost, because
   unknown is not free), and evaluations.
-- **The trajectory** — on the Oracle tab, each store's best-so-far against wall
-  time. You choose the output, minimise or maximise, and which 0/1 column counts as
-  feasible; the viewer ranks nothing on its own.
+- **The trajectory** — on the Oracle tab, best-so-far against wall time, one
+  colour per namespace. You choose the output, minimise or maximise, which 0/1
+  column means feasible and which means salvaged (salvaged rows are diamonds;
+  filled is feasible, hollow is not). The viewer ranks nothing on its own and
+  draws no target line, because runs record none.
 - **The deliverable** — `pipeline.ipynb` as it is being authored.
 
 ## When the run asks you something
