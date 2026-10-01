@@ -325,23 +325,33 @@ def test_columns_count_true_concurrency_not_drawn_height(tmp_path, page):
         tl = _timeline(page)
         assert tl["cols"] == 1
         assert all(c["compact"] for c in tl["cards"])
+        assert page.locator(".vcard.compact").count() == 4
 
 
 def test_feedback_audits_are_cards_with_a_feedback_chip_and_gates_stay_readable(tmp_path, page):
     fb = {**_delegation("FB1", "critic", "FEEDBACK"),
           "started_at": "2026-09-17T12:00:00+00:00",
-          "completed_at": "2026-09-17T12:30:00+00:00"}
+          "completed_at": "2026-09-17T12:30:00+00:00",
+          "deliverable": "## Report\n\n### Verdict\nREJECT. FEEDBACK mode.\n\nverdict: REJECT\n"}
+    fb2 = {**_delegation("FB2", "critic", "FEEDBACK"),
+           "started_at": "2026-09-17T13:00:00+00:00",
+           "completed_at": "2026-09-17T13:30:00+00:00",
+           "deliverable": "no verdict line here"}
     g1 = {**_delegation("GATE-1", "critic", "GATE:REVISE"),
           "started_at": "2026-09-17T12:40:00+00:00",
           "completed_at": "2026-09-17T12:41:00+00:00"}
     g2 = {**_delegation("GATE-2", "critic", "GATE:PASS"),
           "started_at": "2026-09-17T12:42:00+00:00",
           "completed_at": "2026-09-17T12:43:00+00:00"}
-    study, run_id = _run_with_delegations(tmp_path, [fb, g1, g2])
+    study, run_id = _run_with_delegations(tmp_path, [fb, fb2, g1, g2])
     with _LiveServer(create_app(study)) as server:
         _open(page, server, run_id)
         tl = _timeline(page)
-        assert [c["key"] for c in tl["cards"]] == ["feedback"]
+        assert [c["key"] for c in tl["cards"]] == ["feedback", "feedback"]
+        by_id = {c["id"]: c for c in tl["cards"]}
+        assert by_id["FB1"]["label"] == "feedback · reject"
+        assert by_id["FB1"]["glyph"] == "◈✕"
+        assert by_id["FB2"]["label"] == "feedback · verdict —"
         assert [g["id"] for g in tl["gates"]] == ["GATE-1", "GATE-2"]
         assert tl["gates"][0]["slot"] != tl["gates"][1]["slot"]
 

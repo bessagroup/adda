@@ -398,6 +398,10 @@
       border: 1px dashed var(--surface2); border-bottom: none; border-radius: 4px 4px 0 0;
       background: repeating-linear-gradient(135deg, transparent 0 5px, var(--surface0) 5px 7px);
     }
+    .vcard.micro { padding: 0 4px; line-height: 1; }
+    .vcard.micro .chip, .vcard.micro .vcard-dur { display: none; }
+    .vcard.micro .vcard-id { font-size: 10px; }
+    .vcard.tiny > * { display: none; }
     .vcard.compact {
       flex-direction: row; align-items: center; gap: 8px; padding: 0 6px;
     }
@@ -405,6 +409,8 @@
     .vcard.compact .vcard-role, .vcard.compact .hchip, .vcard.compact .vcard-intent { display: none; }
     .vcard.compact .vcard-top { display: contents; }
     .vcard.compact .chip { margin-left: 0; order: 2; }
+    .vcard.compact .chip > span:not(.chip-glyph) { display: none; }
+    .chip.done.feedback, .chip.feedback.done { color: var(--green); }
     .vcard.compact .vcard-dur { order: 3; }
     .vcard.feedback { border-style: dashed; }
     .vcard.queued { background: repeating-linear-gradient(135deg, var(--mantle) 0 5px, var(--surface0) 5px 7px); border-style: dashed; }
@@ -1350,8 +1356,8 @@
                        @mouseenter="hoverHyp = c.hyps" @mouseleave="hoverHyp = []">
                     <div class="vcard-top">
                       <span class="m vcard-id" x-text="c.id"></span>
-                      <span class="chip" :class="c.key"
-                            :style="c.key === 'feedback' ? `color:${identityColorFor(c.node)}` : ''">
+                      <span class="chip" :class="[c.key, c.vkey]"
+                            :style="c.key === 'feedback' && !c.vkey ? `color:${identityColorFor(c.node)}` : ''">
                         <span class="chip-glyph" x-text="c.glyph"></span>
                         <span x-text="c.label"></span>
                       </span>
@@ -2466,8 +2472,11 @@
                      detail: 'Running now.' };
           }
           if (s === 'FEEDBACK') {
-            return { key: 'feedback', label: 'feedback',
-                     detail: 'A mid-run critic audit the strategizer asked for; it carries findings, not a verdict.' };
+            const o = this.feedbackVerdict(row);
+            return { key: 'feedback', vkey: o ? this.verdictKey(o) : '',
+                     label: `feedback · ${o || 'verdict —'}`,
+                     detail: o ? `A mid-run critic audit (not a gate); its verdict was ${o}.`
+                               : 'A mid-run critic audit (not a gate); no verdict line was recorded.' };
           }
           if (s === 'OPEN_FOR_REVIEW') {
             return { key: 'review', label: 'awaiting review',
@@ -2795,8 +2804,8 @@
             const intent = this.firstClause(d.task) || '(no task text)';
             cards.push({
               id: d.id, node: d.to_node, key: life.key, label: life.label,
-              glyph, left: p.c * w + 0.6, width: w - 1.2, top: p.top, height,
-              compact: height < FULL, intent,
+              glyph: life.key === 'feedback' ? '◈' + (life.vkey ? this.verdictGlyph(life.vkey) : '') : glyph, vkey: life.vkey || '', left: p.c * w + 0.6, width: w - 1.2, top: p.top, height,
+              compact: height < FULL, micro: height < 18, tiny: height < 9, intent,
               hyps: d.hypothesis_ids || [],
               dur: this.humanDur(Math.max(0, p.end - p.real)),
               title: `${d.id} → ${d.to_node} · ${life.label}\n${intent}`,
@@ -2868,10 +2877,21 @@
         verdictKey(o) {
           return o === 'passed' ? 'done' : o === 'revise' ? 'revise' : 'failed';
         },
+        // A FEEDBACK review's verdict lives only in its report's "verdict:" line.
+        feedbackVerdict(d) {
+          const m = [...String(d.deliverable || '').matchAll(/^verdict:\s*(PASS|REVISE|REJECT)\b/gim)].pop();
+          if (!m) return '';
+          const v = m[1].toUpperCase();
+          return v === 'PASS' ? 'passed' : v.toLowerCase();
+        },
         verdictGlyph(key) { return { done: '✓', revise: '↻', failed: '✕' }[key]; },
 
         cardClass(c) {
           const cls = [c.key];
+          if (c.vkey) cls.push('v-' + c.vkey);
+          if (c.compact) cls.push('compact');
+          if (c.micro) cls.push('micro');
+          if (c.tiny) cls.push('tiny');
           if (c.id === this.effectiveDelegationId()) cls.push('selected');
           if (this.hoverHyp.length) {
             cls.push(c.hyps.some(h => this.hoverHyp.includes(h)) ? 'hl' : 'dim');
