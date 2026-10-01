@@ -1189,10 +1189,14 @@ against the SDK's cost on calls it did price.
   read from output.csv `_ts` plus run_config's declared output names). The reader returns each
   numeric/binary output column and ranks nothing. The default objective is the study's first
   declared output; min/max, the 0/1 feasible column, the 0/1 salvaged column ("count salvaged
-  rows" toggles whether they enter the best) and log-y are the page reader's choice, with
+  rows" toggles whether they enter the best) are the page reader's choice, with
   `feasible`/`salvaged` pre-picked by name. One colour per namespace, circle = row, diamond =
   salvaged, filled = feasible, hollow = not; a run copied off its machine falls back to the
-  store beside it. No reference line: no record carries a machine-readable target.
+  store beside it. The linear y axis is fitted to the best-so-far lines and the counted points
+  (+15%); points beyond it are triangles pinned at the edge. The readout names what it counts
+  ("best feasible X (incl. salvaged) in <ns> at #i (Dnnn)"), hover shows flags and delegation,
+  and direction reads "(default)" until changed. No reference line: no record carries a
+  machine-readable target.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);
   `agent_runtime.py`'s `AgenticRun.serve_viewer`; `pyproject.toml`'s `viewer`

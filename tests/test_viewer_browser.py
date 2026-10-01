@@ -422,9 +422,9 @@ def test_the_oracle_tab_draws_best_so_far_for_the_chosen_objective(tmp_path, pag
         page.wait_for_selector(".traj-svg", timeout=10_000)
         assert page.locator(".traj-ok").count() == 2
         assert page.locator(".traj-no").count() == 1
-        assert "best 5 in canonical store at #0" in page.locator(".traj-sum").inner_text()
+        assert "best feasible 5 in canonical store at #0" in page.locator(".traj-sum.m").inner_text()
         page.select_option("select[aria-label='direction']", "min")
-        assert "best 3 in canonical store at #2" in page.locator(".traj-sum").inner_text()
+        assert "best feasible 3 in canonical store at #2" in page.locator(".traj-sum.m").inner_text()
 
 
 def test_the_oracle_chart_overlays_namespaces_and_marks_salvaged_rows(tmp_path, page):
@@ -458,4 +458,7 @@ def test_the_oracle_chart_overlays_namespaces_and_marks_salvaged_rows(tmp_path, 
         assert page.locator(".traj-best").count() == 2  # a line per namespace
         legend = page.locator(".traj-legend").inner_text()
         assert "freeform" in legend and "canonical store" in legend
-        assert "best 6 in freeform" in page.locator(".traj-sum").inner_text()
+        assert "best feasible 6 (incl. salvaged) in freeform" in page.locator(".traj-sum.m").inner_text()
+        assert page.locator(".traj-default").is_visible()
+        page.select_option("select[aria-label='direction']", "min")
+        page.locator(".traj-default").wait_for(state="hidden", timeout=3000)

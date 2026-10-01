@@ -70,8 +70,13 @@ default graph).
 - **The trajectory** — on the Oracle tab, best-so-far against wall time, one
   colour per namespace. You choose the output, minimise or maximise, which 0/1
   column means feasible and which means salvaged (salvaged rows are diamonds;
-  filled is feasible, hollow is not). The viewer ranks nothing on its own and
-  draws no target line, because runs record none.
+  filled is feasible, hollow is not). The y axis (linear) is fitted to the
+  best-so-far lines and the points that count, with 15% headroom; points
+  outside it are small triangles pinned at the edge. The readout says what it
+  counts ("best feasible 2.224 (incl. salvaged) in freeform at #217 (D020)"),
+  and hovering a point shows its flags and delegation. Direction starts as
+  maximise, marked "(default)" until you change it. The viewer ranks nothing
+  on its own and draws no target line, because runs record none.
 - **The deliverable** — `pipeline.ipynb` as it is being authored.
 
 ## When the run asks you something
