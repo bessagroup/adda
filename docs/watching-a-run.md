@@ -51,12 +51,19 @@ default graph).
 
 - **The graph** — every node, its resolved backend and model, and the
   delegation edges between them.
+- **The timeline** — Overview draws the run top to bottom. Each column is
+  one concurrent worker slot, a hatched stretch is a delegation waiting for a
+  free slot, and a horizontal rule is a critic gate review with its verdict.
+  Hover a card to highlight the hypotheses it carries, or a hypothesis to
+  highlight its delegations.
 - **Delegations** — each one's task, status, and full transcript, with
   adda's own injected text marked `<adda-note>` so you can tell what the
   tool returned from what the runtime said to the agent.
 - **The ledger** — every real evaluation as it is recorded, and the oracle's
   state.
-- **Vitals** — budget, spend, and progress.
+- **Vitals** — wall clock against its budget (marks at 1.5× and 2×), awake
+  worker slots, spend (shown as "≥" when some call recorded no cost, because
+  unknown is not free), and evaluations.
 - **The deliverable** — `pipeline.ipynb` as it is being authored.
 
 ## When the run asks you something

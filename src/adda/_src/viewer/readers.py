@@ -477,6 +477,12 @@ def read_hypotheses(run_dir: Path | str) -> list[dict[str, Any]]:
             "opened_at": (log[0].get("ts") if log else h.get("proposed_at")),
             "updated_at": latest.get("ts"),
             "history": len(log),
+            "prior": h.get("prior"),
+            "status_log": [
+                {k: e.get(k) for k in ("ts", "status", "posterior", "comment",
+                                       "triggered_by", "validator_note")}
+                for e in log
+            ],
         })
     return out
 
@@ -670,6 +676,7 @@ def read_vitals(run_dir: Path | str) -> dict[str, Any]:
 
     cost = 0.0
     calls = 0
+    unknown_cost_calls = 0
     out_tokens = 0
     by_role: dict[str, dict[str, Any]] = {}
     for path in sorted(debug.glob("telemetry/calls*.jsonl")):
@@ -681,6 +688,8 @@ def read_vitals(run_dir: Path | str) -> dict[str, Any]:
                 row = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if row.get("total_cost_usd") is None:
+                unknown_cost_calls += 1
             c = row.get("total_cost_usd") or 0.0
             o = row.get("output_tokens") or 0
             # A hand-patched or backend-changed row can carry a string here;
@@ -731,6 +740,15 @@ def read_vitals(run_dir: Path | str) -> dict[str, Any]:
     if started is not None:
         elapsed = (ended if ended is not None else time.time()) - started
 
+    max_awake = None
+    try:
+        cfg = json.loads((debug / "run_config.json").read_text(encoding="utf-8"))
+        v = (cfg.get("runtime") or {}).get("max_awake_nodes")
+        if isinstance(v, int) and not isinstance(v, bool):
+            max_awake = v
+    except (OSError, ValueError, AttributeError):
+        pass
+
     return {
         # started_at lets the client tick the clock itself. Serving only a
         # snapshot of elapsed_s made the wall time freeze between polls —
@@ -738,6 +756,8 @@ def read_vitals(run_dir: Path | str) -> dict[str, Any]:
         "started_at": started,
         "cost_usd": round(cost, 6),
         "calls": calls,
+        "unknown_cost_calls": unknown_cost_calls,
+        "max_awake_nodes": max_awake,
         "output_tokens": out_tokens,
         "by_role": {r: {"calls": v["calls"],
                         "cost_usd": round(v["cost_usd"], 6)}

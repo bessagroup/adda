@@ -317,85 +317,89 @@
     .md a { color: var(--id1); }
 
     /* ---- overview ------------------------------------------------------ */
-    .overview { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .overview { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: row; }
+    .overview-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
     .timeline {
       flex: none;
-      padding: 22px 26px 24px;
-      border-bottom: 1px solid var(--surface0);
+      width: clamp(380px, 46%, 640px);
+      min-height: 0;
+      padding: 20px 20px 0 26px;
+      border-right: 1px solid var(--surface0);
       display: flex;
       flex-direction: column;
-      gap: 15px;
+      gap: 12px;
     }
     .timeline-head { display: flex; align-items: baseline; gap: 12px; }
-    .lanes-scroll { overflow-x: auto; overflow-y: hidden; }
-    .lanes { display: flex; flex-direction: column; gap: 4px; }
-    .axis {
-      position: relative;
-      height: 15px;
-      border-bottom: 1px solid var(--surface0);
-      margin-left: 150px;
+    .tl-range { font-size: var(--fs-meta); color: var(--subtext0); }
+    .vtl-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 0 28px; }
+    .vtl { position: relative; margin-left: 52px; }
+    .vtl-tick {
+      position: absolute; left: -52px; right: 0; height: 0;
+      border-top: 1px solid var(--surface0);
     }
-    .axis span {
-      position: absolute;
-      bottom: 3px;
-      font-size: 10px;
-      color: var(--overlay0);
-      transform: translateX(-50%);
-    }
-    .lane {
-      display: grid;
-      grid-template-columns: 150px minmax(0, 1fr);
-      align-items: center;
-      height: 34px;
-    }
-    /* Sticky so the chart can scroll sideways without the reader losing
-       which agent's lane they are looking at — the gutter IS the y-axis
-       label, and a scrolled-away axis label is not an axis. */
-    .lane-name {
-      font-size: var(--fs-ui);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      padding-right: 12px;
-      position: sticky;
-      left: 0;
-      z-index: 2;
+    .vtl-tick span {
+      position: absolute; left: 0; top: -9px; width: 44px;
+      font-size: var(--fs-meta); color: var(--subtext0);
       background: var(--base);
     }
-    .track { position: relative; height: 34px; }
-    /* The base line is the lane itself — an agent with no delegations shows
-       an empty track rather than nothing at all, so a lane never reads as
-       missing data. */
-    .track-base {
-      position: absolute; left: 0; right: 0; top: 15px;
-      height: 3px; border-radius: 2px;
-      background: var(--mantle);
-    }
-    .track-base.entry { background: var(--surface0); }
-    .bar {
-      position: absolute; top: 5px; height: 24px;
-      background: var(--surface0);
-      border: none;
-      border-left: 3px solid var(--surface2);
-      border-radius: 3px;
-      display: flex; align-items: center; gap: 8px;
-      padding: 0 8px;
-      font-family: inherit;
-      color: var(--subtext1);
-      cursor: pointer;
+    .vtl-cols { position: absolute; inset: 0; }
+    .vcard {
+      position: absolute;
+      box-sizing: border-box;
       overflow: hidden;
-      white-space: nowrap;
-      /* A click target, not a hairline. At 4px the shortest delegation of
-         a long run was unhittable and unlabelled — 0.39% of an 8.5h span.
-         Width past this floor still reads as duration; a bar sitting ON
-         the floor is only saying "shorter than the chart can draw", which
-         is why the tooltip carries the real number. */
-      min-width: 26px;
+      padding: 5px 8px;
+      background: var(--mantle);
+      border: 1px solid var(--surface0);
+      border-left: 3px solid var(--surface2);
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex; flex-direction: column; gap: 3px;
+      min-width: 0;
     }
-    .bar:hover { background: var(--surface1); }
-    .bar.selected { background: var(--surface1); color: var(--text); }
-    .bar .bar-id { font-family: var(--mono); font-size: 11px; }
-    .bar .bar-out { font-size: 11.5px; }
+    .vcard:hover, .vcard.selected { background: var(--surface0); }
+    .vcard.selected { border-color: var(--surface2); }
+    .vcard.dim { opacity: .35; }
+    .vcard.hl { outline: 2px solid var(--id1); outline-offset: -1px; }
+    .vcard:focus-visible, .vgate:focus-visible { outline: 2px solid var(--id1); }
+    .vcard-top { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+    .vcard-id { font-size: 12px; flex: none; }
+    .vcard-role { font-size: var(--fs-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .vcard-intent { font-size: var(--fs-meta); color: var(--subtext1); line-height: 1.35; overflow: hidden; }
+    .vcard-foot { display: flex; gap: 6px; align-items: baseline; font-size: var(--fs-meta); color: var(--subtext0); flex-wrap: wrap; }
+    .hchip {
+      font-size: 11px; padding: 0 5px; border-radius: 3px;
+      border: 1px solid var(--surface2); color: var(--subtext1);
+    }
+    .chip {
+      margin-left: auto; flex: none;
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 11px; padding: 0 6px; border-radius: 9px;
+      border: 1px solid currentColor; color: var(--subtext0);
+    }
+    .chip.running { color: var(--green); }
+    .chip.done { color: var(--subtext0); }
+    .chip.failed { color: var(--red); }
+    .chip.review { color: var(--sapphire); }
+    .chip.queued { color: var(--overlay1); border-style: dashed; }
+    .vtl-queued {
+      position: absolute; box-sizing: border-box;
+      border: 1px dashed var(--surface2); border-bottom: none; border-radius: 4px 4px 0 0;
+      background: repeating-linear-gradient(135deg, transparent 0 5px, var(--surface0) 5px 7px);
+    }
+    .vcard.queued { background: repeating-linear-gradient(135deg, var(--mantle) 0 5px, var(--surface0) 5px 7px); border-style: dashed; }
+    .vgate {
+      position: absolute; left: -52px; right: 0; height: 0;
+      border-top: 2px solid var(--green);
+      cursor: pointer; z-index: 3;
+    }
+    .vgate.failed { border-top-color: var(--red); }
+    .vgate-label {
+      position: absolute; right: 0; top: -1px;
+      font-size: var(--fs-meta);
+      padding: 1px 8px; border-radius: 0 0 4px 4px;
+      background: var(--base); border: 1px solid var(--surface2); border-top: none;
+      color: var(--text);
+    }
 
     .deleg { flex: 1; min-height: 0; display: flex; flex-direction: column; }
     .deleg-head {
@@ -463,6 +467,39 @@
       flex-direction: column;
       gap: 24px;
     }
+    .wallbar { position: relative; display: block; width: 100%; min-width: 64px; height: 4px; background: var(--surface1); border-radius: 2px; margin: 2px 0; }
+    .wallbar-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--subtext0); border-radius: 2px; }
+    .wallbar-fill.over1 { background: var(--yellow); }
+    .wallbar-fill.over15 { background: var(--peach); }
+    .wallbar-fill.over2 { background: var(--red); }
+    .wallbar-mark { position: absolute; top: -2px; width: 1px; height: 8px; background: var(--text); }
+    .hfilters { display: flex; gap: 6px; flex-wrap: wrap; }
+    .hfilter {
+      font: inherit; font-size: var(--fs-meta); color: var(--subtext0);
+      background: none; border: 1px solid var(--surface1); border-radius: 12px;
+      padding: 2px 10px; cursor: pointer; display: inline-flex; gap: 6px;
+    }
+    .hfilter.on { color: var(--text); border-color: var(--text); font-weight: 500; }
+    .chip.static { margin-left: 0; }
+    .chip.supported { color: var(--green); }
+    .chip.refuted { color: var(--red); }
+    .chip.inconclusive { color: var(--yellow); }
+    .chip.open { color: var(--text); border-style: dashed; }
+    .chip.retired { color: var(--subtext0); }
+    .pp { display: flex; align-items: center; gap: 8px; }
+    .pp-n { font-size: 11px; color: var(--subtext0); width: 30px; }
+    .pp-bar { position: relative; flex: 1; height: 8px; background: var(--surface0); border-radius: 4px; }
+    .pp-span { position: absolute; top: 2px; height: 4px; }
+    .pp-span.up { background: var(--green); }
+    .pp-span.down { background: var(--red); }
+    .pp-from, .pp-to { position: absolute; top: 0; width: 2px; height: 8px; background: var(--subtext0); }
+    .pp-to { background: var(--text); width: 3px; }
+    .hdet > summary { cursor: pointer; font-size: var(--fs-meta); color: var(--subtext0); }
+    .hdet > p { font-size: var(--fs-meta); color: var(--subtext1); margin: 6px 0 0; line-height: 1.5; }
+    .hlog { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+    .hlog-top { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 11px; color: var(--subtext0); }
+    .hlog-note { margin: 4px 0 0; font-size: var(--fs-meta); color: var(--subtext1); line-height: 1.5; }
+    .hyp.hl { background: var(--surface0); outline: 2px solid var(--id1); outline-offset: 4px; border-radius: 3px; }
     .ledger section { display: flex; flex-direction: column; gap: 12px; }
     .ledger hr { border: none; border-top: 1px solid var(--surface0); margin: 0; }
     .hyp { display: flex; flex-direction: column; gap: 8px; }
@@ -879,6 +916,23 @@
       0%, 100% { box-shadow: 0 0 0 0 rgba(var(--pulse-rgb), .55); }
       50%      { box-shadow: 0 0 0 4px rgba(var(--pulse-rgb), 0); }
     }
+    /* ---- narrow screens: stack, never overlay --------------------------- */
+    @media (max-width: 900px) {
+      .statusbar { height: auto; min-height: 56px; padding: 8px 16px; row-gap: 8px; }
+      .vitals { margin-left: 0; width: 100%; flex-wrap: wrap; gap: 10px 20px; }
+      .numbers { padding-left: 0; border-left: none; flex-wrap: wrap; gap: 10px 18px; }
+      .agent-strip { padding-left: 0; border-left: none; width: 100%; height: auto; }
+      .tabs { padding: 0 12px; overflow-x: auto; }
+      .tab { flex: none; }
+      main { overflow-y: auto; }
+      .view { flex-direction: column; min-height: min-content; }
+      .overview { flex-direction: column; flex: none; }
+      .timeline { width: 100%; border-right: none; padding: 16px 16px 0; max-height: 60vh; }
+      .overview-main { flex: none; }
+      .deleg-body, .deleg-head { padding-left: 16px; padding-right: 16px; }
+      .ledger { width: 100%; flex: none; border-left: none; border-top: 1px solid var(--surface0); overflow: visible; padding: 16px; }
+    }
+
     @media (prefers-reduced-motion: reduce) {
       .tool-call.pending > .tool-line > .call-glyph { animation: none; }
     }
@@ -1132,7 +1186,16 @@
       <div class="numbers">
         <div>
           <b class="m" x-text="wallLabel()"></b>
+          <span class="wallbar" x-show="wallBudget()" :title="wallTitle()">
+            <span class="wallbar-fill" :class="wallTone()" :style="`width:${wallFrac() * 100}%`"></span>
+            <span class="wallbar-mark" style="left:50%"></span>
+            <span class="wallbar-mark" style="left:75%"></span>
+          </span>
           <span class="label">wall</span>
+        </div>
+        <div x-show="vitals && vitals.max_awake_nodes">
+          <b class="m" x-text="slotsLabel()" :title="slotsTitle()"></b>
+          <span class="label">slots</span>
         </div>
         <div>
           <b class="m" x-text="costLabel()" :title="costTitle()"></b>
@@ -1225,50 +1288,77 @@
         <div class="timeline">
           <div class="timeline-head">
             <span class="label">Timeline</span>
-            <span class="m" style="font-size:11px; color:var(--overlay0)"
-                  x-text="timelineRange()"></span>
+            <span class="m tl-range" x-text="timelineRange()"></span>
           </div>
 
           <p class="empty" x-show="rows().length === 0">
             No delegations recorded for this run.
           </p>
 
-          <div class="lanes-scroll" x-show="rows().length > 0">
-           <div class="lanes" :style="`min-width:${timelineWidth()}px`">
-            <div class="axis">
-              <template x-for="t in axisTicks()" :key="t.at">
-                <span :style="`left:${t.at}%`" class="m" x-text="t.label"></span>
+          <!-- Time runs DOWN. Each column is one concurrent slot: a delegation
+               takes the first column that is free when it starts, so parallel
+               work sits side by side instead of being drawn on top of itself.
+               Gate reviews are run-level events and cross every column. -->
+          <div class="vtl-scroll" x-show="rows().length > 0">
+            <div class="vtl" :style="`height:${vtl().h}px`">
+              <template x-for="t in vtl().ticks" :key="t.y">
+                <div class="vtl-tick" :style="`top:${t.y}px`">
+                  <span class="m" x-text="t.label"></span>
+                </div>
+              </template>
+              <div class="vtl-cols">
+                <template x-for="q in vtl().queued" :key="q.id">
+                  <div class="vtl-queued"
+                       :style="`top:${q.top}px; height:${q.height}px; ` +
+                               `left:${q.left}%; width:${q.width}%`"
+                       :title="q.title"></div>
+                </template>
+                <template x-for="c in vtl().cards" :key="c.id">
+                  <div class="vcard"
+                       :class="cardClass(c)"
+                       :style="`top:${c.top}px; height:${c.height}px; ` +
+                               `left:${c.left}%; width:${c.width}%; ` +
+                               `border-left-color:${identityColorFor(c.node)}`"
+                       :title="c.title"
+                       role="button" tabindex="0"
+                       @click="selectDelegation(c.id)"
+                       @keydown.enter="selectDelegation(c.id)"
+                       @mouseenter="hoverHyp = c.hyps" @mouseleave="hoverHyp = []">
+                    <div class="vcard-top">
+                      <span class="m vcard-id" x-text="c.id"></span>
+                      <span class="vcard-role" :style="`color:${identityColorFor(c.node)}`"
+                            x-text="c.node"></span>
+                      <span class="chip" :class="c.key">
+                        <span class="chip-glyph" x-text="c.glyph"></span>
+                        <span x-text="c.label"></span>
+                      </span>
+                    </div>
+                    <div class="vcard-intent" x-show="c.height >= 62" x-text="c.intent"></div>
+                    <div class="vcard-foot" x-show="c.height >= 84">
+                      <span class="m" x-text="c.dur"></span>
+                      <template x-for="h in c.hyps" :key="h">
+                        <span class="m hchip" x-text="h"></span>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+              </div>
+              <template x-for="g in vtl().gates" :key="g.id">
+                <div class="vgate" :class="g.key" :style="`top:${g.y}px`"
+                     role="button" tabindex="0" :title="g.title"
+                     @click="selectDelegation(g.id)"
+                     @keydown.enter="selectDelegation(g.id)">
+                  <span class="vgate-label">
+                    <span class="chip-glyph" x-text="g.glyph"></span>
+                    gate review · <span x-text="g.label"></span>
+                  </span>
+                </div>
               </template>
             </div>
-
-            <!-- One lane per AGENT, bars are that agent's delegations. A
-                 node with several delegations therefore reads as several
-                 bars on one line, rather than as unrelated anonymous rows. -->
-            <template x-for="lane in lanes()" :key="lane.name">
-              <div class="lane">
-                <span class="lane-name" :style="`color: ${identityColor(lane.node)}`"
-                      x-text="lane.name"></span>
-                <div class="track">
-                  <div class="track-base" :class="{ entry: lane.node.is_entry }"></div>
-                  <template x-for="bar in lane.bars" :key="bar.id">
-                    <button class="bar" :class="{ selected: bar.id === selectedDelegation }"
-                            :style="`left:${bar.left}%; width:${bar.width}%; ` +
-                                    `border-left-color:${identityColor(lane.node)}`"
-                            :title="bar.title"
-                            @click="selectDelegation(bar.id)">
-                      <span class="bar-id" x-text="bar.label"></span>
-                      <span class="bar-out" x-show="bar.outcome"
-                            :style="`color:${bar.outcomeColor}`"
-                            x-text="bar.outcome"></span>
-                    </button>
-                  </template>
-                </div>
-              </div>
-            </template>
-           </div>
           </div>
         </div>
 
+        <div class="overview-main">
         <details class="monitor-log" x-show="monitor.length > 0" x-cloak>
           <summary>
             <span class="label">Science monitor</span>
@@ -1357,6 +1447,7 @@
             </div>
           </template>
         </div>
+        </div>
       </div>
 
       <!-- ---- science ledger ---- -->
@@ -1370,18 +1461,44 @@
           <p class="empty" x-show="hypotheses.length === 0"
              style="font-size:var(--fs-ui)">None registered.</p>
 
-          <template x-for="h in hypotheses" :key="h.id">
-            <div class="hyp">
+          <div class="hfilters" x-show="hypotheses.length > 0" role="group" aria-label="Filter hypotheses">
+            <template x-for="f in [['all','all'],['open','open'],['closed','closed'],['reversed','reopened']]" :key="f[0]">
+              <button class="hfilter" :class="{ on: hypFilter === f[0] }"
+                      :aria-pressed="hypFilter === f[0]"
+                      @click="hypFilter = f[0]">
+                <span x-text="f[1]"></span>
+                <span class="m" x-text="hypCount(f[0])"></span>
+              </button>
+            </template>
+          </div>
+
+          <template x-for="h in hypothesesShown()" :key="h.id">
+            <div class="hyp" :class="{ hl: hoverHyp.includes(h.id) }"
+                 @mouseenter="hoverHyp = [h.id]" @mouseleave="hoverHyp = []">
               <div class="hyp-head">
                 <span class="m" style="font-size:13px" x-text="h.id"></span>
-                <span class="st" :class="h.status" x-text="h.status.toLowerCase()"></span>
-                <span class="m" style="margin-left:auto; font-size:11px; color:var(--overlay0)"
+                <span class="chip static" :class="statusKey(h.status)">
+                  <span class="chip-glyph" x-text="statusGlyph(h.status)"></span>
+                  <span x-text="h.status.toLowerCase()"></span>
+                </span>
+                <span class="m" style="margin-left:auto; font-size:11px; color:var(--subtext0)"
                       x-show="h.triggered_by"
                       x-text="h.triggered_by"></span>
               </div>
               <p class="hyp-statement" x-text="h.statement"></p>
               <div class="hyp-pred" x-show="h.prediction">
                 <span x-text="h.prediction"></span>
+              </div>
+              <div class="pp" x-show="h.prior !== null && h.prior !== undefined"
+                   :title="`prior ${h.prior} → posterior ${h.posterior}`">
+                <span class="m pp-n" x-text="fmtP(h.prior)"></span>
+                <span class="pp-bar">
+                  <span class="pp-from" :style="`left:${pct(h.prior)}%`"></span>
+                  <span class="pp-span" :class="h.posterior >= h.prior ? 'up' : 'down'"
+                        :style="`left:${Math.min(pct(h.prior), pct(h.posterior))}%; width:${Math.abs(pct(h.posterior) - pct(h.prior))}%`"></span>
+                  <span class="pp-to" :style="`left:${pct(h.posterior)}%`"></span>
+                </span>
+                <span class="m pp-n" x-text="fmtP(h.posterior)"></span>
               </div>
               <!-- Popper's rule made visible: a hypothesis closed without a
                    falsification attempt on record is a different epistemic
@@ -1395,6 +1512,34 @@
                         ? `falsification attempt — ${attemptFor(h)}`
                         : 'no falsification attempt on record'"></span>
               </div>
+              <details class="hdet" x-show="h.falsification_criterion">
+                <summary>falsification criterion</summary>
+                <p x-text="h.falsification_criterion"></p>
+              </details>
+              <details class="hdet" x-show="(h.status_log || []).length > 1">
+                <summary>
+                  history · <span x-text="h.status_log.length"></span> entries<span
+                    x-show="reopened(h)"> · reopened</span>
+                </summary>
+                <ol class="hlog">
+                  <template x-for="(e, i) in h.status_log" :key="i">
+                    <li>
+                      <div class="hlog-top">
+                        <span class="chip static" :class="statusKey(e.status)">
+                          <span class="chip-glyph" x-text="statusGlyph(e.status)"></span>
+                          <span x-text="String(e.status).toLowerCase()"></span>
+                        </span>
+                        <span class="m" x-text="clockOf(e.ts)"></span>
+                        <span class="m" x-show="e.triggered_by" x-text="e.triggered_by"></span>
+                        <span class="m" x-show="e.posterior !== null && e.posterior !== undefined"
+                              x-text="'p=' + fmtP(e.posterior)"></span>
+                      </div>
+                      <p class="hlog-note" x-show="e.validator_note" x-text="e.validator_note"></p>
+                      <p class="hlog-note" x-show="e.comment" x-text="e.comment"></p>
+                    </li>
+                  </template>
+                </ol>
+              </details>
             </div>
           </template>
         </section>
@@ -1984,6 +2129,8 @@
 
         briefText: null,
         hoverNode: null,
+        hoverHyp: [],
+        hypFilter: 'all',
         hoverStyle: '',
         _hoverHideTimer: null,
 
@@ -2461,14 +2608,55 @@
           return m ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`;
         },
 
+        // A call with no recorded cost (died before its ResultMessage) is
+        // UNKNOWN, not free: the total is a lower bound and says so.
         costLabel() {
-          const total = this.vitals ? (this.vitals.cost_usd || 0) : 0;
-          return total ? `$${total.toFixed(2)}` : '—';
+          const v = this.vitals;
+          const total = v ? (v.cost_usd || 0) : 0;
+          const unk = v ? (v.unknown_cost_calls || 0) : 0;
+          if (!total) return unk ? '? ' : '—';
+          return unk ? `≥$${total.toFixed(2)}` : `$${total.toFixed(2)}`;
+        },
+
+        wallBudget() {
+          const rows = this.rows().filter(d => (d.constraints || {}).wall_budget_s);
+          return rows.length ? rows[rows.length - 1].constraints.wall_budget_s : 0;
+        },
+        wallElapsed() {
+          const v = this.vitals;
+          if (!v) return 0;
+          let secs = v.elapsed_s || 0;
+          if (!v.closed && v.started_at) secs = Math.max(secs, this.now / 1000 - v.started_at);
+          return secs;
+        },
+        wallFrac() {
+          const b = this.wallBudget();
+          return b ? Math.min(1, this.wallElapsed() / (2 * b)) : 0;
+        },
+        wallTone() {
+          const r = this.wallBudget() ? this.wallElapsed() / this.wallBudget() : 0;
+          return r >= 2 ? 'over2' : r >= 1.5 ? 'over15' : r >= 1 ? 'over1' : '';
+        },
+        wallTitle() {
+          const b = this.wallBudget();
+          return `budget ${this.humanDur(b * 1000)}; marks at 1.5× (${this.humanDur(b * 1500)}, no new delegations) and 2× (${this.humanDur(b * 2000)}, stop)`;
+        },
+        slotsLabel() {
+          if (!this.vitals || !this.vitals.max_awake_nodes) return '—';
+          const max = this.vitals.max_awake_nodes - 1;
+          const run = this.rows().filter(d => this.lifeOf(d).key === 'running').length;
+          const q = this.rows().filter(d => this.lifeOf(d).key === 'queued').length;
+          return q ? `${run}/${max} +${q}q` : `${run}/${max}`;
+        },
+        slotsTitle() {
+          return 'worker slots awake / capacity (the strategizer holds one more); +Nq = delegations queued for a free slot';
         },
 
         costTitle() {
           if (!this.vitals) return '';
-          return Object.entries(this.vitals.by_role || {})
+          const unk = this.vitals.unknown_cost_calls || 0;
+          const head = unk ? `${unk} call(s) recorded no cost (unknown, not zero); total is a lower bound\n` : '';
+          return head + Object.entries(this.vitals.by_role || {})
             .map(([r, v]) => `${r}: $${v.cost_usd.toFixed(3)} (${v.calls} calls)`)
             .join('\n');
         },
@@ -2518,80 +2706,137 @@
             : `${fmt(s.t0)} → ${fmt(s.t1)}`;
         },
 
-        // Compression, not run length, is what makes a bar unclickable:
-        // every extra hour shrinks every bar already on the chart, so a
-        // long run ends in a row of 4px stubs. Past this width the chart
-        // stops compressing and starts scrolling instead.
-        //
-        // The scale keys off a TYPICAL delegation, not the shortest one.
-        // Measured on supercompressible-material 20260907T024929: 19
-        // delegations across 8.5h, the shortest 119s — 0.39% of the span,
-        // which at a 1100px pane is 4.3px. Scaling until THAT bar was
-        // legible would demand an 18,560px canvas, seventeen screens to
-        // reach the newest delegation. A 57x spread between shortest and
-        // longest cannot be made uniformly legible by zoom at all; the
-        // px floor on .bar is what keeps the short ones clickable.
-        timelineWidth() {
+        // Vertical timeline model. Time is linear (so the ruler means
+        // something) at a scale chosen from the run length; a card shorter
+        // than its readable minimum is drawn at that minimum and, for column
+        // packing, occupies it — otherwise two short delegations would be
+        // drawn on top of each other. Columns are concurrent slots, assigned
+        // greedily to the first column free when a delegation is dispatched.
+        vtl() {
+          const empty = { h: 0, cols: 0, cards: [], queued: [], gates: [], ticks: [] };
           const s = this._span();
-          if (!s) return 0;
-          const durs = this.rows().map(d => {
-            const a = Date.parse(d.started_at);
-            const b = d.completed_at ? Date.parse(d.completed_at) : this.now;
-            return (isNaN(a) || isNaN(b)) ? null : b - a;
-          }).filter(v => v !== null && v > 0).sort((a, b) => a - b);
-          if (durs.length === 0) return 0;
-          const median = durs[Math.floor(durs.length / 2)];
-          // Cap it: an unbounded canvas trades microbuttons for a chart
-          // nobody can see the end of, which is the same defect wearing
-          // a different hat.
-          return Math.round(Math.min(4200, (s.dur / median) * 90));
-        },
-
-        axisTicks() {
-          const s = this._span();
-          if (!s) return [];
-          const total = s.dur / 1000;
-          // A round step that yields four or five ticks at any run length,
-          // from a 20-second smoke test to a multi-hour campaign.
-          const steps = [5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
-          const step = steps.find(v => total / v <= 5) || 7200;
-          const out = [];
-          for (let t = 0; t <= total; t += step) {
-            const label = step >= 60 ? `${Math.round(t / 60)}m` : `${t}s`;
-            out.push({ at: (t / total) * 100, label: t === 0 ? '0' : label });
-          }
-          return out;
-        },
-
-        lanes() {
-          const s = this._span();
-          if (!s || !this.spec) return [];
-          return this.stripNodes().map(node => {
-            const bars = this.rows()
-              .filter(d => d.to_node === node.name)
-              .sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at))
-              .map(d => {
-                const start = Date.parse(d.started_at);
-                const end = d.completed_at ? Date.parse(d.completed_at) : this.now;
-                const left = ((start - s.t0) / s.dur) * 100;
-                const width = Math.max(1.2, ((end - start) / s.dur) * 100);
-                const state = this.stateOf(d);
-                return {
-                  id: d.id,
-                  label: this.delegLabel(d),
-                  left: Math.max(0, Math.min(100, left)),
-                  width: Math.min(100 - Math.max(0, left), width),
-                  outcome: this.gateOutcome(d),
-                  outcomeColor: state === 'failed'
-                    ? 'var(--red)' : 'var(--green)',
-                  // The duration goes in the tooltip because a bar on the
-                  // px floor no longer encodes it in its width.
-                  title: `${d.id} · ${this.humanDur(end - start)}`
-                    + `\n${(d.task || '').slice(0, 160)}`,
-                };
-              });
-            return { name: node.name, node, bars };
+          if (!s || !this.spec) return empty;
+          const MIN = 46;
+          const h = Math.round(Math.min(9000, Math.max(640, (s.dur / 60000) * 1.5)));
+          const k = h / s.dur;
+          const y = t => Math.round((t - s.t0) * k);
+          const isGate = d => String(d.status || '').toUpperCase().startsWith('GATE:');
+          const items = this.rows().filter(d => !isGate(d))
+            .map(d => {
+              const disp = Date.parse(d.started_at);
+              const queued = 'session_started_at' in d && d.session_started_at === null;
+              const real = queued ? null
+                : Date.parse(d.session_started_at || d.started_at);
+              const end = d.completed_at ? Date.parse(d.completed_at) : this.now;
+              return { d, disp, real, queued, end };
+            })
+            .filter(x => !isNaN(x.disp))
+            .sort((a, b) => a.disp - b.disp);
+          const colEnd = [];
+          const placed = items.map(x => {
+            const top0 = y(x.disp);
+            const cardTop = x.real === null ? top0 : y(x.real);
+            const bottom = x.real === null
+              ? Math.max(top0 + MIN, y(this.now))
+              : Math.max(cardTop + MIN, y(Math.max(x.end, x.real)));
+            let c = colEnd.findIndex(e => e <= top0);
+            if (c < 0) { c = colEnd.length; colEnd.push(0); }
+            colEnd[c] = bottom + 4;
+            return { ...x, c, top0, cardTop, bottom };
           });
+          const n = Math.max(1, colEnd.length);
+          const w = 100 / n;
+          const cards = [], queued = [];
+          for (const p of placed) {
+            const d = p.d;
+            const life = this.lifeOf(d);
+            const left = p.c * w + 0.6, width = w - 1.2;
+            if (p.real !== null && p.cardTop - p.top0 > 3) {
+              queued.push({ id: d.id, top: p.top0, height: p.cardTop - p.top0,
+                            left, width,
+                            title: `${d.id} queued ${this.humanDur(p.real - p.disp)}` });
+            }
+            const glyph = { running: '●', queued: '◐', done: '✓',
+                            failed: '✕', review: '◇' }[life.key] || '•';
+            cards.push({
+              id: d.id, node: d.to_node, key: life.key, label: life.label,
+              glyph, left, width, top: p.cardTop, height: p.bottom - p.cardTop,
+              intent: this.firstClause(d.task),
+              hyps: d.hypothesis_ids || [],
+              dur: p.real === null ? `queued ${this.humanDur(this.now - p.disp)}`
+                : this.humanDur(Math.max(0, p.end - p.real)),
+              title: `${d.id} → ${d.to_node} · ${life.label}\n${(d.task || '').slice(0, 200)}`,
+            });
+          }
+          const gates = this.rows().filter(isGate).map(d => {
+            const t = Date.parse(d.completed_at || d.started_at);
+            const o = this.gateOutcome(d);
+            return { id: d.id, y: y(isNaN(t) ? s.t0 : t), label: o,
+                     key: o === 'passed' ? 'done' : 'failed',
+                     glyph: o === 'passed' ? '✓' : '✕',
+                     title: `${d.id} · gate ${o}` };
+          });
+          const steps = [1, 5, 10, 15, 30, 60, 120, 360, 720];
+          const step = steps.find(m => m * 60000 * k >= 56) || 1440;
+          const ticks = [];
+          for (let m = 0; m * 60000 <= s.dur; m += step) {
+            const hh = Math.floor(m / 60), mm = m % 60;
+            ticks.push({ y: Math.round(m * 60000 * k),
+                         label: hh ? `${hh}h${mm ? ' ' + mm + 'm' : ''}` : `${mm}m` });
+          }
+          return { h, cols: n, cards, queued, gates, ticks };
+        },
+
+        // ---- hypothesis ledger helpers ---------------------------------
+        statusKey(st) {
+          return { SUPPORTED: 'supported', REFUTED: 'refuted', FALSIFIED: 'refuted',
+                   INCONCLUSIVE: 'inconclusive', OPEN: 'open' }[String(st).toUpperCase()]
+            || 'retired';
+        },
+        statusGlyph(st) {
+          return { supported: '✓', refuted: '✕', inconclusive: '≈', open: '○',
+                   retired: '–' }[this.statusKey(st)];
+        },
+        reopened(h) {
+          // A closed verdict later followed by OPEN: the retraction a bare
+          // current-status word cannot show.
+          let closed = false;
+          for (const e of h.status_log || []) {
+            const k = this.statusKey(e.status);
+            if (k === 'open' && closed) return true;
+            if (k !== 'open') closed = true;
+          }
+          return false;
+        },
+        hypCount(f) {
+          return this.hypotheses.filter(h => this._hypMatch(h, f)).length;
+        },
+        _hypMatch(h, f) {
+          if (f === 'open') return h.status === 'OPEN';
+          if (f === 'closed') return h.status !== 'OPEN';
+          if (f === 'reversed') return this.reopened(h);
+          return true;
+        },
+        hypothesesShown() {
+          return this.hypotheses.filter(h => this._hypMatch(h, this.hypFilter));
+        },
+        pct(p) { return Math.round(Math.max(0, Math.min(1, Number(p) || 0)) * 100); },
+        fmtP(p) { return p === null || p === undefined ? '—' : Number(p).toFixed(2); },
+
+        cardClass(c) {
+          const cls = [c.key];
+          if (c.id === this.selectedDelegation) cls.push('selected');
+          if (this.hoverHyp.length) {
+            cls.push(c.hyps.some(h => this.hoverHyp.includes(h)) ? 'hl' : 'dim');
+          }
+          return cls;
+        },
+
+        firstClause(task) {
+          const t = String(task || '').replace(/[*#`]/g, ' ').split(/\s+/).join(' ').trim();
+          const m = t.match(/^.{12,}?(?:[.:;]\s|$)/);
+          const c = (m ? m[0] : t).replace(/[.:;]\s*$/, '');
+          return c.length > 88 ? c.slice(0, 85) + '…' : c;
         },
 
         // A gate check is a delegation like any other on disk, but "GATE…"

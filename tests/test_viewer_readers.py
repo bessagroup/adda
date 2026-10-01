@@ -653,6 +653,47 @@ def test_read_hypotheses_resolves_status_from_the_last_log_entry(tmp_path):
     assert h["history"] == 2
 
 
+def test_read_hypotheses_exposes_prior_and_the_whole_status_log(tmp_path):
+    """The ledger shows prior -> posterior and every transition, including a
+    verdict retracted back to OPEN, which a current-status word cannot."""
+    run = tmp_path / "runs" / "r1"
+    (_notes(run) / "hypotheses.json").write_text(json.dumps({
+        "H4": {"id": "H4", "statement": "s", "prior": 0.3,
+               "falsification_criterion": "fc",
+               "status_log": [
+                   {"status": "OPEN", "ts": "t0", "posterior": 0.3},
+                   {"status": "SUPPORTED", "ts": "t1", "posterior": 0.9,
+                    "triggered_by": "D2", "validator_note": "ok"},
+                   {"status": "OPEN", "ts": "t2", "posterior": 0.5,
+                    "validator_note": "retracted"},
+               ]}}), encoding="utf-8")
+
+    (h,) = read_hypotheses(run)
+    assert h["prior"] == 0.3
+    assert [e["status"] for e in h["status_log"]] == ["OPEN", "SUPPORTED", "OPEN"]
+    assert h["status_log"][1]["triggered_by"] == "D2"
+    assert h["status_log"][2]["validator_note"] == "retracted"
+
+
+def test_read_vitals_counts_calls_with_no_recorded_cost_as_unknown(tmp_path):
+    """A call that died before its ResultMessage has cost None: unknown, which
+    the header must be able to tell apart from free."""
+    run = tmp_path / "runs" / "R1"
+    tel = run / "debug" / "telemetry"
+    tel.mkdir(parents=True)
+    (tel / "calls.jsonl").write_text(
+        json.dumps({"role": "a", "total_cost_usd": 0.5}) + "\n"
+        + json.dumps({"role": "a", "total_cost_usd": None}) + "\n",
+        encoding="utf-8")
+    (run / "debug" / "run_config.json").write_text(
+        json.dumps({"runtime": {"max_awake_nodes": 3}}), encoding="utf-8")
+
+    v = read_vitals(run)
+    assert v["cost_usd"] == 0.5
+    assert v["unknown_cost_calls"] == 1
+    assert v["max_awake_nodes"] == 3
+
+
 def test_read_hypotheses_handles_an_empty_status_log(tmp_path):
     """A hypothesis registered but never updated still has a status."""
     run = tmp_path / "runs" / "r1"

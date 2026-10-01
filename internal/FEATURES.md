@@ -1168,7 +1168,19 @@ against the SDK's cost on calls it did price.
   request" is refused). `GET /api/session` reports `can_write`; the page shows
   a read-only hint instead of failing silently.
   Markdown (notebook, Brief, reports) renders `$…$` / `$$…$$` math with KaTeX
-  (cdnjs), lifted out before parsing so `*` and `_` in a formula are not emphasis. No longer read-only: see
+  (cdnjs), lifted out before parsing so `*` and `_` in a formula are not emphasis.
+  Overview is a VERTICAL timeline (time runs down, linear, with a ruler): one
+  column per concurrent slot (a delegation takes the first column free at
+  dispatch, so parallel same-role work sits side by side), a hatched segment for
+  the wait of a queued delegation, gate reviews as full-width rules labelled with
+  the verdict, status chips with a glyph as well as a colour, and hover linking
+  between a card and the hypotheses it carries (`hypothesis_ids`). The ledger shows
+  prior to posterior, the falsification criterion, the whole status history
+  (a verdict retracted to OPEN is visible) and open/closed/reopened filters. Header
+  vitals add wall against the budget with 1x/1.5x/2x marks, awake worker slots
+  N/max with the queue length, and cost as a lower bound ("≥$") when any call
+  recorded none (unknown, never 0). Orchestrator RSS is not shown: no record holds it.
+  Narrow screens stack the panes instead of overlaying them. No longer read-only: see
   **Operator channel** below for the write path (answering a `FollowUp`,
   queueing a note, nudging a running delegation).
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,

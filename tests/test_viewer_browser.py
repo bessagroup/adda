@@ -274,3 +274,68 @@ def test_a_formula_is_not_eaten_as_markdown_emphasis(tmp_path, page):
         assert "$5" in _render(page, "costs $5 and $6 each")
         # code spans are left alone
         assert "$a*b$" in _render(page, "run `$a*b$` now")
+
+
+# --- vertical timeline -------------------------------------------------------
+
+def _timeline(page) -> dict:
+    return page.evaluate(
+        "() => JSON.parse(JSON.stringify(Alpine.$data(document.querySelector('[x-data]')).vtl()))")
+
+
+def test_overlapping_delegations_get_their_own_columns(tmp_path, page):
+    """Parallel same-role work used to be drawn on top of itself in one lane;
+    each concurrent delegation takes its own column, a later one reuses a
+    freed column, and a gate review is a run-level rule rather than a card."""
+    a = _delegation("D001", "implementer")
+    b = {**_delegation("D002", "implementer"),
+         "started_at": "2026-09-17T12:01:00+00:00",
+         "completed_at": "2026-09-17T12:06:00+00:00", "hypothesis_ids": ["H1"]}
+    c = {**_delegation("D003", "implementer"),
+         "started_at": "2026-09-17T12:20:00+00:00",
+         "completed_at": "2026-09-17T12:25:00+00:00"}
+    gate = {**_delegation("GATE-1", "critic", "GATE:PASS"),
+            "started_at": "2026-09-17T12:26:00+00:00",
+            "completed_at": "2026-09-17T12:27:00+00:00"}
+    study, run_id = _run_with_delegations(tmp_path, [a, b, c, gate])
+    with _LiveServer(create_app(study)) as server:
+        _open(page, server, run_id)
+        tl = _timeline(page)
+        cards = {x["id"]: x for x in tl["cards"]}
+        assert set(cards) == {"D001", "D002", "D003"}
+        assert cards["D001"]["left"] != cards["D002"]["left"]      # concurrent
+        assert cards["D003"]["left"] == cards["D001"]["left"]      # column reused
+        assert cards["D002"]["hyps"] == ["H1"]
+        assert [g["id"] for g in tl["gates"]] == ["GATE-1"]
+        assert tl["gates"][0]["label"] == "passed"
+        assert tl["gates"][0]["y"] > cards["D003"]["top"]
+
+
+def test_a_queued_delegation_is_a_hatched_wait_before_its_card(tmp_path, page):
+    first = _delegation("D001", "implementer")
+    waited = {**_delegation("D002", "implementer"),
+              "started_at": "2026-09-17T12:00:30+00:00",
+              "session_started_at": "2026-09-17T12:05:00+00:00",
+              "completed_at": "2026-09-17T12:09:00+00:00"}
+    study, run_id = _run_with_delegations(tmp_path, [first, waited])
+    with _LiveServer(create_app(study)) as server:
+        _open(page, server, run_id)
+        tl = _timeline(page)
+        (q,) = tl["queued"]
+        card = next(x for x in tl["cards"] if x["id"] == "D002")
+        assert q["id"] == "D002"
+        assert q["top"] + q["height"] <= card["top"] + 1
+
+
+def test_hovering_a_hypothesis_highlights_the_delegations_that_carry_it(tmp_path, page):
+    a = {**_delegation("D001", "implementer"), "hypothesis_ids": ["H1"]}
+    b = _delegation("D002", "datagenerator")
+    study, run_id = _run_with_delegations(tmp_path, [a, b])
+    with _LiveServer(create_app(study)) as server:
+        _open(page, server, run_id)
+        page.evaluate("() => Alpine.$data(document.querySelector('[x-data]')).setTab('overview')")
+        page.wait_for_selector(".vcard", state="attached")
+        page.evaluate("() => { Alpine.$data(document.querySelector('[x-data]')).hoverHyp = ['H1']; }")
+        page.wait_for_selector(".vcard.hl", state="attached")
+        assert page.locator(".vcard.hl").count() == 1
+        assert page.locator(".vcard.dim").count() == 1
