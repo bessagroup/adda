@@ -956,6 +956,36 @@ def test_stream_replays_then_reflects_status_change(tmp_path):
 
 
 @pytest.mark.smoke
+def test_stream_reports_a_queued_delegation_starting(tmp_path):
+    """Starting a queued delegation is a patch row: status stays RUNNING and
+    only session_started_at changes. The page must still hear about it, or a
+    delegation that is working stays "queued" until it finishes."""
+    study = _make_study(tmp_path)
+    run_dir = _make_run(study, "20260904T120000")
+    log_path = run_dir / "debug" / "delegation_log.jsonl"
+    _write_jsonl(log_path, [
+        {"id": "D002", "status": "RUNNING", "from_node": "strategizer",
+         "to_node": "implementer", "session_started_at": None},
+    ])
+
+    def _append_patch():
+        time.sleep(0.5)
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "id": "D002", "patch": {"session_started_at": "2026-09-30T19:37:51+00:00"},
+                "ts": "2026-09-30T19:37:51+00:00",
+            }) + "\n")
+
+    with _LiveServer(create_app(study)) as srv:
+        threading.Thread(target=_append_patch, daemon=True).start()
+        events = _read_sse_events(
+            f"{srv.url}/api/runs/20260904T120000/stream", n=2, timeout=8.0)
+
+    assert events[0]["session_started_at"] is None
+    assert events[1]["session_started_at"] == "2026-09-30T19:37:51+00:00"
+
+
+@pytest.mark.smoke
 def test_stream_replays_run_status_when_already_present(tmp_path):
     """run_status.json written before the client ever connects (a run that
     already finished by the time someone opens the viewer) must replay

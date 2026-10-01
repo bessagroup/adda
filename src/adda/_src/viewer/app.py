@@ -916,8 +916,14 @@ def create_app(
             threading.Thread(target=_tail_delegations, daemon=True).start()
             threading.Thread(target=_tail_diagnostics, daemon=True).start()
 
+            # A queued delegation starts by a PATCH row that changes
+            # session_started_at and leaves status RUNNING, so the status
+            # alone cannot tell the page it has started.
+            def _seen(r):
+                return (r["status"], r.get("session_started_at"))
+
             last_status = {
-                r["id"]: r["status"] for r in readers.read_delegations(run_dir)
+                r["id"]: _seen(r) for r in readers.read_delegations(run_dir)
             }
             # try/finally, not a bare loop: the generator is also closed when
             # the client vanishes mid-yield, which raises GeneratorExit here
@@ -941,8 +947,8 @@ def create_app(
                         continue
                     if kind == "delegation_touched":
                         for row in readers.read_delegations(run_dir):
-                            if last_status.get(row["id"]) != row["status"]:
-                                last_status[row["id"]] = row["status"]
+                            if last_status.get(row["id"]) != _seen(row):
+                                last_status[row["id"]] = _seen(row)
                                 yield _sse("delegation", row)
                     elif kind == "diagnostic":
                         yield _sse("diagnostic", payload)
