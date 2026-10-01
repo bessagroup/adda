@@ -1,12 +1,12 @@
-# 14 — Viewer v2: a readable run, then a run manager
+# 14 — Viewer v2: a readable run, then editable study inputs
 
 Status: SPEC, not built. Author: adda-boss-whopper with Elvis, 2026-10-01.
 Grounded in the live viewer served on run 20260928T225501 (s55r1, 43 delegations,
 22 h 38 m). Screenshots were taken headless; findings below cite what they showed.
 
 The order of the phases matters. Phase 0 removes the defects that make the current page
-read wrong. Phase 1 makes a long run readable. Phase 2 adds information. Phase 3 is the
-run manager, and it does not ship before Phase 0's security item.
+read wrong. Phase 1 makes a long run readable. Phase 2 adds information. Phase 3 edits a
+study's committed inputs, and it does not ship before Phase 0's security item.
 
 ---
 
@@ -82,13 +82,16 @@ Not proposed: anything needing a new recorder in adda. Phase 2 reads only what's
 
 ---
 
-## Phase 3 — the run manager (Elvis's proposal 2: VALIDATED in direction, with conditions)
+## Phase 3 — editing a study's committed inputs (Elvis's proposal 2: VALIDATED in direction, with conditions)
 
 The direction is right: the viewer already is the operator console (notes, answers), and
-editing → launching → watching is one loop.
+editing the inputs while watching the run is one loop.
 
-But it turns a read-only page into something that edits the inputs science depends on,
-and that starts and stops cluster jobs. So:
+Launching and stopping jobs belongs to the layer that runs adda (the study's launcher, the
+cluster), not to adda or its viewer. The viewer edits a study's committed inputs and
+observes runs; it never submits or cancels jobs.
+
+It turns a read-only page into something that edits the inputs science depends on. So:
 
 **3.0 Preconditions (non-negotiable).**
 - Phase 0.1's auth and Origin check.
@@ -112,17 +115,7 @@ So the editor:
 - **Validation:** against adda's settings schema, so a typo is refused, not silently ignored (Elvis's explicit-config rule).
 - **Commit:** the same commit flow as 3.1.
 
-**3.3 Start — through the study's own launcher, never by building an sbatch line in the viewer.**
-- **The study declares its launcher** (e.g. `launch: launch_zeroshot.sh {label} --adda {sha} --mem {mem}` in config). The viewer fills the template and runs it.
-- **The launcher keeps its safety rules:** the hostname check, the sandbox, and walltime derived from the budget (e45dbab).
-- **The viewer shows** the resolved command, the adda SHA it pins and the study commit it copies, before confirming.
-
-**3.4 Stop — graceful first.**
-- "Wrap up" sends adda's own stop: an operator note plus the existing budget wrap-up ladder, so the run writes its notebook and retrospectives.
-- "Stop now" cancels **only the job id this run recorded at launch** (`scancel <id>`). Never by name pattern, never `--me` (the Oscar rules).
-- Both confirm in-page and land in the audit log.
-
-**3.5 Out of scope for v2:** editing prompts or the corpus (that's the prompt-corpus artifact's job), deleting runs, and moving or archiving scratch.
+**3.3 Out of scope:** starting and stopping runs (launching and stopping jobs belongs to the layer that runs adda, not to adda or its viewer), editing prompts or the corpus (that's the prompt-corpus artifact's job), deleting runs, and moving or archiving scratch.
 
 ---
 
@@ -158,5 +151,4 @@ Process for the bugfixer: the screenshots in this spec's review were produced he
 ## Decisions for Elvis
 
 - **D1** Ship order: Phase 0 → 1 → 2 → 3 → 4 polish alongside 1, as written? (Recommended)
-- **D2** The run manager's reach: start/stop only for studies that declare a launcher (3.3), or also a generic local runner for in-repo example studies?
-- **D3** The commit identity for viewer edits: Elvis's git identity, or a "viewer" author with Elvis as committer?
+- **D2** The commit identity for viewer edits: Elvis's git identity, or a "viewer" author with Elvis as committer?
