@@ -343,7 +343,7 @@
       font-size: var(--fs-meta); color: var(--subtext0);
       background: var(--base);
     }
-    .vtl-cols { position: absolute; inset: 0; }
+    .vtl-cols { position: absolute; top: 0; bottom: 0; right: 0; left: 0; }
     .vcard {
       position: absolute;
       box-sizing: border-box;
@@ -394,10 +394,19 @@
     .chip.review { color: var(--sapphire); }
     .chip.queued { color: var(--overlay1); border-style: dashed; }
     .vtl-queued {
-      position: absolute; box-sizing: border-box;
+      position: absolute; box-sizing: border-box; width: 10px; cursor: pointer;
       border: 1px dashed var(--surface2); border-bottom: none; border-radius: 4px 4px 0 0;
       background: repeating-linear-gradient(135deg, transparent 0 5px, var(--surface0) 5px 7px);
     }
+    .vcard.compact {
+      flex-direction: row; align-items: center; gap: 8px; padding: 0 6px;
+    }
+    .vcard.compact .vcard-sub { display: contents; }
+    .vcard.compact .vcard-role, .vcard.compact .hchip, .vcard.compact .vcard-intent { display: none; }
+    .vcard.compact .vcard-top { display: contents; }
+    .vcard.compact .chip { margin-left: 0; order: 2; }
+    .vcard.compact .vcard-dur { order: 3; }
+    .vcard.feedback { border-style: dashed; }
     .vcard.queued { background: repeating-linear-gradient(135deg, var(--mantle) 0 5px, var(--surface0) 5px 7px); border-style: dashed; }
     .vgate {
       position: absolute; left: -52px; right: 0; height: 0;
@@ -1321,13 +1330,13 @@
                   <span class="m" x-text="t.label"></span>
                 </div>
               </template>
-              <div class="vtl-cols">
-                <template x-for="q in vtl().queued" :key="q.id">
-                  <div class="vtl-queued"
-                       :style="`top:${q.top}px; height:${q.height}px; ` +
-                               `left:${q.left}%; width:${q.width}%`"
-                       :title="q.title"></div>
-                </template>
+              <template x-for="q in vtl().queued" :key="q.id">
+                <div class="vtl-queued" role="button" tabindex="0"
+                     :style="`top:${q.top}px; height:${q.height}px; left:${q.left}px`"
+                     :title="q.title" @click="selectDelegation(q.id)"
+                     @keydown.enter="selectDelegation(q.id)"></div>
+              </template>
+              <div class="vtl-cols" :style="`left:${vtl().qw}px`">
                 <template x-for="c in vtl().cards" :key="c.id">
                   <div class="vcard"
                        :class="cardClass(c)"
@@ -1341,7 +1350,8 @@
                        @mouseenter="hoverHyp = c.hyps" @mouseleave="hoverHyp = []">
                     <div class="vcard-top">
                       <span class="m vcard-id" x-text="c.id"></span>
-                      <span class="chip" :class="c.key">
+                      <span class="chip" :class="c.key"
+                            :style="c.key === 'feedback' ? `color:${identityColorFor(c.node)}` : ''">
                         <span class="chip-glyph" x-text="c.glyph"></span>
                         <span x-text="c.label"></span>
                       </span>
@@ -1363,7 +1373,7 @@
                      role="button" tabindex="0" :title="g.title"
                      @click="selectDelegation(g.id)"
                      @keydown.enter="selectDelegation(g.id)">
-                  <span class="vgate-label">
+                  <span class="vgate-label" :style="`right:${g.slot * 150}px`">
                     <span class="chip-glyph" x-text="g.glyph"></span>
                     gate review · <span x-text="g.label"></span>
                   </span>
@@ -2455,6 +2465,10 @@
             return { key: 'running', label: 'running',
                      detail: 'Running now.' };
           }
+          if (s === 'FEEDBACK') {
+            return { key: 'feedback', label: 'feedback',
+                     detail: 'A mid-run critic audit the strategizer asked for; it carries findings, not a verdict.' };
+          }
           if (s === 'OPEN_FOR_REVIEW') {
             return { key: 'review', label: 'awaiting review',
                      detail: 'Report delivered; waiting for the orchestrator to approve it or send feedback.' };
@@ -2721,65 +2735,71 @@
             : `${fmt(s.t0)} → ${fmt(s.t1)}`;
         },
 
-        // Vertical timeline model. Time is linear (so the ruler means
-        // something) at a scale chosen from the run length; a card shorter
-        // than its readable minimum is drawn at that minimum and, for column
-        // packing, occupies it — otherwise two short delegations would be
-        // drawn on top of each other. Columns are concurrent slots, assigned
-        // greedily to the first column free when a delegation is dispatched.
+        // Vertical timeline model. Time is linear, and columns are assigned
+        // from the TRUE interval a delegation held an awake slot (session
+        // start -> completion), never from how tall its card is drawn, so the
+        // column count is the run's real peak concurrency. A delegation short
+        // of the readable height is drawn at its true height as a compact
+        // one-line card. Waiting for a slot occupies no slot: it is a hatched
+        // strip in a separate gutter left of the columns.
         vtl() {
-          const empty = { h: 0, cols: 0, cards: [], queued: [], gates: [], ticks: [] };
+          const empty = { h: 0, cols: 0, qw: 0, cards: [], queued: [], gates: [], ticks: [] };
           const s = this._span();
           if (!s || !this.spec) return empty;
-          const MIN = 80;
+          const FULL = 70, LANE = 12;
           const k = 1.5 / 60000;                       // px per ms: 1.5 px/min, linear
           const y = t => Math.round((t - s.t0) * k);
           const isGate = d => String(d.status || '').toUpperCase().startsWith('GATE:');
           const items = this.rows().filter(d => !isGate(d))
             .map(d => {
               const disp = Date.parse(d.started_at);
-              const queued = 'session_started_at' in d && d.session_started_at === null;
-              const real = queued ? null
+              const waiting = 'session_started_at' in d && d.session_started_at === null;
+              const real = waiting ? null
                 : Date.parse(d.session_started_at || d.started_at);
               const end = d.completed_at ? Date.parse(d.completed_at) : this.now;
-              return { d, disp, real, queued, end };
+              return { d, disp, real, end };
             })
-            .filter(x => !isNaN(x.disp))
-            .sort((a, b) => a.disp - b.disp);
+            .filter(x => !isNaN(x.disp));
+          const slotted = items.filter(x => x.real !== null)
+            .sort((a, b) => a.real - b.real);
           const colEnd = [];
-          const placed = items.map(x => {
-            const top0 = y(x.disp);
-            const cardTop = x.real === null ? top0 : y(x.real);
-            const bottom = x.real === null
-              ? Math.max(top0 + MIN, y(this.now))
-              : Math.max(cardTop + MIN, y(Math.max(x.end, x.real)));
-            let c = colEnd.findIndex(e => e <= top0);
+          const placed = slotted.map(x => {
+            const top = y(x.real);
+            const bottom = Math.max(top + 1, y(Math.max(x.end, x.real)));
+            let c = colEnd.findIndex(e => e <= top);
             if (c < 0) { c = colEnd.length; colEnd.push(0); }
-            colEnd[c] = bottom + 4;
-            return { ...x, c, top0, cardTop, bottom };
+            colEnd[c] = bottom;
+            return { ...x, c, top, bottom };
           });
           const n = Math.max(1, colEnd.length);
           const w = 100 / n;
-          const cards = [], queued = [];
+          const waits = items.map(x => ({ x, t: y(x.disp),
+                                          b: y(x.real === null ? this.now : x.real) }))
+            .filter(q => q.b - q.t > 3).sort((a, b) => a.t - b.t);
+          const laneEnd = [];
+          const queued = waits.map(q => {
+            let l = laneEnd.findIndex(e => e <= q.t);
+            if (l < 0) { l = laneEnd.length; laneEnd.push(0); }
+            laneEnd[l] = q.b;
+            return { id: q.x.d.id, top: q.t, height: q.b - q.t, left: l * LANE,
+                     title: `${q.x.d.id} waited ${this.humanDur((q.x.real === null ? this.now : q.x.real) - q.x.disp)} for a free slot` };
+          });
+          const qw = laneEnd.length ? laneEnd.length * LANE + 6 : 0;
+          const cards = [];
           for (const p of placed) {
             const d = p.d;
             const life = this.lifeOf(d);
-            const left = p.c * w + 0.6, width = w - 1.2;
-            if (p.real !== null && p.cardTop - p.top0 > 3) {
-              queued.push({ id: d.id, top: p.top0, height: p.cardTop - p.top0,
-                            left, width,
-                            title: `${d.id} queued ${this.humanDur(p.real - p.disp)}` });
-            }
             const glyph = { running: '●', queued: '◐', done: '✓', revise: '↻',
-                            failed: '✕', review: '◇' }[life.key] || '•';
+                            failed: '✕', review: '◇', feedback: '◈' }[life.key] || '•';
+            const height = Math.max(2, p.bottom - p.top - 1);
+            const intent = this.firstClause(d.task) || '(no task text)';
             cards.push({
               id: d.id, node: d.to_node, key: life.key, label: life.label,
-              glyph, left, width, top: p.cardTop, height: p.bottom - p.cardTop,
-              intent: this.firstClause(d.task) || '(no task text)',
+              glyph, left: p.c * w + 0.6, width: w - 1.2, top: p.top, height,
+              compact: height < FULL, intent,
               hyps: d.hypothesis_ids || [],
-              dur: p.real === null ? `queued ${this.humanDur(this.now - p.disp)}`
-                : this.humanDur(Math.max(0, p.end - p.real)),
-              title: `${d.id} → ${d.to_node} · ${life.label}\n${(d.task || '').slice(0, 200)}`,
+              dur: this.humanDur(Math.max(0, p.end - p.real)),
+              title: `${d.id} → ${d.to_node} · ${life.label}\n${intent}`,
             });
           }
           const gates = this.rows().filter(isGate).map(d => {
@@ -2787,8 +2807,14 @@
             const o = this.gateOutcome(d);
             const key = this.verdictKey(o);
             return { id: d.id, y: y(isNaN(t) ? s.t0 : t), label: o, key,
-                     glyph: this.verdictGlyph(key),
+                     glyph: this.verdictGlyph(key), slot: 0,
                      title: `${d.id} · gate ${o}` };
+          }).sort((a, b) => a.y - b.y);
+          // Reviews minutes apart land within one label's height; offset the
+          // labels sideways so each verdict stays readable.
+          gates.forEach((g, i) => {
+            const prev = gates[i - 1];
+            g.slot = prev && g.y - prev.y < 22 ? (prev.slot + 1) % 3 : 0;
           });
           const steps = [1, 5, 10, 15, 30, 60, 120, 360, 720];
           const step = steps.find(m => m * 60000 * k >= 56) || 1440;
@@ -2798,8 +2824,8 @@
             ticks.push({ y: Math.round(m * 60000 * k),
                          label: hh ? `${hh}h${mm ? ' ' + mm + 'm' : ''}` : `${mm}m` });
           }
-          const h = Math.round(Math.max(s.dur * k, ...cards.map(c => c.top + c.height)) + 8);
-          return { h, cols: n, cards, queued, gates, ticks };
+          const h = Math.round(Math.max(s.dur * k, ...cards.map(c => c.top + c.height), ...queued.map(q => q.top + q.height)) + 8);
+          return { h, cols: n, qw, cards, queued, gates, ticks };
         },
 
         // ---- hypothesis ledger helpers ---------------------------------

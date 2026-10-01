@@ -311,6 +311,41 @@ def test_overlapping_delegations_get_their_own_columns(tmp_path, page):
         assert tl["gates"][0]["y"] > cards["D003"]["top"]
 
 
+def test_columns_count_true_concurrency_not_drawn_height(tmp_path, page):
+    """A short delegation is drawn at its true height, so back-to-back short
+    work shares one column; drawing never changes the column assignment."""
+    rows = []
+    for i in range(4):
+        rows.append({**_delegation(f"D00{i + 1}", "implementer"),
+                     "started_at": f"2026-09-17T12:{i * 6:02d}:00+00:00",
+                     "completed_at": f"2026-09-17T12:{i * 6 + 5:02d}:00+00:00"})
+    study, run_id = _run_with_delegations(tmp_path, rows)
+    with _LiveServer(create_app(study)) as server:
+        _open(page, server, run_id)
+        tl = _timeline(page)
+        assert tl["cols"] == 1
+        assert all(c["compact"] for c in tl["cards"])
+
+
+def test_feedback_audits_are_cards_with_a_feedback_chip_and_gates_stay_readable(tmp_path, page):
+    fb = {**_delegation("FB1", "critic", "FEEDBACK"),
+          "started_at": "2026-09-17T12:00:00+00:00",
+          "completed_at": "2026-09-17T12:30:00+00:00"}
+    g1 = {**_delegation("GATE-1", "critic", "GATE:REVISE"),
+          "started_at": "2026-09-17T12:40:00+00:00",
+          "completed_at": "2026-09-17T12:41:00+00:00"}
+    g2 = {**_delegation("GATE-2", "critic", "GATE:PASS"),
+          "started_at": "2026-09-17T12:42:00+00:00",
+          "completed_at": "2026-09-17T12:43:00+00:00"}
+    study, run_id = _run_with_delegations(tmp_path, [fb, g1, g2])
+    with _LiveServer(create_app(study)) as server:
+        _open(page, server, run_id)
+        tl = _timeline(page)
+        assert [c["key"] for c in tl["cards"]] == ["feedback"]
+        assert [g["id"] for g in tl["gates"]] == ["GATE-1", "GATE-2"]
+        assert tl["gates"][0]["slot"] != tl["gates"][1]["slot"]
+
+
 def test_revise_and_reject_gates_are_told_apart_and_a_delegation_is_open_by_default(tmp_path, page):
     a = _delegation("D001", "implementer")
     rev = {**_delegation("GATE-1", "critic", "GATE:REVISE"),

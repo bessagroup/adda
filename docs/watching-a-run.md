@@ -52,8 +52,11 @@ default graph).
 - **The graph** — every node, its resolved backend and model, and the
   delegation edges between them.
 - **The timeline** — Overview draws the run top to bottom. Each column is
-  one concurrent worker slot, a hatched stretch is a delegation waiting for a
-  free slot, and a horizontal rule is a critic gate review with its verdict.
+  one concurrent worker slot (the column count is the run's real peak
+  concurrency; short delegations are drawn compact at their true height), a
+  hatched strip in the left gutter is a delegation waiting for a free slot, a
+  horizontal rule is a critic gate review with its verdict, and a mid-run
+  critic audit is a card with a feedback chip.
   Hover a card to highlight the hypotheses it carries, or a hypothesis to
   highlight its delegations.
 - **Delegations** — each one's task, status, and full transcript, with

@@ -1170,9 +1170,10 @@ against the SDK's cost on calls it did price.
   Markdown (notebook, Brief, reports) renders `$…$` / `$$…$$` math with KaTeX
   (cdnjs), lifted out before parsing so `*` and `_` in a formula are not emphasis.
   Overview is a VERTICAL timeline (time runs down, linear, with a ruler): one
-  column per concurrent slot (a delegation takes the first column free at
-  dispatch, so parallel same-role work sits side by side), a hatched segment for
-  the wait of a queued delegation, gate reviews as full-width rules labelled with
+  column per concurrent slot, assigned from the TRUE session start/end (the column
+  count is the run's peak concurrency; short delegations are compact cards at their
+  true height), a hatched gutter strip for the wait of a queued delegation,
+  mid-run critic audits as cards with a feedback chip, gate reviews as full-width rules labelled with
   the verdict, status chips with a glyph as well as a colour, and hover linking
   between a card and the hypotheses it carries (`hypothesis_ids`). The ledger shows
   prior to posterior, the falsification criterion, the whole status history
