@@ -47,3 +47,21 @@ def test_unknown_when_no_verdict():
 def test_garbage_token_is_not_a_false_verdict():
     # A word that isn't a valid verdict must not be returned as one.
     assert _parse_verdict("### Verdict\n\n**Maybe**\n") == "UNKNOWN"
+
+
+def test_leading_verdict_without_sections_is_parsed():
+    # Run 20261001T001224 critic call_002: a full review with no `### Verdict`
+    # heading and no Numbers block, opening "PASS: I found no ...". It was
+    # logged GATE:UNKNOWN and shown to the next critic call as UNKNOWN.
+    from pathlib import Path
+    text = (Path(__file__).parent / "data"
+            / "critic_review_leading_pass_20261001T001224.md").read_text()
+    assert _parse_verdict(text) == "PASS"
+
+
+def test_leading_verdict_forms_and_non_verdicts():
+    assert _parse_verdict("**REVISE** — H2 untested.") == "REVISE"
+    assert _parse_verdict("\n\nReject: the headline is unsupported.") == "REJECT"
+    for prose in ("Passed the ledger audit.", "Pass the notebook to the user.",
+                  "Revised notes follow.", "No verdict given."):
+        assert _parse_verdict(prose) == "UNKNOWN"

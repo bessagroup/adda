@@ -123,7 +123,8 @@ def _parse_verdict(text: str) -> str:
     write ``### Verdict\\n\\n**PASS**`` — so the leading ``**`` no longer makes
     a bare ``(\\w+)`` capture the asterisk and fall through to UNKNOWN (the bug
     that turned an earned PASS into an infinite revise loop). Falls back to a
-    ``verdict: X`` line (e.g. in a ### Numbers block). Returns the UPPER token
+    ``verdict: X`` line (e.g. in a ### Numbers block), then to a review whose
+    first line opens with the bare verdict (``PASS: ...``). Returns the UPPER token
     or ``"UNKNOWN"``.
     """
     import re as _re
@@ -136,6 +137,16 @@ def _parse_verdict(text: str) -> str:
     ):
         if mm.group(1).upper() in _VALID_VERDICTS:
             return mm.group(1).upper()
+    # A review with no sections at all that simply opens with its verdict:
+    # "PASS: I found no ...". Only the first line, and only as a whole token
+    # followed by a delimiter, so prose that starts with "Pass the ..." or
+    # "Passed" never reads as a verdict.
+    first = next((ln for ln in text.splitlines() if ln.strip()), "")
+    lead = _re.match(
+        r"[\s>*_`#\"'-]*(PASS|REVISE|REJECT)\b[*_`\"']*\s*(?:[:.\-\u2013\u2014]|$)",
+        first, _re.IGNORECASE)
+    if lead:
+        return lead.group(1).upper()
     return "UNKNOWN"
 
 
