@@ -87,9 +87,11 @@ Not proposed: anything needing a new recorder in adda. Phase 2 reads only what's
 The direction is right: the viewer already is the operator console (notes, answers), and
 editing the inputs while watching the run is one loop.
 
-Launching and stopping jobs belongs to the layer that runs adda (the study's launcher, the
-cluster), not to adda or its viewer. The viewer edits a study's committed inputs and
-observes runs; it never submits or cancels jobs.
+Starting and stopping an adda RUN belongs to the layer above adda: whoever runs the study's
+launcher in their own Oscar session. The viewer never launches, stops or cancels a run.
+Inside a run, adda works with the permissions of the session that launched it, and its
+agents submit and cancel their own compute jobs through the study's broker. That is adda's
+normal operation and is unaffected by this spec.
 
 It turns a read-only page into something that edits the inputs science depends on. So:
 
@@ -115,7 +117,7 @@ So the editor:
 - **Validation:** against adda's settings schema, so a typo is refused, not silently ignored (Elvis's explicit-config rule).
 - **Commit:** the same commit flow as 3.1.
 
-**3.3 Out of scope:** starting and stopping runs (launching and stopping jobs belongs to the layer that runs adda, not to adda or its viewer), editing prompts or the corpus (that's the prompt-corpus artifact's job), deleting runs, and moving or archiving scratch.
+**3.3 Out of scope:** starting and stopping runs (that belongs to the layer above adda; see Phase 3's intro), editing prompts or the corpus (that's the prompt-corpus artifact's job), deleting runs, and moving or archiving scratch.
 
 ---
 
