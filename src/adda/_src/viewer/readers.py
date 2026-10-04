@@ -688,6 +688,70 @@ def read_trajectory(run_dir: Path | str) -> dict[str, Any]:
             "stores": stores}
 
 
+_FUNNEL_DEFAULT_ORDER = ("coil", "prefilter", "ran|solved", "^converged$", "feas")
+
+
+def read_funnel(run_dir: Path | str, stages: list[str] | None = None) -> dict[str, Any]:
+    """Per store: how many rows survive each 0/1 stage column, in order.
+
+    A row passes a stage only if it passed every earlier one, and an
+    unrecorded value does not pass. ``pass`` is the count passing that stage
+    on its own (stages need not nest), ``cumulative`` the count passing all
+    stages so far, ``dropped`` what this stage removed from the previous
+    cumulative, ``unrecorded`` the rows with no value for it. ``binding`` names
+    the stage that dropped the most. A requested stage the store never
+    recorded as 0/1 is listed in ``skipped``. With no ``stages`` the order is
+    picked by column name from the common pipeline words; the reader ranks
+    nothing else.
+    """
+    import re
+    traj = read_trajectory(run_dir)
+    out = []
+    for st in traj["stores"]:
+        cols = st["columns"]
+        binary = [c for c, v in cols.items() if v["kind"] == "binary"]
+        picked = list(stages) if stages is not None else []
+        if stages is None:
+            for pat in _FUNNEL_DEFAULT_ORDER:
+                hit = next((c for c in binary
+                            if re.search(pat, c, re.I) and c not in picked), None)
+                if hit:
+                    picked.append(hit)
+        n = st["n"]
+        use = [c for c in picked if c in binary]
+        skipped = [c for c in picked if c not in binary]
+        alive = [True] * n
+        prev = n
+        rows = []
+        for c in use:
+            vals = cols[c]["values"]
+            unrecorded = 0
+            for i in range(n):
+                if not alive[i]:
+                    continue
+                if vals[i] is None:
+                    unrecorded += 1
+                if vals[i] != 1.0:
+                    alive[i] = False
+            cum = sum(alive)
+            rows.append({
+                "column": c, "n": n,
+                "pass": sum(1 for v in vals if v == 1.0),
+                "cumulative": cum, "dropped": prev - cum,
+                "unrecorded": unrecorded,
+            })
+            prev = cum
+        binding = None
+        top = 0
+        for r in rows:
+            if r["dropped"] > top:
+                top, binding = r["dropped"], r["column"]
+        out.append({"namespace": st["namespace"], "n": n, "stages": rows,
+                    "skipped": skipped, "binding": binding,
+                    "available": binary})
+    return {"store_found": traj["store_found"], "stores": out}
+
+
 def read_oracle(run_dir: Path | str) -> dict[str, Any]:
     """What the run's oracle is, and every evaluation it has ledgered.
 

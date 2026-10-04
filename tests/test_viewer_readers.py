@@ -12,6 +12,7 @@ import pytest
 from adda._src.viewer.readers import (
     read_artifacts,
     read_oracle,
+    read_funnel,
     read_trajectory,
     read_vitals,
     graph_spec_json,
@@ -1207,3 +1208,51 @@ def test_read_trajectory_returns_columns_with_a_kind_and_never_ranks(tmp_path):
     assert st["columns"]["feasible"] == {"kind": "binary", "values": [1.0, 0.0, 1.0]}
     assert "label" not in st["columns"] and "_ts" not in st["columns"]
     assert t["declared_outputs"] == []
+
+
+def _funnel_run(tmp_path):
+    run = tmp_path / "runs" / "R1"
+    (run / "debug").mkdir(parents=True)
+    data = run / "experiment_data" / "experiment_data"
+    data.mkdir(parents=True)
+    (data / "domain.json").write_text(json.dumps({"input_space": {"x": {}}}), encoding="utf-8")
+    (data / "input.csv").write_text(",x\n0,1\n1,2\n2,3\n3,4\n", encoding="utf-8")
+    (data / "output.csv").write_text(
+        ",coilable,converged,feasible,sigma\n"
+        "0,1,1,1,5.0\n"
+        "1,1,1,0,3.0\n"
+        "2,1,0,1,2.0\n"
+        "3,0,,1,1.0\n", encoding="utf-8")
+    (data / "jobs.csv").write_text(",0\n0,FINISHED\n1,FINISHED\n2,FINISHED\n3,FINISHED\n", encoding="utf-8")
+    return run
+
+
+def test_read_funnel_counts_cumulative_and_alone_and_names_the_binding_stage(tmp_path):
+    f = read_funnel(_funnel_run(tmp_path))
+    (st,) = f["stores"]
+    assert [r["column"] for r in st["stages"]] == ["coilable", "converged", "feasible"]
+    assert [r["cumulative"] for r in st["stages"]] == [3, 2, 1]
+    assert [r["pass"] for r in st["stages"]] == [3, 2, 3]
+    assert [r["dropped"] for r in st["stages"]] == [1, 1, 1]
+    assert st["binding"] == "coilable" and st["n"] == 4
+    assert "sigma" not in st["available"]
+
+
+def test_read_funnel_unrecorded_does_not_pass_and_is_counted(tmp_path):
+    run = _funnel_run(tmp_path)
+    f = read_funnel(run, ["converged"])
+    (r,) = f["stores"][0]["stages"]
+    assert (r["pass"], r["cumulative"], r["unrecorded"]) == (2, 2, 1)
+
+
+def test_read_funnel_names_a_stage_the_store_never_recorded(tmp_path):
+    f = read_funnel(_funnel_run(tmp_path), ["coilable", "ran", "sigma"])
+    st = f["stores"][0]
+    assert [r["column"] for r in st["stages"]] == ["coilable"]
+    assert st["skipped"] == ["ran", "sigma"]
+
+
+def test_read_funnel_with_no_store_is_empty(tmp_path):
+    run = tmp_path / "runs" / "R1"
+    (run / "debug").mkdir(parents=True)
+    assert read_funnel(run)["stores"] == []

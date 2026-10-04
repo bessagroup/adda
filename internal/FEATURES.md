@@ -1197,6 +1197,12 @@ against the SDK's cost on calls it did price.
   ("best feasible X (incl. salvaged) in <ns> at #i (Dnnn)"), hover shows flags and delegation,
   and direction reads "(default)" until changed. No reference line: no record carries a
   machine-readable target.
+  `GET /api/runs/<id>/funnel[?stages=a,b]` (`readers.read_funnel`) is the stage funnel as data:
+  per store, the 0/1 stage columns in order, each with `pass` (alone), `cumulative` (passed every
+  earlier stage; an unrecorded value does not pass), `dropped`, `unrecorded`; plus `binding` (the
+  stage that dropped most), `skipped` (requested but never recorded as 0/1) and `available`.
+  With no `stages`, the order is picked by column name (coil, prefilter, ran/solved, converged,
+  feas). The server computes it; a front end only draws it.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);
   `agent_runtime.py`'s `AgenticRun.serve_viewer`; `pyproject.toml`'s `viewer`

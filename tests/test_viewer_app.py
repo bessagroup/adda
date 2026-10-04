@@ -1271,3 +1271,18 @@ def test_session_redirect_stays_on_this_site(tmp_path):
                    follow_redirects=False)
     assert r.headers["location"].startswith("/")
     assert not r.headers["location"].startswith("//")
+
+
+def test_funnel_route_serves_stages_and_404s_unknown_run(tmp_path):
+    study = _make_study(tmp_path)
+    run = _make_run(study, "20260904T120000")
+    data = run / "experiment_data" / "experiment_data"
+    data.mkdir(parents=True)
+    (data / "domain.json").write_text('{"input_space": {"x": {}}}', encoding="utf-8")
+    (data / "input.csv").write_text(",x\n0,1\n1,2\n", encoding="utf-8")
+    (data / "output.csv").write_text(",feasible\n0,1\n1,0\n", encoding="utf-8")
+    (data / "jobs.csv").write_text(",0\n0,FINISHED\n1,FINISHED\n", encoding="utf-8")
+    client = TestClient(create_app(study))
+    body = client.get("/api/runs/20260904T120000/funnel?stages=feasible").json()
+    assert body["stores"][0]["stages"][0]["cumulative"] == 1
+    assert client.get("/api/runs/nope/funnel").status_code == 404
