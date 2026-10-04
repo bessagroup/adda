@@ -232,6 +232,12 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   knobs are deliberately NOT coupled (four studies run `pipeline_deliverable:
   false` with the gate on), and they are now read through `features.enabled`
   everywhere instead of `get_bool(key, True)` literals.
+- **Feature-gated prompt text:** `[[if key]]on[[else]]off[[/if]]` inline gates
+  (nesting allowed) in any prompt or tool docstring, resolved by
+  `features.resolve_gates` inside `system_prompt_with_catalog`; the on branch is
+  kept byte-for-byte, an unknown key or unbalanced marker raises. KB chapters
+  take a `feature:` frontmatter key and vanish from menu/TOC/search/`get` while
+  it is off. The critic's GATE message is composed from the enabled features.
 - **Grounded in code, not paraphrased:** what the gate mechanically checks
   (the canonical store must hold ≥1 row before it will even run the
   notebook; zero new evals on replay; no modified/deleted rows; headline

@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ....prompts.tool_catalog import tool_examples
-from ....runtime import terminal
+from ....runtime import features, terminal
 from ...parsing import _parse_verdict
 from ...stop import stop_headline, time_section
 from ._binding import with_doc
@@ -575,12 +575,8 @@ class FeedbackTools:
             f"strategizer_notes     = {notes_path}\n"
             "delegations_workspace = "
             f"{_debug_dir}/delegations/\n"
-            f"deliverable           = {_study_dir}/pipeline.ipynb "
-            "(the runtime EXECUTES the notebook lazily after this gate to "
-            "verify the headline re-derives from the ledger with zero new "
-            "evals; the notebook's own markdown cells ARE the writeup — "
-            "there is no solution.md, do NOT flag it as missing)\n"
-            "</paths>\n\n"
+            + self._deliverable_line(_study_dir)
+            + "</paths>\n\n"
             + evidence_index_block(_debug_dir)
             # FULL conclusion — never truncate what the adversarial gate
             # must validate (a head-excerpt would let an over-claim in
@@ -588,12 +584,26 @@ class FeedbackTools:
             # is not a concern, and final_summary.md is also available.
             + f"Proposed conclusion:\n{summary}"
         )
-        return task_msg + (
+        _ledger = (
             "\n\n<hypothesis_ledger>\n" + self._ledger_dump()
-            + "\n</hypothesis_ledger>\n\n"
-            "<milestones>\n" + self._milestone_block()
-            + "\n</milestones>\n\n"
-            "<delegation_flags>\n"
+            + "\n</hypothesis_ledger>"
+            if features.enabled("hypothesis_ledger") else ""
+        )
+        _milestones = (
+            "\n\n<milestones>\n" + self._milestone_block()
+            + "\n</milestones>"
+            if features.enabled("milestones_enabled") else ""
+        )
+        _per_hypothesis = (
+            "\n\nFor each hypothesis, judge whether its stated "
+            "falsification_criterion was actually tested by "
+            "a delegation flagged is_falsification_attempt "
+            "— adequacy of the test (given the budget), not mere "
+            "presence of the flag."
+            if features.enabled("hypothesis_ledger") else ""
+        )
+        return task_msg + _ledger + _milestones + (
+            "\n\n<delegation_flags>\n"
             + "\n".join(self._attempt_flags())
             + "\n</delegation_flags>\n\n"
             + snapshot.as_text() + "\n"
@@ -604,12 +614,25 @@ class FeedbackTools:
             "an honest INCONCLUSIVE/negative result whose falsification "
             "attempts were adequate for that point can PASS. Do NOT "
             "REVISE solely to demand work the remaining budget no longer "
-            "supports — note it as future work instead.\n\n"
-            "For each hypothesis, judge whether its stated "
-            "falsification_criterion was actually tested by "
-            "a delegation flagged is_falsification_attempt "
-            "— adequacy of the test (given the budget), not mere "
-            "presence of the flag."
+            "supports — note it as future work instead."
+        ) + _per_hypothesis
+
+    def _deliverable_line(self, study_dir: Any) -> str:
+        """The ``deliverable =`` row of ``<paths>``; absent when the run has
+        no notebook deliverable."""
+        if not features.enabled("pipeline_deliverable"):
+            return ""
+        return (
+            f"deliverable           = {study_dir}/pipeline.ipynb "
+            "("
+            + (
+                "the runtime EXECUTES the notebook lazily after this gate to "
+                "verify the headline re-derives from the ledger with zero new "
+                "evals; "
+                if features.enabled("reproduction_gate") else ""
+            )
+            + "the notebook's own markdown cells ARE the writeup — "
+            "there is no solution.md, do NOT flag it as missing)\n"
         )
 
     def _ledger_dump(self) -> str:

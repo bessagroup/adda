@@ -328,3 +328,45 @@ def test_the_pipeline_and_reproduction_knobs_are_read_through_the_registry(
         for key in ("pipeline_deliverable", "reproduction_gate"):
             assert f'get_bool("{key}"' not in src.replace("\n", "").replace(
                 " ", ""), (mod.__name__, key)
+
+
+# --- inline gates: [[if key]]on[[else]]off[[/if]] --------------------------
+
+
+def test_gate_keeps_on_branch_byte_for_byte_and_drops_else():
+    s = "a [[if hypothesis_ledger]]ON  x[[else]]OFF[[/if]] z"
+    assert features.resolve_gates(s) == "a ON  x z"
+
+
+def test_gate_off_takes_else_or_nothing():
+    settings.configure({"hypothesis_ledger": False})
+    assert features.resolve_gates("a [[if hypothesis_ledger]]ON[[else]]OFF[[/if]] z") == "a OFF z"
+    assert features.resolve_gates("a [[if hypothesis_ledger]]ON[[/if]] z") == "a  z"
+
+
+def test_gates_nest_and_dead_outer_kills_inner():
+    s = "[[if pipeline_deliverable]]P[[if reproduction_gate]]R[[else]]r[[/if]][[/if]]"
+    assert features.resolve_gates(s) == "PR"
+    settings.configure({"reproduction_gate": False})
+    assert features.resolve_gates(s) == "Pr"
+    settings.configure({"pipeline_deliverable": False})
+    assert features.resolve_gates(s) == ""
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["[[if hypothesis_ledger]]x", "x[[/if]]", "x[[else]]y", "[[if nope_key]]x[[/if]]"],
+)
+def test_gate_errors_are_loud(bad):
+    with pytest.raises((ValueError, KeyError)):
+        features.resolve_gates(bad)
+
+
+def test_feature_tagged_chapter_hidden_while_feature_off():
+    from adda._src.knowledge.kb import KnowledgeBase
+
+    kb = KnowledgeBase.load()
+    assert kb.get("pipeline-reproduces-from-store") is not None
+    settings.configure({"pipeline_deliverable": False})
+    assert kb.get("pipeline-reproduces-from-store") is None
+    assert all(e.id != "pipeline-reproduces-from-store" for e in kb.entries)

@@ -230,8 +230,8 @@ study_dir             = {study_dir}
 run_dir               = {run_dir}
 debug_dir             = {debug_dir}
 strategizer_notes_dir = {notes_dir}
-hypotheses_json       = {notes_dir}/hypotheses.json
-delegation_log_jsonl  = {debug_dir}/delegation_log.jsonl
+[[if hypothesis_ledger]]hypotheses_json       = {notes_dir}/hypotheses.json
+[[/if]]delegation_log_jsonl  = {debug_dir}/delegation_log.jsonl
 diagnostics_jsonl     = {debug_dir}/diagnostics.jsonl
 canonical_store       = {experiment_data_dir}
   ^ this is the ExperimentData PROJECT_DIR. To load ONE store directly:

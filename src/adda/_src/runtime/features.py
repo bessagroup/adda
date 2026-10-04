@@ -48,6 +48,7 @@ __all__ = [
     "conflicts",
     "disabled_tool_names",
     "strip_disabled_sections",
+    "resolve_gates",
     "by_key",
 ]
 
@@ -289,3 +290,48 @@ def strip_disabled_sections(prompt: str) -> str:
                 "", prompt, flags=re.DOTALL,
             )
     return prompt
+
+
+_GATE_TOKEN = re.compile(r"\[\[(?:if (\w+)|(else)|(/if))\]\]")
+
+
+def resolve_gates(text: str) -> str:
+    """Resolve inline ``[[if <feature>]]…[[else]]…[[/if]]`` gates.
+
+    A sentence that belongs to one feature but sits inside prose that does not
+    (a tool's docstring, one criterion of the charter) is wrapped in a gate
+    instead of an owned section. The markers are ALWAYS removed: the body
+    survives, byte for byte, when the feature is on, and the ``[[else]]``
+    branch (empty when absent) replaces it when off. Gates nest. An unknown
+    feature key or an unbalanced marker raises rather than silently keeping
+    or dropping text.
+    """
+    out: list[str] = []
+    # one frame per open gate: (emitting-before, this branch emits, else seen)
+    stack: list[list] = []
+    pos = 0
+    live = True
+    for m in _GATE_TOKEN.finditer(text):
+        if live:
+            out.append(text[pos:m.start()])
+        pos = m.end()
+        key, is_else, is_end = m.groups()
+        if key is not None:
+            on = enabled(key)
+            stack.append([live, on, False])
+            live = live and on
+        elif is_else:
+            if not stack or stack[-1][2]:
+                raise ValueError("[[else]] outside a gate, or repeated")
+            frame = stack[-1]
+            frame[2] = True
+            live = frame[0] and not frame[1]
+        else:
+            if not stack:
+                raise ValueError("[[/if]] without a matching [[if]]")
+            live = stack.pop()[0]
+    if stack:
+        raise ValueError("unterminated [[if]] gate")
+    if live:
+        out.append(text[pos:])
+    return "".join(out)

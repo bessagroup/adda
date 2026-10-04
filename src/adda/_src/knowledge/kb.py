@@ -44,6 +44,9 @@ class KBEntry:
     tags: list[str] = field(default_factory=list)
     audience: list[str] = field(default_factory=list)
     body: str = ""
+    #: key of the runtime feature this chapter documents; the chapter is
+    #: absent from the menu, the TOC, search and ``get`` while it is off.
+    feature: str = ""
 
     @property
     def text(self) -> str:
@@ -104,6 +107,7 @@ def _load_entry(path: Path) -> KBEntry | None:
         tags=_tags if isinstance(_tags, list) else [],
         audience=_aud if isinstance(_aud, list) else [],
         body=m.group(2),
+        feature=str(meta.get("feature", "")),
     )
 
 
@@ -134,8 +138,14 @@ class KnowledgeBase:
     """
 
     def __init__(self, entries: list[KBEntry]) -> None:
-        self._entries = entries
+        self._all = entries
         self._by_id = {e.id: e for e in entries}
+
+    @property
+    def _entries(self) -> list[KBEntry]:
+        from ..runtime import features
+        return [e for e in self._all
+                if not e.feature or features.enabled(e.feature)]
 
     @classmethod
     def load(cls, entries_dir: Path | None = None) -> KnowledgeBase:
@@ -156,7 +166,8 @@ class KnowledgeBase:
         return list(self._entries)
 
     def get(self, entry_id: str) -> KBEntry | None:
-        return self._by_id.get(entry_id)
+        e = self._by_id.get(entry_id)
+        return e if e in self._entries else None
 
     def toc(self) -> str:
         """The table of contents: one line per chapter (id — title + summary).

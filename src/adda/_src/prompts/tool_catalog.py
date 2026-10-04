@@ -86,7 +86,8 @@ def render_tool_catalog(closure_tools: dict[str, Callable]) -> str:
 def system_prompt_with_catalog(base_prompt: str, closure_tools: dict) -> str:
     """Base prompt + the generated tool catalog. Computed at prompt-assembly
     time so it always reflects the current closures; never mutates state."""
-    return base_prompt + render_tool_catalog(closure_tools)
+    from ..runtime.features import resolve_gates
+    return resolve_gates(base_prompt + render_tool_catalog(closure_tools))
 
 
 def qualify_tool_mentions(text: str, names: Mapping[str, str]) -> str:

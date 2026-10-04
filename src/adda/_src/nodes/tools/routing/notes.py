@@ -19,8 +19,8 @@ def build_notes_closures(node) -> dict:
         """Write a Markdown (.md) note to strategizer_notes/ — free-form
         reasoning: why you chose each Delegate, interim findings, open issues.
         Do NOT write code in notes (embed it in Delegate().intent as plain
-        text), and do NOT record priors/posteriors here — those live ONLY in
-        the hypothesis ledger (HypothesisPropose/Update)."""
+        text)[[if hypothesis_ledger]], and do NOT record priors/posteriors here — those live ONLY in
+        the hypothesis ledger (HypothesisPropose/Update)[[/if]]."""
         notes_dir = node._current_notes_dir
         if notes_dir is None:
             return "ERROR: notes_dir not set (run_dir missing from state)."
@@ -47,7 +47,7 @@ def build_notes_closures(node) -> dict:
         to load PROBLEM_STATEMENT.md, review prior notes, and (importantly) to
         reuse the implementers' work: point it at a delegation workspace
         (workspace_dir/D###/) to LIST its files, then read the script you want
-        to consolidate into pipeline.ipynb. Read what you need, not everything."""
+        [[if pipeline_deliverable]]to consolidate into pipeline.ipynb[[else]]to reuse[[/if]]. Read what you need, not everything."""
         if study_dir is None:
             return "ERROR: study_dir not set."
         # Contain to the study directory. An absolute or ..-escaping path — e.g.

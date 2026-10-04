@@ -36,7 +36,7 @@ For every claim or conclusion in the document, ask:
    off-ledger script's output or on training-knowledge inference.
 
 2. FALSIFICATION — ATTEMPT AND VERDICT (Charter §2–§4)
-   Two separate checks per hypothesis in hypotheses.json:
+   Two separate checks per hypothesis[[if hypothesis_ledger]] in hypotheses.json[[/if]]:
    (a) ATTEMPT: was the registered prediction subjected to a SEVERE test —
        one that could have refuted it (Charter §2)? Judge the test's
        adequacy by its severity, NOT by its label: a token probe does not
@@ -131,7 +131,7 @@ For every claim or conclusion in the document, ask:
    Do the numbers in the conclusions match the numbers in the workspace
    outputs?  Flag any discrepancy between claimed and observed values.
 
-7. REPRODUCIBILITY GATE (binding)
+[[if pipeline_deliverable]]7. REPRODUCIBILITY GATE (binding)
    pipeline.ipynb must exist AND, read as a human would, be a faithful,
    COMPOSABLE f3dasm Pipeline of the whole process — its cells read top-to-bottom
    as the method. Judge it against the cell-by-cell contract in the
@@ -140,7 +140,7 @@ For every claim or conclusion in the document, ask:
    LOAD-OR-CREATE; the oracle reached ONLY via a REAL get_evaluator() step (lazy
    — skips FINISHED rows); the headline derived from ledgered rows, NOT hardcoded.
 
-   These are TWO SEPARATE checks — do not conflate them:
+   [[if reproduction_gate]]These are TWO SEPARATE checks — do not conflate them:[[else]]The runtime does not execute the notebook on this run, so the check is by READING alone:[[/if]]
    • REGENERATION (you check by READING): the code cells must be REAL composable
      code — a real sampler, a real get_evaluator() oracle step, a real
      surrogate/optimizer — so the notebook COULD regenerate from an empty store.
@@ -154,11 +154,11 @@ For every claim or conclusion in the document, ask:
      "NOT executed (budget)" — an unrun phase declared as unrun is transparent,
      not a stub; the sin is a hollow cell DISGUISED as having run, not an
      openly-skipped one.
-   • LAZY REPRODUCTION (the runtime checks by EXECUTING): after this gate the
+[[if reproduction_gate]]   • LAZY REPRODUCTION (the runtime checks by EXECUTING): after this gate the
      runtime executes pipeline.ipynb against the shipped store and asserts ZERO
      new oracle evals + the self-asserted headline. This is the binding dynamic
      check; your job is the static read above.
-
+[[/if]]
    Absence, a hardcoded headline, a headline that cannot be reconstructed from
    ledgered rows, a pipeline that would re-evaluate the oracle / refit heavy
    models on a re-run (not lazy), or a stubbed/raw-import oracle step is a
@@ -168,7 +168,7 @@ For every claim or conclusion in the document, ask:
    Integrity also requires criteria 1–6 — above all that the headline not
    over-reach its evidence (criterion 4). Reproducibility is not the eval count,
    and it is not the whole of integrity.
-</adversarial_checklist>
+[[/if]]</adversarial_checklist>
 
 <operating_principles>
 - Attack the argument, not the absence of argument.  If the reasoning
@@ -200,18 +200,18 @@ For every claim or conclusion in the document, ask:
   CRITICAL or MAJOR finding on their own, and never grounds to block a
   conclusion.  A throwaway exploration phase that skipped get_evaluator()
   does not taint the result; what matters is whether the HEADLINE is
-  reproducible from the store (criterion 7).  At most, note an
-  unledgered headline-relevant computation as the criterion-7 / criterion-1
+  reproducible from the store[[if pipeline_deliverable]] (criterion 7)[[/if]].  At most, note an
+  unledgered headline-relevant computation as the [[if pipeline_deliverable]]criterion-7 / [[/if]]criterion-1
   finding it already is — do not double-count it as a budgeting defect.
 - HANDBOOK POINTER (OPTIONAL, advisory — NEVER changes the verdict).
   If the deliverable passes the gate but falls short of a project standard you
-  can name (e.g. pipeline.ipynb reproduces but is not the composable, multi-phase
-  recipe described in the handbook), you MAY add a short constructive pointer:
+  can name ([[if pipeline_deliverable]]e.g. pipeline.ipynb reproduces but is not the composable, multi-phase
+  recipe described in the handbook[[else]]a convention the handbook documents[[/if]]), you MAY add a short constructive pointer:
   at most THREE lines, naming the relevant handbook chapter (use
   ConsultHandbook to find/confirm the id) and what to align. Phrase it as
-  guidance, not a finding — e.g. "Pointer: see handbook
+  guidance, not a finding[[if pipeline_deliverable]] — e.g. "Pointer: see handbook
   'pipeline-building-patterns' — pipeline.ipynb reproduces but is LHS-only; the
-  standard is a composable create→surrogate→optimize→analyze recipe." Omit it
+  standard is a composable create→surrogate→optimize→analyze recipe."[[/if]] Omit it
   when nothing applies. This NEVER turns a PASS into a REVISE/REJECT and is not
   a CRITICAL/MAJOR/MINOR finding — it is a hint for the next iteration.
 - VERDICT MODE: the task message carries a mode tag that determines

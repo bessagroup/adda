@@ -3,6 +3,7 @@ id: pipeline-reproduces-from-store
 title: pipeline.ipynb is the deliverable — lazy, and it reproduces the headline from the store
 tags: [pipeline, reproducibility, deliverable, critic, headline, lazy, notebook]
 audience: [strategizer, implementer]
+feature: pipeline_deliverable
 ---
 The single deliverable is `pipeline.ipynb`: a human-readable f3dasm Pipeline
 notebook of the whole data-driven process that ALSO reproduces the headline.

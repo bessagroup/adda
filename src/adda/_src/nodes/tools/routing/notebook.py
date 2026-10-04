@@ -581,8 +581,8 @@ class NotebookTools:
     def WriteDeliverable(self, filename: str, content: str) -> str:
         """Write an extra deliverable file that the study's config declares
         (config.yaml required_deliverables, e.g. replicate.py), verbatim, into
-        the study directory. `filename` is a bare name. The notebook is not
-        written here — it has its own cell tools, which keep its structure."""
+        the study directory. `filename` is a bare name.[[if pipeline_deliverable]] The notebook is not
+        written here — it has its own cell tools, which keep its structure.[[/if]]"""
         node = self.node
         if node._study_dir is None:
             return "ERROR: study_dir not available."
@@ -1080,8 +1080,8 @@ class NotebookTools:
         "print({k: len(v) for k, v in load_experiments().items()})\")")
     def RunScratch(self, code: str) -> str:
         """Run a short Python snippet and return its stdout/stderr — your
-        scratchpad for INSPECTING state before committing it to
-        pipeline.ipynb. f3dasm and adda are importable and
+        scratchpad for INSPECTING state[[if pipeline_deliverable]] before committing it to
+        pipeline.ipynb[[/if]]. f3dasm and adda are importable and
         F3DASM_CANONICAL_STORE points at a temp COPY of the store, so the
         store-loading idiom below reads that copy, not the real one, and
         does NOT count toward the eval budget: e.g. ``from adda import
@@ -1097,13 +1097,13 @@ class NotebookTools:
         sandbox: the snippet is a real OS process with full filesystem
         access, so code using an ABSOLUTE path (``os.remove``,
         ``open(..., 'w')``, ``shutil.*``) still reaches the real
-        experiment_data or pipeline.ipynb. Always go through the env var /
+        experiment_data[[if pipeline_deliverable]] or pipeline.ipynb[[/if]]. Always go through the env var /
         relative-import idiom above, never a hardcoded run path. As a
-        backstop, not a substitute for that — the real canonical store and
-        pipeline.ipynb are hashed before and after every call; any change is
+        backstop, not a substitute for that — the real canonical store[[if pipeline_deliverable]] and
+        pipeline.ipynb are[[else]] is[[/if]] hashed before and after every call; any change is
         reverted and reported as an ERROR here rather than left in place.
-        Use it to debug instead of guessing (e.g. 'does hypotheses.json
-        load? does h_dict populate?') rather than discovering a silent bug
+        Use it to debug instead of guessing ([[if hypothesis_ledger]]e.g. 'does hypotheses.json
+        load? does h_dict populate?'[[else]]e.g. 'does the store load? does the frame populate?'[[/if]]) rather than discovering a silent bug
         only at the Done() gate."""
         import subprocess as _sub
         node = self.node
@@ -1147,12 +1147,13 @@ class NotebookTools:
         runs top-to-bottom up to and including that cell — cells share kernel
         state, so this pinpoints WHICH cell breaks reproduction.
 
-        gate=True → the SAME reproduction gate Done() applies, as a dry run
+        [[if reproduction_gate]]gate=True → the SAME reproduction gate Done() applies, as a dry run
         that does not close the run: the notebook must run cleanly, add zero
         new evals and leave the store unchanged, and its printed
         'REPRODUCED: <value>' headline is surfaced (the critic checks its
         provenance). On a pass, Done()'s gate will pass. Limited to 10 per run,
-        so localize a failure with the trace before re-checking the gate."""
+        so localize a failure with the trace before re-checking the gate.[[else]]gate=True → this run has no reproduction gate, so the call executes
+        nothing and reports a pass.[[/if]]"""
         if gate:
             if upto is not None:
                 return ("ERROR: gate=True checks the whole notebook — drop "
