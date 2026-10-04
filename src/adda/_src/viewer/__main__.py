@@ -11,6 +11,8 @@ Options
 -------
 --host HOST   Interface to bind (default: 127.0.0.1 — local-only).
 --port PORT   Port to bind (default: 8765).
+--allow-network  Needed to bind any non-loopback --host (the viewer can
+                 start and kill runs).
 
 The viewer prints a ``/session?token=...`` URL at start. Reads are open; opening
 that URL once lets the browser write (notes, answers). Without it the page is
@@ -44,6 +46,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--port", type=int, default=8765, metavar="PORT",
         help="Port to bind (default: 8765).",
     )
+    parser.add_argument(
+        "--allow-network", action="store_true",
+        help=(
+            "Allow --host to be a non-loopback interface. The viewer can "
+            "start and kill runs, so this exposes that to the network."
+        ),
+    )
     return parser
 
 
@@ -62,7 +71,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    run_viewer(args.study_dir, host=args.host, port=args.port)
+    try:
+        run_viewer(args.study_dir, host=args.host, port=args.port,
+                   allow_network=args.allow_network)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
     return 0
 
 

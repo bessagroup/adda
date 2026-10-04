@@ -30,7 +30,7 @@ from starlette.templating import Jinja2Templates
 
 from ..infra import operator_channel, stop_request
 from ..nodes.notices import split_notices
-from . import readers
+from . import readers, run_control
 
 __all__ = ["create_app", "run_viewer"]
 
@@ -812,6 +812,39 @@ def create_app(
                stop_request=written)
         return JSONResponse({"ok": True, "stop_request": written})
 
+    async def get_preflight(request):
+        checks = run_control.preflight(study_dir)
+        return JSONResponse({
+            "checks": checks,
+            "can_start": not any(c["ok"] is False for c in checks),
+            "launched": run_control.launched(study_dir),
+        })
+
+    async def post_start(request):
+        refused = _check_write(request, token)
+        if refused is not None:
+            return refused
+        try:
+            entry = await asyncio.to_thread(run_control.start_run, study_dir)
+        except run_control.StartRefused as exc:
+            return JSONResponse(
+                {"error": str(exc), "checks": exc.checks}, status_code=409)
+        _audit(study_dir, "start", pid=entry["pid"],
+               command=entry["cmdline"], log=entry["log"])
+        return JSONResponse({"ok": True, **entry})
+
+    async def post_kill(request):
+        refused = _check_write(request, token)
+        if refused is not None:
+            return refused
+        out = run_control.kill_run(
+            study_dir, audit=lambda action, **f: _audit(study_dir, action, **f))
+        if out is None:
+            return JSONResponse(
+                {"error": "this viewer has not started a run that is still "
+                          "alive"}, status_code=404)
+        return JSONResponse({"ok": True, **out})
+
     async def get_log(request):
         run_id = request.path_params["run_id"]
         run_dir = _run_dir(study_dir, run_id)
@@ -1076,6 +1109,9 @@ def create_app(
         Route("/api/runs/{run_id}/operator", get_operator),
         Route("/api/runs/{run_id}/answer", post_answer, methods=["POST"]),
         Route("/api/runs/{run_id}/note", post_note, methods=["POST"]),
+        Route("/api/study/preflight", get_preflight),
+        Route("/api/study/start", post_start, methods=["POST"]),
+        Route("/api/study/kill", post_kill, methods=["POST"]),
         Route("/api/runs/{run_id}/log", get_log),
         Route("/api/runs/{run_id}/stop", post_stop, methods=["POST"]),
         Route("/api/runs/{run_id}/vitals", get_vitals),
@@ -1102,13 +1138,38 @@ def create_app(
     return app
 
 
+def _is_loopback(host: str) -> bool:
+    import ipaddress
+
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def run_viewer(
     study_dir: Path | str, host: str = "127.0.0.1", port: int = 8765,
-    graph=None,
+    graph=None, allow_network: bool = False,
 ) -> None:
-    """Launch the viewer web server (blocking). Requires ``uvicorn``."""
+    """Launch the viewer web server (blocking). Requires ``uvicorn``.
+
+    The viewer can start and kill runs, so binding anywhere but the loopback
+    interface must be asked for with ``allow_network=True``.
+    """
     import uvicorn
 
+    if not _is_loopback(host):
+        if not allow_network:
+            raise ValueError(
+                f"refusing to bind {host!r}: the viewer can start and stop "
+                "runs, so it listens on the loopback interface only unless "
+                "you pass --allow-network")
+        print(
+            f"adda viewer WARNING: bound to {host!r}. Anyone on that network "
+            "who gets the session URL can START and KILL runs on this "
+            "machine.", flush=True)
     app = create_app(study_dir, graph=graph)
     shown = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     print(

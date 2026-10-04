@@ -1212,6 +1212,21 @@ against the SDK's cost on calls it did price.
   byte once, a file that shrank comes back from the start with `reset: true`. The log is chosen
   by name (only `run` = `debug/run.log` today), never by path. The watchdog's own log joins once
   the viewer starts runs (5.3) and so owns its stdout.
+  **Start / Kill (spec 14 5.3, 5.4):** `viewer/run_control.py`.
+  `GET /api/study/preflight` returns `{checks:[{name, ok, detail}], can_start, launched}`
+  (problem statement, config, budget, evaluator present and parsed without importing it, backend
+  CLI on PATH, no live run; `ok: null` = not decidable without side effects: the evaluator's
+  one-sample run and the problem statement's content are left to a person). `POST /api/study/start`
+  runs exactly `python -m adda.watchdog <study>` (budget/model from the committed config), 409
+  with the checks if any is false. One live run per study: a viewer-started process still alive,
+  or a run dir with no `run_status.json` that wrote to `debug/` in the last 600 s (`LIVE_WINDOW_S`;
+  a crashed run that stopped writing does not block forever). What it started is in
+  `runs/_viewer/registry.json` (PID + process start time, so a viewer restart still knows and a
+  recycled PID is never mistaken for ours), its output in `runs/_viewer/watchdog_<ts>.log`.
+  `POST /api/study/kill` SIGTERMs that watchdog (which reaps the run's tree), then SIGKILLs the
+  survivors among the descendants of that exact PID after 30 s; 404 if the viewer started nothing
+  alive. Every start/kill is a `viewer_actions.jsonl` line with the exact command and signal.
+  The viewer binds loopback only: any other `--host` needs `--allow-network` and prints a warning.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);
   `agent_runtime.py`'s `AgenticRun.serve_viewer`; `pyproject.toml`'s `viewer`

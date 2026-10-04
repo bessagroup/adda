@@ -23,10 +23,12 @@ Then open the `http://…/session?token=…` URL it prints. Anyone who can reach
 the port can read the runs, but only a browser that opened that URL once (it
 sets a cookie) can write — answer a question, queue a note. Another web page
 cannot write on your behalf. Without the cookie the page is read-only and says
-so. The default bind is localhost; don't put the viewer on a public interface.
+so. The viewer can start and kill runs, so it binds the loopback interface only
+unless you pass `--allow-network`, which prints a warning; don't put it on a
+public interface.
 
 ```bash
-python -m adda.viewer my_study --host 0.0.0.0 --port 9000  # only on a network you trust
+python -m adda.viewer my_study --host 0.0.0.0 --port 9000 --allow-network  # only on a network you trust
 ```
 
 The viewer is a separate process from the run, so start it in its own

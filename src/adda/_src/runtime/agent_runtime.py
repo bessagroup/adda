@@ -399,6 +399,7 @@ class AgenticRun:
 
     def serve_viewer(
         self, host: str = "127.0.0.1", port: int = 8765,
+        allow_network: bool = False,
     ) -> None:
         """Launch the read-only live web viewer for this study's runs
         (blocking — run in a separate terminal/process from ``execute()``,
@@ -417,7 +418,8 @@ class AgenticRun:
         from ..viewer.app import run_viewer
 
         run_viewer(
-            self.study_dir, host=host, port=port, graph=self._graph_spec)
+            self.study_dir, host=host, port=port, graph=self._graph_spec,
+            allow_network=allow_network)
 
     def execute(self) -> str:
         """Run the agentic loop; return the final report text.
