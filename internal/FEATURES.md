@@ -1342,6 +1342,18 @@ would have avoided it, each change attributed to the agent's strategy, the
 tools/harness, or the problem setup. The retrospective cap is 16000 chars so
 the bullet is not cut off behind a long report.
 
+**Resuming a crashed run (`runtime.resume_close_with_retrospectives`, default
+off).** When a resume finds a mid-flight checkpoint (the process was lost:
+crash, SIGKILL, OOM), this knob writes a stop request (`by="resume"`,
+`termination=crashed`) before the graph restarts, so the entry node gives the
+retrospective the crash cost it, with a crash variant of the TIME bullet
+(`CRASH_SECTION`: what brought it down, where the time went, what would have
+avoided it), and the run closes `crashed`/`halted`, resumable. Delegations the
+log last saw RUNNING are named in `RETROSPECTIVES_MISSING` ("process lost");
+no text is ever synthesized for them. A crash that already ran past the time
+budget needs no knob for the entry node: the resumed run keeps its original
+start, so the time backstop trips on the first turn.
+
 **Backstops go through it too.** A time, USD or repeated-errors backstop
 no longer jumps to END: it writes a stop request (`by="backstop"`) carrying
 its own `termination` (`backstop_time` / `backstop_usd` / `repeated_errors`),

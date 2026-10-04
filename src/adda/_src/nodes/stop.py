@@ -45,11 +45,32 @@ TIME_SECTION = (
 )
 
 
+CRASH_SECTION = (
+    "- TIME: the previous process of this run was lost before it could "
+    "close. (a) DIAGNOSIS: what do you think brought it down (a resource "
+    "limit such as memory, a node loss, the evaluator or a tool, your own "
+    "work) and did anything in your work foreshadow it? Say what you know "
+    "and what you are inferring. (b) WHERE IT WENT: what the run had spent "
+    "its time on up to that point, citing your own work. (c) WHAT WOULD HAVE "
+    "AVOIDED IT (required): concrete changes, each attributed to who can "
+    "make it — your own strategy, the tools/harness, or the problem setup."
+)
+
+
+def time_section(stop: dict | None) -> str:
+    return CRASH_SECTION if (stop or {}).get("termination") == (
+        terminal.CRASHED) else TIME_SECTION
+
+
 def stop_headline(stop: dict | None) -> str:
     """Why the run is ending, stated plainly. A run out of time is told it did
     not finish on time; any other stop names its own cause."""
     stop = stop or {}
     reason = stop.get("reason") or ""
+    if stop.get("termination") == terminal.CRASHED:
+        return ("The previous process of this run crashed or was killed"
+                + (f" ({reason})" if reason else "")
+                + "; this resume only collects what you can still report.")
     if stop.get("by") == "watchdog" or stop.get("termination") == (
             terminal.BACKSTOP_TIME):
         return ("The hard time cap is being reached"
@@ -63,7 +84,7 @@ def wind_down_notice(stop: dict | None) -> str:
         f"[RUN STOP — {stop_headline(stop)} Report what you have NOW: your "
         "findings so far, what is unfinished, and your retrospective. Do not "
         "start new work. Your retrospective must include this bullet:\n"
-        f"{TIME_SECTION}]"
+        f"{time_section(stop)}]"
     )
 
 
@@ -95,6 +116,8 @@ class StopMixin:
                 "cancelled": False,
             }
             wound = self._stop_wind_down()
+            if req.get("termination") == terminal.CRASHED:
+                self._log_lost_workers()
             self._record_intervention(
                 "RUN_STOP", "(run)",
                 f"stop requested by {req['by']}"
@@ -213,14 +236,13 @@ class StopMixin:
     def _stop_termination(self) -> str:
         return (self._stop or {}).get("termination") or terminal.STOPPED
 
-    def _missing_retrospectives(self) -> list[str]:
-        """Delegations that ended without a recorded retrospective."""
+    def _recorded_retrospective_ids(self) -> set[str]:
         import json
 
         run_dir = self._current_run_dir
-        if run_dir is None:
-            return []
         have: set[str] = set()
+        if run_dir is None:
+            return have
         try:
             with open(run_dir / "debug" / "retrospectives.jsonl",
                       encoding="utf-8") as f:
@@ -231,6 +253,14 @@ class StopMixin:
                         continue
         except OSError:
             pass
+        return have
+
+    def _missing_retrospectives(self) -> list[str]:
+        """Delegations that ended without a recorded retrospective."""
+        run_dir = self._current_run_dir
+        if run_dir is None:
+            return []
+        have = self._recorded_retrospective_ids()
         ids: set[str] = set()
         for n in self._stop_nodes():
             with n._registry_lock:
@@ -239,6 +269,24 @@ class StopMixin:
         if "DONE" not in have:
             missing.append("DONE")
         return missing
+
+    def _log_lost_workers(self) -> None:
+        """A resume after a crash: delegations the delegation log last saw
+        RUNNING died with the process. They are named, never given invented
+        retrospective text."""
+        log = getattr(self, "_delegation_log", None)
+        if log is None:
+            return
+        have = self._recorded_retrospective_ids()
+        lost = sorted(
+            r["id"] for r in log.query_all()
+            if r.get("status") == "RUNNING" and r["id"] not in have)
+        if lost:
+            self._record_intervention(
+                "RETROSPECTIVES_MISSING", "(run)",
+                "process lost: no retrospective from "
+                f"{', '.join(lost)} (they were running when the process "
+                "died; none is synthesized)")
 
     def _log_missing_retrospectives(self, why: str) -> None:
         missing = self._missing_retrospectives()

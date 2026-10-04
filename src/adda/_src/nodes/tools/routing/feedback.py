@@ -24,7 +24,7 @@ from typing import Any
 from ....prompts.tool_catalog import tool_examples
 from ....runtime import terminal
 from ...parsing import _parse_verdict
-from ...stop import TIME_SECTION, stop_headline
+from ...stop import stop_headline, time_section
 from ._binding import with_doc
 from ._decoding import decode_list_arg
 
@@ -92,7 +92,7 @@ def _stop_retrospective(stop: dict | None, termination: str) -> str:
         "- DECISION: what you would have done next had the run continued.\n"
         "- FRICTION: any rule/tool that worked against you, INCLUDING what you "
         "recovered from; 'none' only if truly zero.\n"
-        f"{TIME_SECTION}\n"
+        f"{time_section(stop)}\n"
         "This will NOT reopen the run."
     )
 

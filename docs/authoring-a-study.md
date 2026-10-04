@@ -91,6 +91,7 @@ rather than silently reverting to the default.
 | `delegate_cutoff_multiple` | multiple of the wall budget past which NEW delegations are refused (in-flight ones are never touched); must stay below `run_backstop_multiple` or it can never fire. `0` disables | `1.5` |
 | `followup_wait_s` | how long a `FollowUp` waits for a human answer | `600` |
 | `stop_grace_s` | only with the watchdog launcher: seconds BEFORE its deadline at which it asks the run to wind down (a stop request in `debug/`) instead of waiting to kill it, so agents hand over real retrospectives. On unless you change it: unset means a tenth of the deadline, at most 900 s. The deadline does not move. Must be shorter than the deadline; `0` disables | `min(900, deadline/10)` |
+| `resume_close_with_retrospectives` | on a resume whose process was lost (crash, SIGKILL, OOM), wind the run down at once instead of continuing it, so the entry node gives the retrospective the crash cost it (TIME bullet included); closes `crashed`. Workers that died in flight are logged as missing (`RETROSPECTIVES_MISSING`, "process lost"); nothing is invented for them | `false` |
 | `peer_message_wait_s` | how long `SendMessage(wait_for_reply=True)` waits for a peer's reply before returning (spec 12, behind `peer_interaction`) | `300` |
 | `llm_retry_max` | retry attempts for a failed model call | `5` |
 | `llm_retry_base` | base seconds for retry backoff | `2.0` |

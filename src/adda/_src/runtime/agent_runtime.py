@@ -18,6 +18,7 @@ from ..agents import ImplementerAgent, StrategizerAgent, _default_graph
 from ..backends.base import Agent, Graph
 from ..infra.container_runner import ContainerRunner
 from ..infra.delegation_log import DelegationLog
+from ..infra.stop_request import write_stop_request
 from ..infra.workspace_vcs import init_workspace_repo
 from ..nodes._constants import (
     backstop_enabled,
@@ -796,6 +797,8 @@ class AgenticRun:
                 if ctx.resuming and hasattr(graph, "get_state"):
                     graph_input = self._resumed_graph_input(graph, ctx)
                 self._refresh_resumed_budgets(graph, ctx)
+                if ctx.resuming and graph_input is None:
+                    self._ask_crashed_run_for_retrospective(ctx)
                 try:
                     return graph.invoke(graph_input, config=ctx.graph_config)
                 except BaseException as _exc:  # noqa: BLE001
@@ -850,6 +853,17 @@ class AgenticRun:
                     log.info("llm_slurm: scancel'd serve job %s", _serve_jobid)
                 except Exception:  # noqa: BLE001
                     log.warning("llm_slurm: teardown failed", exc_info=True)
+
+    def _ask_crashed_run_for_retrospective(self, ctx: _RunContext) -> bool:
+        """Resuming a run whose process was lost (its checkpoint is mid-flight):
+        when ``runtime.resume_close_with_retrospectives`` is on, wind the
+        resumed run down at once instead of continuing it, so the entry node
+        gives the retrospective the crash cost it. The run closes CRASHED."""
+        if not settings.get_bool("resume_close_with_retrospectives", False):
+            return False
+        return write_stop_request(
+            ctx.run_dir, by="resume", termination=terminal.CRASHED,
+            reason="the process that ran this was lost before it could close")
 
     def _resumed_graph_input(self, graph: Any, ctx: _RunContext) -> Any:
         """What to feed a resumed graph: None to replay, or fresh input to re-run.

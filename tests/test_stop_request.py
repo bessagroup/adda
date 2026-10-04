@@ -366,6 +366,79 @@ def test_the_time_section_survives_the_retrospective_cap(tmp_path):
     assert len(retro) < recording._RETRO_TEXT_CAP
 
 
+def test_a_crash_resume_stop_names_the_crash_not_the_clock():
+    from adda._src.nodes.stop import CRASH_SECTION, TIME_SECTION, stop_headline, time_section
+
+    stop = {"by": "resume", "termination": terminal.CRASHED, "reason": "lost"}
+    assert "crashed or was killed" in stop_headline(stop)
+    assert "did not finish on time" not in stop_headline(stop)
+    assert time_section(stop) is CRASH_SECTION
+    assert "(c) WHAT WOULD HAVE AVOIDED IT (required)" in CRASH_SECTION
+    assert time_section({"by": "watchdog"}) is TIME_SECTION
+
+
+def test_lost_workers_are_named_never_given_invented_retrospectives(tmp_path):
+    node, run_dir, tools = _node(tmp_path)
+    node._delegation_log.record_started(
+        id="D001", from_node="strategizer", to_node="worker", task="t",
+        hypothesis_ids=[], started_at="2026-01-01T00:00:00+00:00")
+    write_stop_request(run_dir, by="resume", reason="lost", grace_s=5,
+                       termination=terminal.CRASHED)
+    node._stop_tick()
+    rows = [r for r in _interventions(run_dir)
+            if "RETROSPECTIVES_MISSING" in json.dumps(r)]
+    assert rows and "process lost" in json.dumps(rows[0])
+    assert "D001" in json.dumps(rows[0])
+    retros = run_dir / "debug" / "retrospectives.jsonl"
+    assert not retros.exists() or "D001" not in retros.read_text()
+
+
+def test_resume_asks_a_crashed_run_only_when_configured(tmp_path):
+    from adda._src.runtime import settings
+    from adda._src.runtime.agent_runtime import AgenticRun
+
+    (tmp_path / "PROBLEM_STATEMENT.md").write_text("x\n", encoding="utf-8")
+    run = AgenticRun(tmp_path)
+    run_dir = tmp_path / "runs" / "T"
+    (run_dir / "debug").mkdir(parents=True)
+    ctx = type("C", (), {"run_dir": run_dir})()
+    try:
+        settings.configure({}, {})
+        assert run._ask_crashed_run_for_retrospective(ctx) is False
+        assert read_stop_request(run_dir) is None
+        settings.configure({"resume_close_with_retrospectives": True}, {})
+        assert run._ask_crashed_run_for_retrospective(ctx) is True
+        req = read_stop_request(run_dir)
+        assert req["by"] == "resume" and req["termination"] == terminal.CRASHED
+    finally:
+        settings.configure({}, {})
+
+
+def test_a_resume_past_the_budget_winds_down_through_the_backstop(tmp_path):
+    """A crashed run resumed after its budget: the anchored start makes the
+    time backstop trip on the first turn, and it asks for retrospectives."""
+    from adda._src.runtime.agent_runtime import AgenticRun
+    from tests.test_route_aware_termination import (
+        StubAdapter, _make_state, _minimal_spec)
+
+    study = tmp_path / "study"
+    run_dir = study / "runs" / "T"
+    (run_dir / "debug").mkdir(parents=True)
+    (run_dir / "debug" / "run_started_at").write_text(repr(time.time() - 500))
+    (study / "pipeline.ipynb").write_text("# t\n")
+    start = AgenticRun._anchor_start_time(
+        AgenticRun.__new__(AgenticRun), run_dir / "debug", run_dir)
+    assert time.time() - start > 400
+
+    node = Node(StubAdapter(), name="strategizer", outgoing=["implementer"],
+                spec=_minimal_spec())
+    state = _make_state(study_dir=study)
+    state.update(budget_seconds=10, start_time=start, run_dir=str(run_dir))
+    node(state)
+    req = read_stop_request(run_dir)
+    assert req["by"] == "backstop" and req["termination"] == terminal.BACKSTOP_TIME
+
+
 def test_a_wound_down_halt_stays_resumable_with_its_halted_status(tmp_path):
     import logging
 
