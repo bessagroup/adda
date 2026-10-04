@@ -24,6 +24,7 @@ from typing import Any
 from ....prompts.tool_catalog import tool_examples
 from ....runtime import terminal
 from ...parsing import _parse_verdict
+from ...stop import TIME_SECTION, stop_headline
 from ._binding import with_doc
 from ._decoding import decode_list_arg
 
@@ -79,19 +80,22 @@ _FAILED_RETROSPECTIVE = (
 # Retrospective when an operator/watchdog stop closes the run. Same fields as
 # the failed-close interview, but it names the real reason so the agent does
 # not read its own interruption as a failure of its work.
-_STOP_RETROSPECTIVE = (
-    "The run is being STOPPED on request (recorded as UNGATED, termination "
-    "'stopped'; it can be resumed). Before it finalises, a quick "
-    "retrospective about the SYSTEM, not the science. Call Done() ONE more "
-    "time with a summary containing only a ### Retrospective block:\n"
-    "- BLOCKED: the single biggest thing you NEEDED but COULDN'T do — a "
-    "missing tool, permission, or way to test/inspect your own work. Name it "
-    "specifically.\n"
-    "- DECISION: what you would have done next had the run continued.\n"
-    "- FRICTION: any rule/tool that worked against you, INCLUDING what you "
-    "recovered from; 'none' only if truly zero.\n"
-    "This will NOT reopen the run."
-)
+def _stop_retrospective(stop: dict | None, termination: str) -> str:
+    return (
+        f"{stop_headline(stop)} The run is recorded as UNGATED, termination "
+        f"'{termination}', and can be resumed. Before it finalises, a quick "
+        "retrospective about the SYSTEM, not the science. Call Done() ONE more "
+        "time with a summary containing only a ### Retrospective block:\n"
+        "- BLOCKED: the single biggest thing you NEEDED but COULDN'T do — a "
+        "missing tool, permission, or way to test/inspect your own work. Name "
+        "it specifically.\n"
+        "- DECISION: what you would have done next had the run continued.\n"
+        "- FRICTION: any rule/tool that worked against you, INCLUDING what you "
+        "recovered from; 'none' only if truly zero.\n"
+        f"{TIME_SECTION}\n"
+        "This will NOT reopen the run."
+    )
+
 
 # Bounce budget before a never-reproducing deliverable closes the run FAILED.
 _REPRO_MAX = 6
@@ -225,7 +229,7 @@ class FeedbackTools:
         }
         node._awaiting_retro = True
         node._final_summary = banner + summary
-        return prefix + _STOP_RETROSPECTIVE
+        return prefix + _stop_retrospective(stop, termination)
 
     def _capture_retrospective(self, summary: str, prefix: str) -> str | None:
         """Final stage: this Done() carries ONLY the retrospective.

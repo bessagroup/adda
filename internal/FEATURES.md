@@ -1331,6 +1331,17 @@ A request stamped before the run's start is a leftover and is ignored, so a
 resumed run does not stop on arrival; the file is renamed
 `stop_request.consumed.json` once honoured.
 
+**Time accountability.** Every stop (watchdog, backstop, operator) states its
+cause plainly to the agents; a time cap says "the hard time cap is being
+reached; the run did not finish on time". Workers' wind-down notice and the
+entry node's retrospective prompt both require a `- TIME:` bullet in the
+`### Retrospective` block (`nodes/stop.py` `TIME_SECTION`): (a) diagnosis —
+the problem too hard for the allotment, or the work inefficient; (b) where
+the time went, with evidence from the agent's own work; (c) REQUIRED — what
+would have avoided it, each change attributed to the agent's strategy, the
+tools/harness, or the problem setup. The retrospective cap is 16000 chars so
+the bullet is not cut off behind a long report.
+
 **Backstops go through it too.** A time, USD or repeated-errors backstop
 no longer jumps to END: it writes a stop request (`by="backstop"`) carrying
 its own `termination` (`backstop_time` / `backstop_usd` / `repeated_errors`),

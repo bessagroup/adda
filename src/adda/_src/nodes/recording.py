@@ -12,7 +12,7 @@ from .parsing import _extract_report_section
 # interview (CONSISTENCY/DECISION/FRICTION/BLOCKED) is the highest-signal
 # first-person record there is; the old 2000-char cap truncated it mid-sentence
 # (run 20260624T021359). Uniform across roles — no node-specific special-casing.
-_RETRO_TEXT_CAP = 8000
+_RETRO_TEXT_CAP = 16000
 
 # Fault classification (system vs agent) for the diagnostics KPI. The exception
 # TYPE is authoritative. Message matching is a fallback for string-only errors

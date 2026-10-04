@@ -242,8 +242,8 @@ def run_under_watchdog(
                 if resolved_run_dir is not None:
                     write_stop_request(
                         resolved_run_dir, by="watchdog",
-                        reason=f"{stop_grace_s:g}s before the "
-                               f"{deadline_s:g}s wall-clock deadline",
+                        reason=f"the {deadline_s:g}s wall-clock deadline is "
+                               f"{stop_grace_s:g}s away",
                         grace_s=stop_grace_s / 2,
                     )
             remaining = deadline - time.monotonic()

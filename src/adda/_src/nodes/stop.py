@@ -33,11 +33,39 @@ from ..infra.stop_request import (
 )
 from ..runtime import terminal
 
-_WIND_DOWN = (
-    "[RUN STOP — the run is being stopped. Report what you have NOW: "
-    "your findings so far, what is unfinished, and your retrospective. Do "
-    "not start new work.]"
+TIME_SECTION = (
+    "- TIME: the run is ending before the work was finished. (a) DIAGNOSIS: "
+    "was the problem too hard for the resources allotted, or was the work "
+    "inefficient (your strategy, the tools, the problem setup)? Pick one and "
+    "say why. (b) WHERE IT WENT: where the time (or spend) went, citing "
+    "evidence from your own work — turns, waits, evaluations, retries. "
+    "(c) WHAT WOULD HAVE AVOIDED IT (required): concrete changes, each "
+    "attributed to who can make it — your own strategy, the tools/harness, or "
+    "the problem setup (budget, evaluator cost, statement)."
 )
+
+
+def stop_headline(stop: dict | None) -> str:
+    """Why the run is ending, stated plainly. A run out of time is told it did
+    not finish on time; any other stop names its own cause."""
+    stop = stop or {}
+    reason = stop.get("reason") or ""
+    if stop.get("by") == "watchdog" or stop.get("termination") == (
+            terminal.BACKSTOP_TIME):
+        return ("The hard time cap is being reached"
+                + (f" ({reason})" if reason else "")
+                + "; the run did not finish on time.")
+    return "The run is being stopped" + (f": {reason}." if reason else ".")
+
+
+def wind_down_notice(stop: dict | None) -> str:
+    return (
+        f"[RUN STOP — {stop_headline(stop)} Report what you have NOW: your "
+        "findings so far, what is unfinished, and your retrospective. Do not "
+        "start new work. Your retrospective must include this bullet:\n"
+        f"{TIME_SECTION}]"
+    )
+
 
 _LIVE = ("Working", "FollowUp", "Revising")
 
@@ -105,7 +133,7 @@ class StopMixin:
             for n in self._stop_nodes():
                 with n._pending_worker_msgs_lock:
                     n._pending_worker_msgs.setdefault(did, []).append(
-                        _WIND_DOWN)
+                        wind_down_notice(self._stop))
         return sorted(ids)
 
     def _stop_cancel_stragglers(self) -> list[str]:

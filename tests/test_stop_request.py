@@ -86,7 +86,7 @@ def test_request_while_idle_closes_stopped_through_the_retrospective(tmp_path):
     first = tools["Done"]("Stopping with what I have.")
     # No milestone / first-call-warning / reproduction gate: straight to the
     # retrospective, which names the real reason.
-    assert "STOPPED" in first and "Retrospective" in first, first
+    assert "stopped" in first and "Retrospective" in first, first
     assert "WARNING: first Done()" not in first
 
     out = tools["Done"](_RETRO)
@@ -314,3 +314,53 @@ def test_an_overrun_wind_down_falls_through_to_the_hard_halt(tmp_path):
     assert node._wind_down_overdue() is True
     node._stop["deadline"] = time.time() + 100
     assert node._wind_down_overdue() is False
+
+
+def test_a_time_stop_says_plainly_that_the_run_did_not_finish_on_time(tmp_path):
+    node, run_dir, tools = _node(tmp_path)
+    _live(node)
+    write_stop_request(run_dir, by="watchdog", grace_s=60,
+                       reason="the 100s wall-clock deadline is 10s away")
+
+    node._stop_tick()
+    with node._pending_worker_msgs_lock:
+        notice = node._pending_worker_msgs["D001"][0]
+    assert "hard time cap" in notice and "did not finish on time" in notice
+    assert "- TIME:" in notice and "(c) WHAT WOULD HAVE AVOIDED IT" in notice
+    assert "required" in notice
+
+    with node._registry_lock:
+        node._registry["D001"].update({"status": "Done", "result": "x"})
+    prompt = tools["Done"]("closing")
+    assert "did not finish on time" in prompt
+    for part in ("(a) DIAGNOSIS", "too hard", "inefficient", "(b) WHERE IT WENT",
+                 "(c) WHAT WOULD HAVE AVOIDED IT", "strategy",
+                 "tools/harness", "problem setup"):
+        assert part in prompt, part
+
+
+def test_every_stop_asks_for_the_time_section(tmp_path):
+    for by, term in (("viewer", None), ("backstop", terminal.BACKSTOP_USD)):
+        node, run_dir, tools = _node(tmp_path / by)
+        write_stop_request(run_dir, by=by, reason="why", grace_s=5,
+                           termination=term)
+        prompt = tools["Done"]("closing")
+        assert "- TIME:" in prompt and "why" in prompt
+        assert "did not finish on time" not in prompt
+
+
+def test_the_time_section_survives_the_retrospective_cap(tmp_path):
+    from adda._src.nodes import recording
+
+    node, run_dir, tools = _node(tmp_path)
+    write_stop_request(run_dir, by="watchdog", grace_s=5)
+    tools["Done"]("closing")
+    long_findings = "finding. " * 800   # 7200 chars of report before the block
+    retro = (long_findings + "\n### Retrospective\n- BLOCKED: none\n"
+             "- FRICTION: none\n- TIME: (a) inefficient. (b) " + "x" * 1200 +
+             " (c) END-OF-TIME-SECTION-MARKER")
+    tools["Done"](retro)
+    rows = [json.loads(x) for x in
+            (run_dir / "debug" / "retrospectives.jsonl").read_text().splitlines()]
+    assert "END-OF-TIME-SECTION-MARKER" in rows[-1]["text"]
+    assert len(retro) < recording._RETRO_TEXT_CAP
