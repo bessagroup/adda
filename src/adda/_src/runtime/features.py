@@ -22,6 +22,17 @@ set. ``tests/test_features.py`` fails if a declared section tag does not exist
 in the prompt that claims to own it, so a renamed tag cannot silently stop
 being stripped.
 
+A feature's footprint is a DECLARATION, not scattered conditionals. Text it
+owns reaches an agent three ways, all resolved here and nowhere else: a tagged
+section (``sections``, removed by ``strip_disabled_sections``); an inline gate
+``[[if key]]on[[else]]off[[/if]]`` inside any prompt or tool docstring
+(``resolve_gates``, applied when the catalog is appended; the on branch is kept
+byte-for-byte, an unknown key or unbalanced marker raises); and a knowledge
+chapter's ``feature:`` frontmatter, which hides the chapter while the feature
+is off. ``requires`` declares a prerequisite feature and ``enabled`` resolves
+it, so a combination is stated once and ``conflicts`` reports where a knob said
+on but a prerequisite said off.
+
 PERVASIVE features are the honest caveat. A feature is pervasive when its
 CONCEPT appears outside the sections it owns — the strategizer's whole
 scientific method is written in terms of hypotheses, across

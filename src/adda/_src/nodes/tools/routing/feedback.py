@@ -104,6 +104,31 @@ _REPRO_MAX = 6
 _REVISE_MAX = 3
 
 
+# What follows the critic's task message. Each feature-owned block is a gated
+# section, so the message is composed by the same declaration as every prompt.
+_GATE_TAIL = (
+    "[[if hypothesis_ledger]]\n\n<hypothesis_ledger>\n@@LEDGER@@"
+    "\n</hypothesis_ledger>[[/if]]"
+    "[[if milestones_enabled]]\n\n<milestones>\n@@MILESTONES@@"
+    "\n</milestones>[[/if]]"
+    "\n\n<delegation_flags>\n@@FLAGS@@\n</delegation_flags>\n\n"
+    "@@SNAPSHOT@@\n"
+    "If nothing meaningful still fits in the remaining budget "
+    "(criterion 5's endpoint — the graded bar it sets cannot be "
+    "met by anything the run could still do), judge the BEST "
+    "HONEST conclusion reachable within what was actually spent: "
+    "an honest INCONCLUSIVE/negative result whose falsification "
+    "attempts were adequate for that point can PASS. Do NOT "
+    "REVISE solely to demand work the remaining budget no longer "
+    "supports — note it as future work instead."
+    "[[if hypothesis_ledger]]\n\nFor each hypothesis, judge whether its "
+    "stated falsification_criterion was actually tested by "
+    "a delegation flagged is_falsification_attempt "
+    "— adequacy of the test (given the budget), not mere "
+    "presence of the flag.[[/if]]"
+)
+
+
 class FeedbackTools:
     """The run-closing and critic-consulting tools, bound to one node."""
 
@@ -584,55 +609,32 @@ class FeedbackTools:
             # is not a concern, and final_summary.md is also available.
             + f"Proposed conclusion:\n{summary}"
         )
-        _ledger = (
-            "\n\n<hypothesis_ledger>\n" + self._ledger_dump()
-            + "\n</hypothesis_ledger>"
-            if features.enabled("hypothesis_ledger") else ""
-        )
-        _milestones = (
-            "\n\n<milestones>\n" + self._milestone_block()
-            + "\n</milestones>"
-            if features.enabled("milestones_enabled") else ""
-        )
-        _per_hypothesis = (
-            "\n\nFor each hypothesis, judge whether its stated "
-            "falsification_criterion was actually tested by "
-            "a delegation flagged is_falsification_attempt "
-            "— adequacy of the test (given the budget), not mere "
-            "presence of the flag."
-            if features.enabled("hypothesis_ledger") else ""
-        )
-        return task_msg + _ledger + _milestones + (
-            "\n\n<delegation_flags>\n"
-            + "\n".join(self._attempt_flags())
-            + "\n</delegation_flags>\n\n"
-            + snapshot.as_text() + "\n"
-            "If nothing meaningful still fits in the remaining budget "
-            "(criterion 5's endpoint — the graded bar it sets cannot be "
-            "met by anything the run could still do), judge the BEST "
-            "HONEST conclusion reachable within what was actually spent: "
-            "an honest INCONCLUSIVE/negative result whose falsification "
-            "attempts were adequate for that point can PASS. Do NOT "
-            "REVISE solely to demand work the remaining budget no longer "
-            "supports — note it as future work instead."
-        ) + _per_hypothesis
+        tail = features.resolve_gates(_GATE_TAIL)
+        for token, build in (
+            ("@@LEDGER@@", self._ledger_dump),
+            ("@@MILESTONES@@", self._milestone_block),
+            ("@@FLAGS@@", lambda: "\n".join(self._attempt_flags())),
+            ("@@SNAPSHOT@@", snapshot.as_text),
+        ):
+            if token in tail:
+                tail = tail.replace(token, build())
+        return task_msg + tail
 
     def _deliverable_line(self, study_dir: Any) -> str:
         """The ``deliverable =`` row of ``<paths>``; absent when the run has
         no notebook deliverable."""
-        if not features.enabled("pipeline_deliverable"):
-            return ""
-        return (
+        return features.resolve_gates(
+            "[[if pipeline_deliverable]]"
             f"deliverable           = {study_dir}/pipeline.ipynb "
             "("
-            + (
-                "the runtime EXECUTES the notebook lazily after this gate to "
-                "verify the headline re-derives from the ledger with zero new "
-                "evals; "
-                if features.enabled("reproduction_gate") else ""
-            )
-            + "the notebook's own markdown cells ARE the writeup — "
+            "[[if reproduction_gate]]"
+            "the runtime EXECUTES the notebook lazily after this gate to "
+            "verify the headline re-derives from the ledger with zero new "
+            "evals; "
+            "[[/if]]"
+            "the notebook's own markdown cells ARE the writeup — "
             "there is no solution.md, do NOT flag it as missing)\n"
+            "[[/if]]"
         )
 
     def _ledger_dump(self) -> str:

@@ -48,7 +48,7 @@ def _clean_settings():
     settings.configure(None)
 
 
-def _assemble(tmp_path: Path, override: dict) -> dict[str, tuple[str, set]]:
+def _assemble(tmp_path: Path, override: dict, graph=None) -> dict[str, tuple[str, set]]:
     from adda._src.runtime.agent_runtime import AgenticRun
     from adda._src.runtime.graph_builder import build_graph
 
@@ -59,7 +59,7 @@ def _assemble(tmp_path: Path, override: dict) -> dict[str, tuple[str, set]]:
         for f in ("PROBLEM_STATEMENT.md", "config.yaml"):
             shutil.copy(_STUDY / f, study / f)
         run = AgenticRun(study_dir=study, review_statement=False,
-                         interactive=False, runtime=override)
+                         interactive=False, runtime=override, graph=graph)
         settings.configure(run._study_runtime, run._runtime_override)
         ctx = run._prepare_run()
         live: dict = {}

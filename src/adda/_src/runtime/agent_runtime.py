@@ -1659,10 +1659,9 @@ class AgenticRun:
         # explicitly turns this off has no notebook contract to inject at all.
         from ..evaluation.notebook_exec import notebook_deliverable_spec
         _role = getattr(agent, "role", None)
-        if _role in ("strategizer", "implementer", "critic") and features.enabled(
-            "pipeline_deliverable"
-        ):
-            system_prompt = system_prompt + notebook_deliverable_spec(_role)
+        if _role in ("strategizer", "implementer", "critic"):
+            system_prompt = (system_prompt + "[[if pipeline_deliverable]]"
+                             + notebook_deliverable_spec(_role) + "[[/if]]")
 
         # The reproduction gate's exact preconditions — generated from
         # nodes/reproduction_gate.py::gate_contract(), itself extracted from
@@ -1671,13 +1670,12 @@ class AgenticRun:
         # pipeline_deliverable above; independent knob (reproduction_gate) —
         # a study can require a notebook without requiring it to reproduce,
         # or vice versa.
-        if _role in ("strategizer", "implementer", "critic") and features.enabled(
-            "reproduction_gate"
-        ):
+        if _role in ("strategizer", "implementer", "critic"):
             from ..nodes.reproduction_gate import gate_contract
             system_prompt = system_prompt + (
-                "\n<reproduction_gate_contract>\n" + gate_contract()
-                + "\n</reproduction_gate_contract>\n"
+                "[[if reproduction_gate]]\n<reproduction_gate_contract>\n"
+                + gate_contract()
+                + "\n</reproduction_gate_contract>\n[[/if]]"
             )
 
         model, backend = resolve_node_identity(

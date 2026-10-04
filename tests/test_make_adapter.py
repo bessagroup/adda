@@ -315,7 +315,9 @@ def test_notebook_deliverable_spec_suppressed_when_pipeline_deliverable_false(tm
 
             run._make_adapter("strategizer", agent)
 
-        system_prompt = MockClaude.call_args[1]["system_prompt"]
+        from adda._src.runtime import features
+        system_prompt = features.resolve_gates(
+            MockClaude.call_args[1]["system_prompt"])
         assert "DELIVERABLE = pipeline.ipynb" not in system_prompt
     finally:
         settings.configure(None)  # don't leak into other tests
@@ -377,7 +379,9 @@ def test_reproduction_gate_contract_suppressed_when_reproduction_gate_false(
 
             run._make_adapter("strategizer", agent)
 
-        system_prompt = MockClaude.call_args[1]["system_prompt"]
+        from adda._src.runtime import features
+        system_prompt = features.resolve_gates(
+            MockClaude.call_args[1]["system_prompt"])
         assert "<reproduction_gate_contract>" not in system_prompt
         assert "DELIVERABLE = pipeline.ipynb" in system_prompt  # untouched
     finally:
