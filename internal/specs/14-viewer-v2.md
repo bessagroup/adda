@@ -87,11 +87,13 @@ Not proposed: anything needing a new recorder in adda. Phase 2 reads only what's
 The direction is right: the viewer already is the operator console (notes, answers), and
 editing the inputs while watching the run is one loop.
 
-Starting and stopping an adda RUN belongs to the layer above adda: whoever runs the study's
-launcher in their own Oscar session. The viewer never launches, stops or cancels a run.
-Inside a run, adda works with the permissions of the session that launched it, and its
-agents submit and cancel their own compute jobs through the study's broker. That is adda's
-normal operation and is unaffected by this spec.
+Starting and stopping a run is covered by Phase 5 (terminal parity, 2026-10-04). That phase
+supersedes the earlier exclusion as follows. The viewer runs adda's OWN commands
+(`python -m adda.watchdog <study>`) on the machine it runs on. For anything else, such as a
+cluster launcher, it runs only the command the study declares in its config. adda itself
+still knows nothing about Slurm. Inside a run, adda works with the permissions of the
+session that launched it, and its agents submit and cancel their own compute jobs through
+the study's broker. That is unchanged.
 
 It turns a read-only page into something that edits the inputs science depends on. So:
 
@@ -117,7 +119,41 @@ So the editor:
 - **Validation:** against adda's settings schema, so a typo is refused, not silently ignored (Elvis's explicit-config rule).
 - **Commit:** the same commit flow as 3.1.
 
-**3.3 Out of scope:** starting and stopping runs (that belongs to the layer above adda; see Phase 3's intro), editing prompts or the corpus (that's the prompt-corpus artifact's job), deleting runs, and moving or archiving scratch.
+**3.3 Out of scope:** editing prompts or the corpus (that's the prompt-corpus artifact's job), deleting runs, and moving or archiving scratch. Starting and stopping runs moved to Phase 5.
+
+---
+
+## Phase 5 — terminal parity (Elvis, 2026-10-04)
+
+**The requirement, verbatim:** "non technical = anyone who doesnt use a terminal. It doesnt have to poay down the hargon, just allow them to do anything hou would do on a terminal command".
+
+So the bar is parity with what a terminal user does with adda, not simplification. The jargon stays; every action gets a control.
+
+**The inventory of terminal actions.** This is the acceptance list: each row needs a working control, and a headless test that it runs the same thing the command does.
+
+| # | Terminal action today | Viewer control |
+|---|---|---|
+| 5.1 | `mkdir studies/<name>`, write `PROBLEM_STATEMENT.md` + `config.yaml` | **New study**: name, problem statement and config (schema-validated, as 3.2), from a blank or an existing study as template. Commit flow as 3.1. |
+| 5.2 | Copy a study to vary it | **Duplicate study**, then edit it. |
+| 5.3 | `python -m adda.watchdog <study> --budget …` | **Start run**: the budget and model come from the committed config. A pre-flight check shows what `docs/authoring-a-study.md` "Before a long run, check" asks for; failures block the start, with the reason. |
+| 5.4 | Ctrl-C / kill the watchdog | **Stop run**: a graceful stop through the run's own shutdown path, so retrospectives and close run. The watchdog today SIGTERMs the process tree on its deadline (`infra/watchdog_launcher.py::run_under_watchdog`). Verify first whether a run closes gracefully on that signal. If it doesn't, adding a graceful stop is part of 5.4. A second, confirmed **Kill** sends the signal to the exact PID the viewer started. Never by name pattern. |
+| 5.5 | A study-specific launcher (e.g. `launch_zeroshot.sh` on a cluster) | **Start via study launcher**: the viewer runs `config.yaml → runtime.launch.command` (explicit config, no env flags) with its declared arguments, and shows its output. If the study declares no launcher, the control is absent. Stop calls `runtime.launch.stop_command` with the id the launcher printed. The viewer never composes cluster commands itself. |
+| 5.6 | `tail -f` logs, `ls runs/` | **Runs list and live logs** per run: orchestrator log, watchdog log, run status. |
+| 5.7 | Notes / answers to a live run | Exists: Phase 0.1 and the current note/answer boxes. |
+| 5.8 | `jupyter` on `pipeline.ipynb`; re-run it | **Open the deliverable** (rendered) and **Re-execute** it through adda's own notebook execution (`evaluation/notebook_exec.py`), showing pass/fail plus output. |
+| 5.9 | `adda-docs "<question>"` | **Ask the docs**: a box that runs the same `adda.explain` entry point. |
+| 5.10 | `git log` / `git diff` on the study | **History**: the study's commits, with the diff of each. |
+| 5.11 | Copy files off the machine | **Download**: the notebook, the run's `debug/` as a zip, store CSVs. |
+
+**Safety (on top of 3.0, non-negotiable):**
+- Start, stop and launcher commands make the viewer a remote-execution surface. The default bind becomes `127.0.0.1`. Binding to any other interface needs an explicit flag, and prints a warning that start/stop is exposed to everyone on that network.
+- One active run per study from the viewer. A second Start is refused while one is live (read from the run's status file, not from memory).
+- Every start, stop, kill and launcher call goes in the audit log (3.0), with the exact command line run.
+- The viewer stores the PIDs and launcher ids it started. Stop and Kill touch only those.
+
+**Out of scope here:** deleting runs or studies (irreversible; stays a terminal action), editing the prompt corpus, scratch management.
+
+**Order:** Phase 5 comes after Phase 2 and before Phase 4. 5.3, 5.4, 5.6 and 5.8 first: they're the loop a non-terminal user needs to run anything at all.
 
 ---
 
