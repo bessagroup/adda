@@ -197,7 +197,7 @@ class FeedbackTools:
         if not pending:
             return None
         return (
-            prefix + f"Operator stop: {len(pending)} delegation(s) still "
+            prefix + f"Run stop: {len(pending)} delegation(s) still "
             f"reporting: {pending}. Wait() for them, then call Done() again "
             "— any still running when the grace period ends are cancelled."
         )
@@ -207,16 +207,21 @@ class FeedbackTools:
     ) -> str | None:
         node = self.node
         stop = node._stop or {}
+        termination = node._stop_termination()
         banner = (
             "## ⚠ STOPPED — run closed on request"
-            + (f" ({stop['reason']})" if stop.get("reason") else "")
-            + "\n\nThis run was stopped, not finished: nothing below was "
+            if termination == terminal.STOPPED
+            else f"## ⚠ HALTED — {termination}"
+        ) + (
+            f" ({stop['reason']})" if stop.get("reason") else ""
+        ) + (
+            "\n\nThis run was stopped, not finished: nothing below was "
             "reviewed, and it can be resumed.\n\n---\n\n"
         )
         node._terminal = {
             "outcome": terminal.UNGATED,
             "reviewed": False,
-            "termination": terminal.STOPPED,
+            "termination": termination,
         }
         node._awaiting_retro = True
         node._final_summary = banner + summary
@@ -242,8 +247,10 @@ class FeedbackTools:
         # a courier, not a judge — it must not invent an outcome of its own.
         node._route.update(getattr(node, "_terminal", {}))
         node._route.setdefault("termination", terminal.DONE)
-        if node._route["termination"] == terminal.STOPPED:
+        if node._stop is not None:
             node._stop_consume()
+            node._log_missing_retrospectives(
+                f"run closed {node._route['termination']} after a wind-down")
         return prefix + "Run complete."
 
     def _milestone_gate(self, summary: str, prefix: str) -> str | None:

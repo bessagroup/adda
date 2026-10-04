@@ -776,7 +776,12 @@ class OrchestrationMixin:
         if stop_notice:
             pending_notifs.append(stop_notice)
         messages = self._compose_messages(state, budget_warnings, pending_notifs)
-        ai_msg = self._invoke_turn(messages)
+        try:
+            ai_msg = self._invoke_turn(messages)
+        except Exception as exc:  # noqa: BLE001
+            if self._stop is None:
+                raise
+            return self._close_after_wind_down_error(state, exc)
         return self._route_turn(state, ai_msg)
 
     # ── Before the turn ──────────────────────────────────────────────────────

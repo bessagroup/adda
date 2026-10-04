@@ -90,7 +90,7 @@ message every turn. Past `runtime: delegate_cutoff_multiple` (default `1.5`),
 `Delegate()` refuses to start anything NEW — an in-flight delegation is never
 touched, and `Wait`/`Done`/the deliverable tools stay open so the
 run can still close. The hard backstop is `runtime: run_backstop_multiple`
-(default `2.0`), after which the run itself is force-closed. Both checks run
+(default `2.0`), after which the run is asked to wind down (every agent gives its retrospective, and the run closes `backstop_time`); only if the wind-down overruns its grace is it force-closed. Both checks run
 *inside* the graph, though, so they can only fire on the run's own next turn
 — no help if the run has genuinely wedged (a hung model call, a stuck
 simulation) and never gets there. For that, launch under the external

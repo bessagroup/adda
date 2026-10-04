@@ -96,23 +96,59 @@ class LifecycleMixin:
             update.update(extra_update)
         return Command(goto=END, update=update)
 
+    def _halt_tallies(self, state: Any) -> dict:
+        with self._registry_lock:
+            _total_new = len(self._registry)
+            _evals_new = sum(e["evals"] for e in self._registry.values())
+        return {
+            "total_delegations": state["total_delegations"] + _total_new,
+            "evals_used": state.get("evals_used", 0) + _evals_new,
+        }
+
+    def _close_after_wind_down_error(self, state: Any, exc: Exception):
+        """The turn that was to close a wind-down raised. The run closes anyway,
+        with the halt's own termination, and says which retrospectives it lacks."""
+        reason = (f"the wind-down turn failed ({type(exc).__name__}: "
+                  f"{str(exc)[:200]})")
+        self._log_missing_retrospectives(reason)
+        return self._halt_resumable(
+            state, reason=reason, termination=self._stop_termination(),
+            extra_update=self._halt_tallies(state))
+
+    def _trip(
+        self, state: Any, *, drift: dict, reason: str, termination: str,
+        tallies: dict,
+    ) -> Command | None:
+        """A backstop condition holds. Ask the run to wind down — every agent
+        gives its retrospective, the run closes with ``termination`` — instead of
+        jumping to END with none. While the wind-down is in progress this
+        returns None (the condition keeps holding; that is expected). Only a
+        wind-down that overruns its grace, or one that cannot be asked for,
+        falls through to the hard halt, so a halt is always bounded."""
+        if self._stop is None:
+            self._record_science_drift(drift)
+            if self._request_wind_down(
+                reason=reason, termination=termination,
+                run_dir=state.get("run_dir")):
+                self._record_intervention(
+                    "BACKSTOP_WIND_DOWN", "(run)",
+                    f"{reason}; winding down for retrospectives, closing "
+                    f"{termination}")
+                return None
+        elif not self._wind_down_overdue():
+            return None
+        else:
+            self._record_science_drift({**drift, "wind_down": "overran"})
+            self._log_missing_retrospectives(
+                f"{reason}; the wind-down overran its grace")
+        return self._halt_resumable(
+            state, reason=reason, termination=termination,
+            extra_update=tallies)
+
     def _check_unrecoverable(self, state: Any, budget: float | None, start: float | None) -> Command | None:
         """Return a halt Command if an unrecoverable condition is met, else None.
         Extracted verbatim from __call__ (USD ceiling → repeated errors → time
         backstop)."""
-
-        def _halt_tallies() -> dict:
-            with self._registry_lock:
-                _total_new = len(self._registry)
-                _evals_new = sum(
-                    e["evals"] for e in self._registry.values()
-                )
-            return {
-                "total_delegations": (
-                    state["total_delegations"] + _total_new
-                ),
-                "evals_used": state.get("evals_used", 0) + _evals_new,
-            }
 
         # (1) USD cost ceiling. Hard, resumable (raise budget_usd and resume).
         # Inactive under ollama (no cost data): warn once, never halt.
@@ -132,19 +168,19 @@ class LifecycleMixin:
                                 "USD ceiling treated as inactive",
                     })
             elif _spent >= _budget_usd:
-                self._record_science_drift({
-                    "error_type": "USD_BACKSTOP",
-                    "spent_usd": _spent,
-                    "budget_usd": _budget_usd,
-                })
-                return self._halt_resumable(
+                return self._trip(
                     state,
+                    drift={
+                        "error_type": "USD_BACKSTOP",
+                        "spent_usd": _spent,
+                        "budget_usd": _budget_usd,
+                    },
                     reason=(
                         f"USD budget exhausted "
                         f"(${_spent:.4f} / ${_budget_usd:.4f})"
                     ),
                     termination=terminal.BACKSTOP_USD,
-                    extra_update=_halt_tallies(),
+                    tallies=self._halt_tallies(state),
                 )
 
         # (2) Repeated errors: a target failing N times in a row (genuine
@@ -165,18 +201,18 @@ class LifecycleMixin:
                 ]
             if _stuck:
                 _t, _n = _stuck[0]
-                self._record_science_drift({
-                    "error_type": "REPEATED_ERRORS",
-                    "target": _t,
-                    "consecutive": _n,
-                })
-                return self._halt_resumable(
+                return self._trip(
                     state,
+                    drift={
+                        "error_type": "REPEATED_ERRORS",
+                        "target": _t,
+                        "consecutive": _n,
+                    },
                     reason=(
                         f"repeated errors: {_t} failed {_n}x consecutively"
                     ),
                     termination=terminal.REPEATED_ERRORS,
-                    extra_update=_halt_tallies(),
+                    tallies=self._halt_tallies(state),
                 )
 
         # (3) Time backstop: past run_backstop_multiple x the (soft) time
@@ -190,21 +226,21 @@ class LifecycleMixin:
                         d for d, e in self._registry.items()
                         if e["status"] in ("Working", "FollowUp")
                     ]
-                self._record_science_drift({
-                    "error_type": "RUN_BACKSTOP",
-                    "elapsed": _elapsed_now,
-                    "budget": budget,
-                    "multiple": _backstop_mult,
-                    "abandoned": _abandoned,
-                })
-                return self._halt_resumable(
+                return self._trip(
                     state,
+                    drift={
+                        "error_type": "RUN_BACKSTOP",
+                        "elapsed": _elapsed_now,
+                        "budget": budget,
+                        "multiple": _backstop_mult,
+                        "abandoned": _abandoned,
+                    },
                     reason=(
                         f"time backstop: {int(_backstop_mult)}x budget "
                         f"exceeded ({_elapsed_now:.0f}s / {budget:.0f}s)"
                     ),
                     termination=terminal.BACKSTOP_TIME,
-                    extra_update=_halt_tallies(),
+                    tallies=self._halt_tallies(state),
                 )
 
         return None

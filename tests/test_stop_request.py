@@ -114,7 +114,7 @@ def test_request_mid_delegation_winds_down_before_cancelling(tmp_path):
     write_stop_request(run_dir, by="watchdog", grace_s=60)
 
     notice = node._drain_notifications()
-    assert "OPERATOR STOP" in notice and "D001" in notice, notice
+    assert "RUN STOP" in notice and "D001" in notice, notice
     # The worker was asked to report, not cancelled.
     with node._pending_worker_msgs_lock:
         queued = node._pending_worker_msgs["D001"]
@@ -143,7 +143,7 @@ def test_stragglers_past_the_grace_are_cancelled_and_recorded(tmp_path):
     assert node._registry["D001"]["status"] == "Cancelled"
     rows = [r for r in node._delegation_log.query_all() if r["id"] == "D001"]
     assert rows and rows[-1]["status"] == "CANCELLED"
-    assert "operator stop" in rows[-1]["deliverable"]
+    assert "run stop" in rows[-1]["deliverable"]
     assert "no retrospective" in rows[-1]["deliverable"]
     # Not pending any more, so Done() proceeds to the retrospective.
     assert "Retrospective" in tools["Done"]("closing")
@@ -153,7 +153,7 @@ def test_new_delegation_is_refused_while_stopping(tmp_path):
     node, run_dir, tools = _node(tmp_path)
     write_stop_request(run_dir, by="viewer")
     out = tools["Delegate"]("worker", "do a thing", "a report")
-    assert "operator stop" in out and "NOT started" in out, out
+    assert "run stop" in out and "NOT started" in out, out
     # Not an ERROR return: a refusal by design is not a tool failure.
     assert not out.lstrip().startswith("ERROR:")
     assert node._registry == {}
@@ -175,7 +175,7 @@ def test_blocking_wait_returns_early_once_on_first_sight(tmp_path):
         started = time.monotonic()
         out = tools["Wait"]()
         assert time.monotonic() - started < 20, "Wait did not return early"
-        assert "OPERATOR STOP" in out and "woken early" in out, out
+        assert "RUN STOP" in out and "woken early" in out, out
     finally:
         stop.set()
 
@@ -238,3 +238,79 @@ def test_a_stopped_close_is_recorded_stopped_and_resumable(tmp_path):
     assert status["outcome"] == "UNGATED"
     assert status["termination"] == "stopped"
     assert status["resumable"] is True
+
+
+def _interventions(run_dir: Path) -> list[dict]:
+    p = run_dir / "debug" / "strategizer_notes" / "diagnostics.jsonl"
+    if not p.exists():
+        p = run_dir / "debug" / "diagnostics.jsonl"
+    return [json.loads(x) for x in p.read_text().splitlines() if x.strip()]
+
+
+def test_a_stop_request_carries_the_halts_own_termination(tmp_path):
+    write_stop_request(tmp_path, by="backstop", reason="r",
+                       termination=terminal.BACKSTOP_TIME)
+    req = read_stop_request(tmp_path)
+    assert req["termination"] == terminal.BACKSTOP_TIME
+    (tmp_path / "debug" / "stop_request.json").write_text(json.dumps({
+        "requested_at": time.time(), "by": "x", "termination": "bogus"}))
+    assert read_stop_request(tmp_path)["termination"] is None
+
+
+def test_a_backstop_wind_down_closes_with_its_own_termination(tmp_path):
+    node, run_dir, tools = _node(tmp_path)
+    write_stop_request(run_dir, by="backstop", reason="time backstop",
+                       grace_s=5, termination=terminal.BACKSTOP_TIME)
+
+    first = tools["Done"]("closing")
+    assert "Retrospective" in first, first
+    assert "HALTED" in node._final_summary
+    assert terminal.BACKSTOP_TIME in node._final_summary
+    assert "STOPPED" not in node._final_summary
+
+    out = tools["Done"](_RETRO)
+    assert out.endswith("Run complete."), out
+    assert node._route["termination"] == terminal.BACKSTOP_TIME
+    assert node._route["outcome"] == terminal.UNGATED
+
+
+def test_a_close_names_the_retrospectives_that_never_came(tmp_path):
+    node, run_dir, tools = _node(tmp_path)
+    _live(node)
+    write_stop_request(run_dir, by="backstop", reason="time backstop",
+                       grace_s=5, termination=terminal.BACKSTOP_TIME)
+    node._stop_tick()
+    assert node._missing_retrospectives() == ["D001", "DONE"]
+
+    node._log_missing_retrospectives("test")
+    row = next(r for r in _interventions(run_dir)
+               if "RETROSPECTIVES_MISSING" in json.dumps(r))
+    assert "D001" in json.dumps(row) and "DONE" in json.dumps(row)
+
+
+def test_a_turn_that_errors_during_a_wind_down_closes_anyway(tmp_path):
+    node, run_dir, tools = _node(tmp_path)
+    write_stop_request(run_dir, by="backstop", reason="time backstop",
+                       grace_s=5, termination=terminal.BACKSTOP_USD)
+    node._stop_tick()
+
+    cmd = node._close_after_wind_down_error(
+        {"run_dir": str(run_dir), "messages": [], "study_dir": str(tmp_path),
+         "total_delegations": 0},
+        RuntimeError("boom"))
+    assert cmd.update["done"] is True
+    status = json.loads((run_dir / "debug" / "run_status.json").read_text())
+    assert status["termination"] == terminal.BACKSTOP_USD
+    assert status["resumable"] is True
+    assert "RETROSPECTIVES_MISSING" in json.dumps(_interventions(run_dir))
+
+
+def test_an_overrun_wind_down_falls_through_to_the_hard_halt(tmp_path):
+    node, run_dir, tools = _node(tmp_path)
+    write_stop_request(run_dir, by="backstop", reason="r", grace_s=0,
+                       termination=terminal.BACKSTOP_TIME)
+    node._stop_tick()
+    node._stop["deadline"] = time.time() - 10
+    assert node._wind_down_overdue() is True
+    node._stop["deadline"] = time.time() + 100
+    assert node._wind_down_overdue() is False

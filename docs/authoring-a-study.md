@@ -87,7 +87,7 @@ rather than silently reverting to the default.
 | `recursion_limit` | LangGraph step ceiling for one run | `2000` |
 | `max_awake_nodes` | how many nodes may be awake at once, the strategizer included (it always holds one reserved slot; workers share the rest). A delegation over the cap is reported `QUEUED: too many nodes working (N/N)` and starts, first come first served, when a slot frees. A node that blocks in `Wait` on its own queued child, or whose report awaits review, hands its slot back meanwhile. A critic call runs inside its caller's slot. **Memory scales with it: 5 awake nodes needs `--mem >= 32G` on Slurm** (run 20260928T225501 peaked at 16.76 of 16 GB with three awake) | `5` |
 | `max_consecutive_errors` | consecutive failures to one target before the run halts | `12` |
-| `run_backstop_multiple` | multiple of the wall budget after which the run is force-closed | `2.0` |
+| `run_backstop_multiple` | multiple of the wall budget after which the run is asked to wind down and closes `backstop_time` (force-closed only if the wind-down overruns) | `2.0` |
 | `delegate_cutoff_multiple` | multiple of the wall budget past which NEW delegations are refused (in-flight ones are never touched); must stay below `run_backstop_multiple` or it can never fire. `0` disables | `1.5` |
 | `followup_wait_s` | how long a `FollowUp` waits for a human answer | `600` |
 | `stop_grace_s` | only with the watchdog launcher: seconds BEFORE its deadline at which it asks the run to wind down (a stop request in `debug/`) instead of waiting to kill it, so agents hand over real retrospectives. On unless you change it: unset means a tenth of the deadline, at most 900 s. The deadline does not move. Must be shorter than the deadline; `0` disables | `min(900, deadline/10)` |

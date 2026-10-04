@@ -20,6 +20,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from ..runtime import terminal
+
 __all__ = [
     "DEFAULT_GRACE_S",
     "write_stop_request",
@@ -45,14 +47,21 @@ def write_stop_request(
     by: str,
     reason: str = "",
     grace_s: float = DEFAULT_GRACE_S,
+    termination: str | None = None,
 ) -> bool:
-    """Ask the run in ``run_dir`` to stop. False when it could not be written."""
+    """Ask the run in ``run_dir`` to stop. False when it could not be written.
+
+    ``termination`` names the terminal value the run closes with once it has
+    wound down; left out, the run closes STOPPED. A backstop that asks for its
+    own wind-down passes its halt's value, so analysis can still tell them apart.
+    """
     path = _path(run_dir)
     payload = {
         "requested_at": time.time(),
         "by": by,
         "reason": reason,
         "grace_s": float(grace_s),
+        "termination": termination,
     }
     tmp = path.with_suffix(f".{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
     try:
@@ -86,11 +95,14 @@ def read_stop_request(
         return None
     if since is not None and at < since:
         return None
+    termination = data.get("termination")
     return {
         "requested_at": at,
         "by": str(data.get("by") or "unknown"),
         "reason": str(data.get("reason") or ""),
         "grace_s": max(grace, 0.0),
+        "termination": (
+            termination if termination in terminal.TERMINATIONS else None),
     }
 
 

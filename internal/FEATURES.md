@@ -1308,7 +1308,7 @@ against the SDK's cost on calls it did price.
 SIGTERM unwinds nothing in a run, so a watchdog or operator kill used to lose
 every agent's real retrospective. A **stop request** is the graceful
 alternative: whoever wants the run over writes `debug/stop_request.json`
-(`{requested_at, by, reason, grace_s}`, `infra/stop_request.py`); the entry
+(`{requested_at, by, reason, grace_s, termination}`, `infra/stop_request.py`); the entry
 node notices it at its next checkpoint — the start of a turn, every tool
 result, and each tick of a blocking `Wait` — and:
 
@@ -1331,8 +1331,16 @@ A request stamped before the run's start is a leftover and is ignored, so a
 resumed run does not stop on arrival; the file is renamed
 `stop_request.consumed.json` once honoured.
 
-Not covered: the backstop halts (time/USD/repeated errors) still go straight
-to END with no real retrospectives. **Where:** `infra/stop_request.py`,
+**Backstops go through it too.** A time, USD or repeated-errors backstop
+no longer jumps to END: it writes a stop request (`by="backstop"`) carrying
+its own `termination` (`backstop_time` / `backstop_usd` / `repeated_errors`),
+so the run winds down, collects every retrospective and closes with that
+value (banner "HALTED", not "STOPPED"). The wind-down is bounded: past
+`grace_s` for workers plus an equal allowance for the entry node, or if the
+request cannot be written, the old hard halt fires. A turn that raises during
+the wind-down closes anyway. Whoever never gave a retrospective is logged by
+delegation id (`RETROSPECTIVES_MISSING`). After a USD cap fires the wind-down
+spends a little more; that is accepted. **Where:** `infra/stop_request.py`,
 `nodes/stop.py` (`StopMixin`), the `Done` stop path in
 `nodes/tools/routing/feedback.py`, `terminal.STOPPED`. **Watchdog:**
 `runtime.stop_grace_s` (only under `watchdog_launcher`; ON by default at `min(900 s, deadline/10)`, an explicit value overrides it, `0` opts out, a value at or past the deadline is refused) writes

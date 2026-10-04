@@ -20,6 +20,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END
 
 from adda._src.backends.base import Agent, Edge, Graph
+from adda._src.runtime import terminal
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -183,6 +184,19 @@ def test_accepted_done_no_banner():
 # ---------------------------------------------------------------------------
 
 
+def _halt_after_wind_down(node, state, run_dir):
+    """A backstop first asks for the graceful wind-down (a stop request carrying
+    its own termination, no halt, no hard stop); only once that overruns its
+    grace does the hard halt fire. Returns (first, request, halt)."""
+    import json
+
+    first = node(state)
+    req = json.loads((run_dir / "debug" / "stop_request.json").read_text())
+    node._stop["deadline"] = 0.0
+    node._stop["grace_s"] = 0.0
+    return first, req, node(state)
+
+
 def test_run_backstop_halts_resumable_past_multiple(tmp_path):
     """Past RUN_BACKSTOP_MULTIPLE x budget: invoke skipped, the run HALTS
     cleanly and resumably — a HALTED banner is prefixed (conclusion kept
@@ -212,9 +226,10 @@ def test_run_backstop_halts_resumable_past_multiple(tmp_path):
     state["start_time"] = time.time() - 100
     state["run_dir"] = str(run_dir)
 
-    cmd = node(state)
+    first, req, cmd = _halt_after_wind_down(node, state, run_dir)
 
-    assert adapter.invoke_count == 0, "invoke must be skipped past the backstop"
+    assert first is None or first.goto != END, "the first trip must not hard-halt"
+    assert req["by"] == "backstop" and req["termination"] == terminal.BACKSTOP_TIME
     assert cmd.goto == END
     assert cmd.update.get("done") is True
     report = cmd.update.get("last_report", "")
@@ -252,11 +267,12 @@ def test_usd_budget_exhausted_halts_resumable(tmp_path):
 
     state = _make_state(study_dir=study_dir)
     state["budget_usd"] = 0.50
+    state["start_time"] = time.time()
     state["run_dir"] = str(run_dir)
 
-    cmd = node(state)
+    first, req, cmd = _halt_after_wind_down(node, state, run_dir)
 
-    assert adapter.invoke_count == 0
+    assert req["termination"] == terminal.BACKSTOP_USD
     assert cmd.goto == END and cmd.update.get("done") is True
     assert "USD budget exhausted" in cmd.update.get("last_report", "")
     import json
@@ -312,10 +328,11 @@ def test_repeated_errors_halt_resumable(tmp_path, monkeypatch):
     node._consecutive_errors["implementer"] = 3  # at threshold
 
     state = _make_state(study_dir=study_dir)
+    state["start_time"] = time.time()
     state["run_dir"] = str(run_dir)
 
-    cmd = node(state)
-    assert adapter.invoke_count == 0
+    first, req, cmd = _halt_after_wind_down(node, state, run_dir)
+    assert req["termination"] == terminal.REPEATED_ERRORS
     assert cmd.goto == END and cmd.update.get("done") is True
     assert "repeated errors: implementer" in cmd.update.get("last_report", "")
 

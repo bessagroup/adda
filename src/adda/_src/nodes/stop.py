@@ -1,4 +1,4 @@
-"""Operator/watchdog stop: wind the run down and close it, instead of killing it.
+"""A stop: wind the run down and close it, instead of killing or halting it.
 
 SIGTERM unwinds nothing, so a killed run loses every agent's real
 retrospective. A stop request (``infra/stop_request.py``) is noticed by the
@@ -11,17 +11,30 @@ receives, and each tick of a blocking ``Wait`` — and answered in order:
    stragglers are cancelled and recorded as such), ``Done()`` skips the
    milestone, first-call, reproduction and critic gates and takes the
    retrospective round, closing STOPPED — UNGATED, never reviewed, resumable.
+
+Whoever asks — the watchdog ahead of its deadline, the viewer, or a backstop
+(time, USD, repeated errors) that would otherwise jump straight to END — goes
+through this one path. A backstop closes with its own termination value rather
+than STOPPED, and only if the wind-down overruns its grace plus one closing
+allowance does the hard halt still fire, so a halt can never run on forever.
 """
 from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
-from ..infra.stop_request import consume_stop_request, read_stop_request
+from ..infra.stop_request import (
+    DEFAULT_GRACE_S,
+    consume_stop_request,
+    read_stop_request,
+    write_stop_request,
+)
+from ..runtime import terminal
 
 _WIND_DOWN = (
-    "[OPERATOR STOP — the run is being stopped. Report what you have NOW: "
+    "[RUN STOP — the run is being stopped. Report what you have NOW: "
     "your findings so far, what is unfinished, and your retrospective. Do "
     "not start new work.]"
 )
@@ -55,14 +68,14 @@ class StopMixin:
             }
             wound = self._stop_wind_down()
             self._record_intervention(
-                "OPERATOR_STOP", "(run)",
+                "RUN_STOP", "(run)",
                 f"stop requested by {req['by']}"
                 + (f": {req['reason']}" if req["reason"] else "")
                 + f"; winding down {wound or 'no delegations'}, "
                 f"grace {req['grace_s']:g}s",
             )
             return (
-                f"[OPERATOR STOP — requested by {req['by']}"
+                f"[RUN STOP — requested by {req['by']}"
                 + (f" ({req['reason']})" if req["reason"] else "")
                 + ". New delegations are refused. "
                 + (f"Winding down {', '.join(wound)}: Wait() for their "
@@ -73,7 +86,7 @@ class StopMixin:
             cancelled = self._stop_cancel_stragglers()
             if cancelled:
                 return (
-                    "[OPERATOR STOP — grace expired; cancelled "
+                    "[RUN STOP — grace expired; cancelled "
                     f"{', '.join(cancelled)} (no report). Call Done() now.]")
         return ""
 
@@ -121,7 +134,7 @@ class StopMixin:
                     task=str(e.get("task", "")),
                     hypothesis_ids=list(e.get("hypothesis_ids") or []),
                     deliverable=(
-                        "operator stop: cancelled after the "
+                        "run stop: cancelled after the "
                         f"{self._stop['grace_s']:g}s grace without a "
                         "report; no retrospective was given"),
                     started_at=e.get("started_at") or now, completed_at=now,
@@ -131,7 +144,7 @@ class StopMixin:
         ids = sorted(d for d, _ in cancelled)
         if ids:
             self._record_intervention(
-                "OPERATOR_STOP_CANCELLED", "(run)",
+                "RUN_STOP_CANCELLED", "(run)",
                 f"cancelled after grace, no report: {', '.join(ids)}")
         return ids
 
@@ -140,7 +153,7 @@ class StopMixin:
         if not any(n._stop is not None for n in self._stop_nodes()):
             return None
         return (
-            "operator stop: new delegations are refused. This delegation "
+            "run stop: new delegations are refused. This delegation "
             "was NOT started. Wait() for any still reporting, then call "
             "Done().")
 
@@ -148,3 +161,60 @@ class StopMixin:
         run_dir = self._current_run_dir
         if run_dir is not None:
             consume_stop_request(run_dir)
+
+    def _request_wind_down(
+        self, *, reason: str, termination: str, run_dir: Any = None,
+        grace_s: float = DEFAULT_GRACE_S,
+    ) -> bool:
+        """A backstop asks for the graceful path instead of halting. False when
+        it cannot (no run directory, or the file cannot be written), in which
+        case the caller halts as it always did."""
+        run_dir = Path(run_dir) if run_dir else self._current_run_dir
+        if run_dir is None or self._run_start is None:
+            return False
+        return write_stop_request(
+            run_dir, by="backstop", reason=reason, grace_s=grace_s,
+            termination=termination)
+
+    def _wind_down_overdue(self) -> bool:
+        """The grace for the workers plus an equal one for the entry node's own
+        retrospective round has passed: the hard halt may fire."""
+        stop = self._stop
+        return bool(stop) and time.time() > stop["deadline"] + stop["grace_s"]
+
+    def _stop_termination(self) -> str:
+        return (self._stop or {}).get("termination") or terminal.STOPPED
+
+    def _missing_retrospectives(self) -> list[str]:
+        """Delegations that ended without a recorded retrospective."""
+        import json
+
+        run_dir = self._current_run_dir
+        if run_dir is None:
+            return []
+        have: set[str] = set()
+        try:
+            with open(run_dir / "debug" / "retrospectives.jsonl",
+                      encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        have.add(str(json.loads(line).get("source_id")))
+                    except (json.JSONDecodeError, AttributeError):
+                        continue
+        except OSError:
+            pass
+        ids: set[str] = set()
+        for n in self._stop_nodes():
+            with n._registry_lock:
+                ids.update(n._registry)
+        missing = sorted(ids - have)
+        if "DONE" not in have:
+            missing.append("DONE")
+        return missing
+
+    def _log_missing_retrospectives(self, why: str) -> None:
+        missing = self._missing_retrospectives()
+        if missing:
+            self._record_intervention(
+                "RETROSPECTIVES_MISSING", "(run)",
+                f"{why}; no retrospective from: {', '.join(missing)}")
