@@ -730,6 +730,52 @@ def test_stop_needs_the_write_token(tmp_path):
     assert not (run / "debug" / "stop_request.json").exists()
 
 
+def test_log_tail_follows_a_growing_file_without_gaps_or_repeats(tmp_path):
+    study = _make_study(tmp_path)
+    run = _make_run(study, "20260904T120000")
+    log = run / "debug" / "run.log"
+    log.write_text("one\ntwo\n")
+    client = TestClient(create_app(study))
+    url = "/api/runs/20260904T120000/log"
+    first = client.get(url).json()
+    assert first["text"] == "one\ntwo\n" and first["exists"] is True
+    with open(log, "a") as fh:
+        fh.write("three\n")
+    second = client.get(url, params={"after": first["next_cursor"]}).json()
+    assert second["text"] == "three\n" and second["reset"] is False
+    assert client.get(
+        url, params={"after": second["next_cursor"]}).json()["text"] == ""
+
+
+def test_log_tail_without_after_returns_only_the_last_window(tmp_path):
+    study = _make_study(tmp_path)
+    run = _make_run(study, "20260904T120000")
+    (run / "debug" / "run.log").write_text("a" * 100 + "TAIL")
+    out = TestClient(create_app(study)).get(
+        "/api/runs/20260904T120000/log", params={"limit": 4}).json()
+    assert out["text"] == "TAIL"
+
+
+def test_log_tail_resets_when_the_file_shrank(tmp_path):
+    study = _make_study(tmp_path)
+    run = _make_run(study, "20260904T120000")
+    (run / "debug" / "run.log").write_text("fresh\n")
+    out = TestClient(create_app(study)).get(
+        "/api/runs/20260904T120000/log", params={"after": 9999}).json()
+    assert out["reset"] is True and out["text"] == "fresh\n"
+
+
+def test_log_tail_takes_a_name_never_a_path(tmp_path):
+    study = _make_study(tmp_path)
+    _make_run(study, "20260904T120000")
+    client = TestClient(create_app(study))
+    url = "/api/runs/20260904T120000/log"
+    assert client.get(url, params={"name": "../../PROBLEM_STATEMENT.md"}
+                      ).status_code == 404
+    assert client.get(url, params={"after": "x"}).status_code == 400
+    assert client.get(url).json()["exists"] is False
+
+
 def test_transcript_key_cannot_escape_the_run_directory(tmp_path):
     """The severe one: {key:path} reaches read_transcript raw.
 

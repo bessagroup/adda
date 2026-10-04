@@ -812,6 +812,24 @@ def create_app(
                stop_request=written)
         return JSONResponse({"ok": True, "stop_request": written})
 
+    async def get_log(request):
+        run_id = request.path_params["run_id"]
+        run_dir = _run_dir(study_dir, run_id)
+        if run_dir is None:
+            return _not_found(f"no such run {run_id!r}")
+        q = request.query_params
+        try:
+            after = int(q["after"]) if "after" in q else None
+            limit = int(q.get("limit", readers._LOG_DEFAULT_BYTES))
+        except ValueError:
+            return JSONResponse({"error": "after/limit must be integers"},
+                                status_code=400)
+        out = readers.read_log_tail(
+            run_dir, q.get("name", "run"), after=after, limit=limit)
+        if out is None:
+            return _not_found("unknown log name")
+        return JSONResponse(out)
+
     async def get_oracle(request):
         run_id = request.path_params["run_id"]
         run_dir = _run_dir(study_dir, run_id)
@@ -1058,6 +1076,7 @@ def create_app(
         Route("/api/runs/{run_id}/operator", get_operator),
         Route("/api/runs/{run_id}/answer", post_answer, methods=["POST"]),
         Route("/api/runs/{run_id}/note", post_note, methods=["POST"]),
+        Route("/api/runs/{run_id}/log", get_log),
         Route("/api/runs/{run_id}/stop", post_stop, methods=["POST"]),
         Route("/api/runs/{run_id}/vitals", get_vitals),
         Route("/api/runs/{run_id}/oracle", get_oracle),

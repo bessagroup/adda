@@ -1108,6 +1108,55 @@ def read_notebook(
             "live": path == live, "error": None}
 
 
+# Logs a client may ask for, by name. A name, never a path: the file is
+# looked up here, so nothing the client sends reaches the filesystem.
+_LOG_FILES = {"run": "run.log"}
+_LOG_DEFAULT_BYTES = 64 * 1024
+_LOG_MAX_BYTES = 1024 * 1024
+
+
+def read_log_tail(
+    run_dir: Path | str, name: str, *, after: int | None = None,
+    limit: int = _LOG_DEFAULT_BYTES,
+) -> dict[str, Any] | None:
+    """A window onto one of the run's log files, ``tail -f`` style.
+
+    ``after=None`` returns the last ``limit`` bytes; ``after=N`` returns the
+    bytes from offset N, so a client that echoes ``next_cursor`` back sees
+    every byte exactly once. Offsets are bytes, not characters. A file that
+    shrank below ``after`` (rotated or rewritten) is re-read from the start
+    with ``reset: true`` rather than silently returning nothing. ``None``
+    for an unknown log name; ``exists: false`` for a known one not written
+    yet.
+    """
+    fname = _LOG_FILES.get(name)
+    if fname is None:
+        return None
+    limit = max(1, min(int(limit), _LOG_MAX_BYTES))
+    path = Path(run_dir) / "debug" / fname
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return {"name": name, "exists": False, "text": "", "size": 0,
+                "next_cursor": 0, "reset": False}
+    reset = after is not None and after > size
+    if after is None:
+        start = max(0, size - limit)
+    else:
+        start = 0 if reset else max(0, after)
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(start)
+            raw = fh.read(limit)
+    except OSError:
+        raw = b""
+    return {
+        "name": name, "exists": True, "size": size, "reset": reset,
+        "text": raw.decode("utf-8", errors="replace"),
+        "next_cursor": start + len(raw),
+    }
+
+
 def read_run_status(run_dir: Path | str) -> dict[str, Any] | None:
     """``run_status.json``'s contents, or ``None`` if the run hasn't closed
     yet (normal close and crash both write this file, but only once, at the

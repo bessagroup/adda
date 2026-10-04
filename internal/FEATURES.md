@@ -1203,6 +1203,11 @@ against the SDK's cost on calls it did price.
   stage that dropped most), `skipped` (requested but never recorded as 0/1) and `available`.
   With no `stages`, the order is picked by column name (coil, prefilter, ran/solved, converged,
   feas). The server computes it; a front end only draws it.
+  `GET /api/runs/<id>/log[?name=run&after=<byte>&limit=<bytes>]` (`readers.read_log_tail`) tails
+  a run's log like `tail -f`: no `after` gives the last window, echoing `next_cursor` gives every
+  byte once, a file that shrank comes back from the start with `reset: true`. The log is chosen
+  by name (only `run` = `debug/run.log` today), never by path. The watchdog's own log joins once
+  the viewer starts runs (5.3) and so owns its stdout.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);
   `agent_runtime.py`'s `AgenticRun.serve_viewer`; `pyproject.toml`'s `viewer`
