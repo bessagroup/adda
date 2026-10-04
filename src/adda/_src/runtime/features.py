@@ -45,6 +45,7 @@ __all__ = [
     "FEATURES",
     "FEATURE_KEYS",
     "enabled",
+    "conflicts",
     "disabled_tool_names",
     "strip_disabled_sections",
     "by_key",
@@ -78,6 +79,10 @@ class Feature:
     #: True when the feature's CONCEPT also appears outside its own sections,
     #: so disabling it is a partial ablation. See the module docstring.
     pervasive: bool = False
+    #: keys of features this one cannot run without. A feature whose
+    #: prerequisite is off is OFF, whatever its own knob says: reporting it as
+    #: on would label an arm by a capability the run does not have.
+    requires: tuple[str, ...] = ()
 
 
 #: Notebook-authoring surface. Done is deliberately excluded — a run still has
@@ -161,6 +166,9 @@ FEATURES: tuple[Feature, ...] = (
         # measures whether being second-guessed changes the science rather
         # than whether a gate stopped the run.
         behaviours=("verdict_validator",),
+        # It judges HypothesisUpdate verdicts (tools/routing/ledger.py) and is
+        # called from nowhere else: without the ledger there is nothing to judge.
+        requires=("hypothesis_ledger",),
     ),
     Feature(
         key="pipeline_deliverable",
@@ -215,7 +223,24 @@ def enabled(key: str) -> bool:
     f = by_key(key)
     if f is None:
         raise KeyError(f"unknown feature {key!r}; known: {sorted(FEATURE_KEYS)}")
-    return get_bool(f.key, f.default)
+    return get_bool(f.key, f.default) and all(
+        enabled(r) for r in f.requires)
+
+
+def conflicts() -> list[str]:
+    """Features whose own knob is set on while a prerequisite is off.
+
+    ``enabled`` resolves these to off, so the run is consistent; the message is
+    for whoever set the knob expecting the feature to run.
+    """
+    out = []
+    for f in FEATURES:
+        if get_bool(f.key, f.default) and not enabled(f.key):
+            off = [r for r in f.requires if not enabled(r)]
+            out.append(
+                f"{f.key} is on but requires {', '.join(off)}, which "
+                f"{'is' if len(off) == 1 else 'are'} off: it runs as off")
+    return out
 
 
 def max_awake_nodes() -> int:
@@ -243,7 +268,7 @@ def disabled_tool_names() -> frozenset[str]:
     """
     out: set[str] = set()
     for f in FEATURES:
-        if not get_bool(f.key, f.default):
+        if not enabled(f.key):
             out |= f.tools
     return frozenset(out)
 
@@ -256,7 +281,7 @@ def strip_disabled_sections(prompt: str) -> str:
     test is what makes its absence loud.
     """
     for f in FEATURES:
-        if get_bool(f.key, f.default):
+        if enabled(f.key):
             continue
         for tag in f.sections:
             prompt = re.sub(

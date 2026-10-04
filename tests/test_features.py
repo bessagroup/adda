@@ -286,3 +286,45 @@ def test_a_disabled_features_shared_closures_never_reach_the_catalog(tmp_path):
     tools = _node().adapter.closure_tools
     assert "HypothesisList" not in tools
     assert "QueryStore" in tools
+
+
+# --- a feature whose prerequisite is off is off ------------------------------
+
+def test_the_verdict_validator_cannot_outlive_the_ledger_it_judges():
+    """It reviews HypothesisUpdate verdicts and nothing else. With the ledger
+    off, reporting it as on would label the arm by a capability the run has
+    not got."""
+    settings.configure({"hypothesis_ledger": False})
+    assert features.enabled("verdict_validator") is False
+    assert features.arm_config()["verdict_validator"] is False
+    assert any("verdict_validator" in m for m in features.conflicts())
+
+
+def test_a_prerequisite_that_is_on_changes_nothing():
+    settings.configure({"verdict_validator": False})
+    assert features.enabled("hypothesis_ledger") is True
+    assert features.enabled("verdict_validator") is False
+    assert features.conflicts() == []
+
+
+def test_every_declared_prerequisite_is_a_feature():
+    for f in features.FEATURES:
+        for r in f.requires:
+            assert r in features.FEATURE_KEYS, (f.key, r)
+            assert r != f.key
+
+
+def test_the_pipeline_and_reproduction_knobs_are_read_through_the_registry(
+        tmp_path):
+    """Both used to be read as get_bool(key, True) literals at three sites, so
+    a changed registry default would have drifted from them silently."""
+    import inspect
+
+    from adda._src.nodes import orchestration, reproduction_gate
+    from adda._src.runtime import agent_runtime
+
+    for mod in (orchestration, reproduction_gate, agent_runtime):
+        src = inspect.getsource(mod)
+        for key in ("pipeline_deliverable", "reproduction_gate"):
+            assert f'get_bool("{key}"' not in src.replace("\n", "").replace(
+                " ", ""), (mod.__name__, key)

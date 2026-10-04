@@ -69,14 +69,14 @@ class ReproductionGateMixin:
         regardless of this flag.
         """
         from ..evaluation.notebook_exec import required_deliverable_name
-        from ..runtime import settings
+        from ..runtime import features
         study_dir = Path(state.get("study_dir", "."))
         # WriteDeliverable writes BARE names to study_dir/ (it rejects path
         # separators). Normalise any configured path to its basename so a stray
         # 'workspace/…' prefix in a study config can't spuriously flag a present
         # deliverable as missing.
         required = list(state.get("required_deliverables") or [])
-        if settings.get_bool("pipeline_deliverable", True):
+        if features.enabled("pipeline_deliverable"):
             required = [required_deliverable_name()] + required
         seen: set[str] = set()
         missing: list[str] = []
@@ -125,8 +125,8 @@ class ReproductionGateMixin:
         # runtime does not gate on the value itself, only on (4)'s
         # self-consistency; an independent runtime extremum match used to
         # wrongly reject legitimate constrained optima.
-        from ..runtime import settings
-        if not settings.get_bool("reproduction_gate", True):
+        from ..runtime import features
+        if not features.enabled("reproduction_gate"):
             return None
 
         import json as _json

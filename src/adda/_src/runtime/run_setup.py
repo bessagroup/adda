@@ -185,6 +185,8 @@ def _init_canonical_store(
 
     from . import features as _features
     arms = _features.arm_config()
+    for _msg in _features.conflicts():
+        logging.getLogger(__name__).warning("ablation arms: %s", _msg)
     drift_from = None
     prior_arms = existing.get("arms")
     if prior_arms is not None and prior_arms != arms:

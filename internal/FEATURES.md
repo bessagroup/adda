@@ -225,6 +225,13 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   with `--entrypoint`). `python -m adda --model` now defaults to None, so the
   study's `config.yaml` `model:` is no longer silently overridden by the
   haiku default.
+- **`Feature.requires`:** a feature whose prerequisite is off is off —
+  `features.enabled()` resolves it, `features.conflicts()` lists the cases
+  where its own knob said on, and `_init_canonical_store` logs them. Today
+  `verdict_validator` requires `hypothesis_ledger`. The pipeline/reproduction
+  knobs are deliberately NOT coupled (four studies run `pipeline_deliverable:
+  false` with the gate on), and they are now read through `features.enabled`
+  everywhere instead of `get_bool(key, True)` literals.
 - **Grounded in code, not paraphrased:** what the gate mechanically checks
   (the canonical store must hold ≥1 row before it will even run the
   notebook; zero new evals on replay; no modified/deleted rows; headline

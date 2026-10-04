@@ -216,7 +216,6 @@ class OrchestrationMixin:
         from ..epistemics.milestones import MilestoneLedger
         from ..infra.telemetry import Telemetry
         from ..runtime import features
-        from ..runtime.settings import get_bool
 
         notes = self._current_notes_dir
         if not self._owns_epistemics or notes is None:
@@ -247,8 +246,9 @@ class OrchestrationMixin:
             # reproduction gate itself is on — its whole reason to exist is
             # that gate's store-row precondition.
             self._milestones.seed_defaults(
-                include_pipeline=get_bool("pipeline_deliverable", True),
-                include_reproduction_gate=get_bool("reproduction_gate", True))
+                include_pipeline=features.enabled("pipeline_deliverable"),
+                include_reproduction_gate=features.enabled(
+                    "reproduction_gate"))
 
         # Science drift monitor — needs the delegation log and nothing else.
         # It used to be gated on the hypothesis ledger too, via a constructor
