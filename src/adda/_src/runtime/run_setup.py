@@ -183,6 +183,25 @@ def _init_canonical_store(
         except (OSError, _json.JSONDecodeError):
             existing = {}
 
+    from . import features as _features
+    arms = _features.arm_config()
+    drift_from = None
+    prior_arms = existing.get("arms")
+    if prior_arms is not None and prior_arms != arms:
+        changed = {
+            k: (prior_arms.get(k), arms.get(k))
+            for k in sorted(set(prior_arms) | set(arms))
+            if prior_arms.get(k) != arms.get(k)
+        }
+        if not _settings.get_bool("allow_arm_drift", False):
+            raise RuntimeError(
+                f"Resuming {run_dir.name} under different ablation arms than "
+                f"it started with (key: (was, now)) {changed}. A run measured "
+                "under two arms belongs to neither. Resume with the original "
+                "arms, or set runtime.allow_arm_drift: true to accept the mix "
+                "(the first arms stay recorded as arms_initial).")
+        drift_from = prior_arms
+
     config: dict = {
         "store_dir": str(store_dir),
         # Co-locate the lock with the data (store_dir/experiment_data/) so
@@ -214,7 +233,10 @@ def _init_canonical_store(
         # analysed months later still knows what it was, and a sweep's label
         # can be checked against the artifact instead of trusted.
         "runtime": _settings.resolved(),
+        "arms": arms,
     }
+    if drift_from is not None:
+        config["arms_initial"] = existing.get("arms_initial", drift_from)
     if "oracles" in existing:
         config["oracles"] = existing["oracles"]
     run_config_path.write_text(

@@ -92,6 +92,7 @@ rather than silently reverting to the default.
 | `followup_wait_s` | how long a `FollowUp` waits for a human answer | `600` |
 | `stop_grace_s` | only with the watchdog launcher: seconds BEFORE its deadline at which it asks the run to wind down (a stop request in `debug/`) instead of waiting to kill it, so agents hand over real retrospectives. On unless you change it: unset means a tenth of the deadline, at most 900 s. The deadline does not move. Must be shorter than the deadline; `0` disables | `min(900, deadline/10)` |
 | `resume_close_with_retrospectives` | on a resume whose process was lost (crash, SIGKILL, OOM), wind the run down at once instead of continuing it, so the entry node gives the retrospective the crash cost it (TIME bullet included); closes `crashed`. Workers that died in flight are logged as missing (`RETROSPECTIVES_MISSING`, "process lost"); nothing is invented for them | `false` |
+| `allow_arm_drift` | a resume under different ablation arms than the run started with is refused, since a run measured under two arms belongs to neither. Set this to accept the mix; the arms the run started with stay recorded as `arms_initial` in `run_config.json` | `false` |
 | `peer_message_wait_s` | how long `SendMessage(wait_for_reply=True)` waits for a peer's reply before returning (spec 12, behind `peer_interaction`) | `300` |
 | `llm_retry_max` | retry attempts for a failed model call | `5` |
 | `llm_retry_base` | base seconds for retry backoff | `2.0` |
@@ -140,6 +141,8 @@ choice: a study with no notebook deliverable legitimately turns it off.)
 | `pipeline_deliverable` | require `pipeline.ipynb` as the deliverable; turn off for a study with no notebook | `true` |
 | `reproduction_gate` | enforce Done()'s reproduction gate: before a run can close GATED, the deliverable must reproduce lazily against the canonical store (zero new evals, no modified rows). Independent of `pipeline_deliverable` — that knob decides whether a notebook is required at all; this one decides whether an authored notebook must additionally prove it reproduces | `true` |
 | `peer_interaction` | the `SendMessage` peer/human messaging tool (spec 12): every delegation report opens for the delegator's review instead of finalizing on delivery, and `Confer`/`Reply`/the peer-facing `FollowUp`/`ReportProgress` retire in its favour. Off restores that old surface exactly, as an ablation arm | `true` |
+
+Every run records the arms it ran under, defaults included, in `run_config.json` (`arms`), in `run_status.json` and in the `arm_*` columns of `studies/run_ledger.csv`; `runtime` there lists only the knobs somebody set, so read `arms` to tell an all-defaults baseline from a run nobody labelled.
 
 ## How designs get evaluated (the evaluator)
 

@@ -301,6 +301,8 @@ class AgenticRun:
         notebook metadata + the longitudinal ledger. Best-effort: a status write
         must never fail a run."""
         try:
+            from . import features as _features
+            payload.setdefault("arms", _features.arm_config())
             (debug_dir / "run_status.json").write_text(
                 json.dumps(payload, indent=2), encoding="utf-8")
         except OSError:

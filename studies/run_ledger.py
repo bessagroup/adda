@@ -39,6 +39,12 @@ COLUMNS = [
     # into) the SDK's `cost_usd`; covers calls the SDK never priced (the
     # strategizer). Blank = unknown.
     "cost_usd_computed",
+    # The ablation arms this run actually ran under, defaults included (from
+    # run_config.json["arms"]). Blank = the run predates arm recording.
+    "arm_hypothesis_ledger", "arm_milestones_enabled", "arm_science_monitor",
+    "arm_f3dasm_api", "arm_doe_playbook", "arm_verdict_validator",
+    "arm_pipeline_deliverable", "arm_reproduction_gate",
+    "arm_peer_interaction", "arm_max_awake_nodes",
 ]
 
 
@@ -79,6 +85,14 @@ def extract(run_dir: Path) -> dict:
     row = {c: "" for c in COLUMNS}
     row["study"] = study
     row["run_id"] = run_dir.name
+
+    try:
+        _arms = json.loads((debug / "run_config.json").read_text()).get("arms")
+    except (OSError, ValueError):
+        _arms = None
+    for _k, _v in (_arms or {}).items():
+        if f"arm_{_k}" in row:
+            row[f"arm_{_k}"] = str(_v).lower()
 
     # outcome
     status_f = debug / "run_status.json"

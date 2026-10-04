@@ -37,7 +37,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from .settings import get_bool
+from .settings import get_bool, get_int
 
 __all__ = [
     "Feature",
@@ -216,6 +216,22 @@ def enabled(key: str) -> bool:
     if f is None:
         raise KeyError(f"unknown feature {key!r}; known: {sorted(FEATURE_KEYS)}")
     return get_bool(f.key, f.default)
+
+
+def max_awake_nodes() -> int:
+    return get_int("max_awake_nodes", 5)
+
+
+def arm_config() -> dict:
+    """The effective value of every ablation arm, defaults included.
+
+    ``settings.resolved()`` holds only knobs somebody set, so an all-defaults
+    baseline reads ``{}``; an arm label has to be recoverable from the run
+    itself, not from the code version that happened to produce it.
+    """
+    out: dict = {k: enabled(k) for k in sorted(FEATURE_KEYS)}
+    out["max_awake_nodes"] = max_awake_nodes()
+    return out
 
 
 def disabled_tool_names() -> frozenset[str]:

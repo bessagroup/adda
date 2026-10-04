@@ -57,6 +57,7 @@ KNOWN_KEYS: frozenset[str] = frozenset({
     "hypothesis_ledger",
     "llm_max_buffer_mb",
     "llm_metadata_fetch",
+    "allow_arm_drift",
     "llm_metadata_timeout_s",
     "llm_quantization",
     "llm_retry_base",

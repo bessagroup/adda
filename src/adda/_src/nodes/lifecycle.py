@@ -44,6 +44,8 @@ class LifecycleMixin:
         from langgraph.graph import END
         from langgraph.types import Command
 
+        from ..runtime import features as _features
+
         run_dir = state.get("run_dir")
         thread_id = None
         if run_dir:
@@ -66,6 +68,7 @@ class LifecycleMixin:
                             "outcome": terminal.UNGATED,
                             "termination": termination,
                             "reviewed": False,
+                            "arms": _features.arm_config(),
                         },
                         indent=2,
                     ),
