@@ -364,3 +364,32 @@ def test_the_time_section_survives_the_retrospective_cap(tmp_path):
             (run_dir / "debug" / "retrospectives.jsonl").read_text().splitlines()]
     assert "END-OF-TIME-SECTION-MARKER" in rows[-1]["text"]
     assert len(retro) < recording._RETRO_TEXT_CAP
+
+
+def test_a_wound_down_halt_stays_resumable_with_its_halted_status(tmp_path):
+    import logging
+
+    from adda._src.runtime.agent_runtime import AgenticRun, _RunContext
+
+    (tmp_path / "PROBLEM_STATEMENT.md").write_text("x\n", encoding="utf-8")
+    run = AgenticRun(tmp_path)
+    run_dir = tmp_path / "runs" / "T"
+    debug_dir = run_dir / "debug"
+    debug_dir.mkdir(parents=True)
+    ctx = _RunContext(
+        ts="T", run_dir=run_dir, debug_dir=debug_dir,
+        notes_dir=debug_dir / "strategizer_notes",
+        workspace_dir=run_dir / "workspace",
+        problem="x", problem_sha256="a", live_problem_sha256="a",
+        resume_from=None, start_time=0.0, thread_id="th",
+        log=logging.getLogger("t"), log_handler=logging.NullHandler(),
+        delegation_log=__import__("unittest.mock").mock.MagicMock(),
+        canonical_cfg={}, study_cfg={}, initial_state={}, graph_config={},
+    )
+    run._finalize_run(ctx, {
+        "last_report": "x", "outcome": "UNGATED",
+        "termination": terminal.BACKSTOP_TIME, "reviewed": False,
+        "token_totals": {}})
+    status = json.loads((debug_dir / "run_status.json").read_text())
+    assert status["status"] == "halted" and status["resumable"] is True
+    assert status["termination"] == terminal.BACKSTOP_TIME

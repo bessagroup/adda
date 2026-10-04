@@ -1031,11 +1031,18 @@ class AgenticRun:
         # A stop is not a verdict on the work: it is recorded as STOPPED, with
         # the outcome (UNGATED) alongside and the run marked resumable.
         _stopped = termination == terminal.STOPPED
+        # A backstop or crash that wound down for retrospectives is a halt, not
+        # a verdict either: it keeps the "halted" status it had before it went
+        # through the wind-down, and stays resumable.
+        _halted = termination in (
+            terminal.BACKSTOP_TIME, terminal.BACKSTOP_USD,
+            terminal.REPEATED_ERRORS, terminal.CRASHED)
         self._write_run_status(
             ctx.debug_dir,
-            status="STOPPED" if _stopped else gate_outcome,
+            status=("STOPPED" if _stopped else "halted" if _halted
+                    else gate_outcome),
             **({"outcome": gate_outcome, "resumable": True}
-               if _stopped else {}),
+               if _stopped or _halted else {}),
             model=self._model,
             evals_used=evals, timestamp=now_ts, run=str(ctx.run_dir),
             thread_id=ctx.thread_id, stop_reason=stop_reason,
