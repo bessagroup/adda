@@ -219,9 +219,11 @@ class Node(
         # identical, working QueryStore/HypothesisList
         # surface whenever it declares them. Resolves the run via the shared
         # Node._resolve_run_dir (delegation-log path).
+        from ..runtime import features as _features
         from .tools.routing import build_declared_shared_closures
         self.adapter.closure_tools.update(
-            build_declared_shared_closures(self, self._agent_tools))
+            build_declared_shared_closures(
+                self, self._agent_tools - _features.disabled_tool_names()))
         # Closures from Agent.build_closure_tools() (ConsultLiterature,
         # CorpusAdd, ...) are installed on the adapter BEFORE this node
         # exists (agent_runtime.py), so they never pass through

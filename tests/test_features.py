@@ -252,3 +252,37 @@ def test_turning_off_the_playbook_leaves_the_api_and_the_contract():
     assert "<f3dasm_api>" in out
     assert "<oracle_contract>" in out
     assert "get_evaluator()" in out
+
+
+def test_a_disabled_features_shared_closures_never_reach_the_catalog(tmp_path):
+    """The read-only shared tools (HypothesisList, ...) are built by a second
+    path from the routing tools; it must honour the same subtraction, or the
+    ledger-off arm keeps a tool that returns "ERROR: ... not available"."""
+    from adda._src.backends.base import Agent, Edge, Graph
+    from adda._src.nodes import Node
+
+    from .test_route_aware_termination import StubAdapter
+
+    class A(Agent):
+        role = "strategizer"
+        tools = frozenset({"Done", "FollowUp", "HypothesisList", "QueryStore"})
+        description = "Test strategizer."
+
+    class B(Agent):
+        description = "Test implementer."
+
+    spec = Graph(nodes={"strategizer": A(), "implementer": B()},
+                 edges=(Edge("strategizer", "implementer"),),
+                 entry="strategizer")
+
+    def _node():
+        return Node(StubAdapter(), name="strategizer",
+                    outgoing=["implementer"], spec=spec, notes_dir=tmp_path,
+                    agent_tools=A.tools)
+
+    assert "HypothesisList" in _node().adapter.closure_tools
+
+    settings.configure({"hypothesis_ledger": False})
+    tools = _node().adapter.closure_tools
+    assert "HypothesisList" not in tools
+    assert "QueryStore" in tools
