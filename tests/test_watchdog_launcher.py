@@ -276,10 +276,17 @@ def test_signalling_the_watchdog_reaps_the_child_instead_of_orphaning_it(
     )
     proc = subprocess.Popen([sys.executable, str(harness)])
     pid_file = tmp_path / "child.pid"
-    deadline = time.monotonic() + 15
-    while not pid_file.exists() and time.monotonic() < deadline:
+    # The harness imports adda before it spawns the child, and the child writes
+    # its pid with open('w') then write(): wait for CONTENT, not mere
+    # existence, and for longer than a loaded macOS runner needs to start up.
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        if pid_file.exists() and pid_file.read_text().strip():
+            break
         time.sleep(0.05)
-    time.sleep(0.2)
+    else:
+        proc.kill()
+        pytest.fail("the child never wrote its pid within 90 s")
     child_pid = int(pid_file.read_text())
     assert psutil.pid_exists(child_pid)
 

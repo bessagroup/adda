@@ -34,7 +34,20 @@ def _study(tmp_path, name="s"):
     return d
 
 
-def test_two_runs_in_the_same_second_get_different_directories(tmp_path):
+def test_two_runs_in_the_same_second_get_different_directories(
+        tmp_path, monkeypatch):
+    import datetime as _dt
+
+    from adda._src.runtime import agent_runtime
+
+    # Freeze the clock: with the real one, a second boundary between the two
+    # calls gives the second run a plain new timestamp, not a collision suffix.
+    class _Frozen(_dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 1, 1, 0, 0, 0, tzinfo=tz)
+
+    monkeypatch.setattr(agent_runtime, "datetime", _Frozen)
     study = _study(tmp_path)
     run = AgenticRun(study_dir=study, interactive=False)
 
