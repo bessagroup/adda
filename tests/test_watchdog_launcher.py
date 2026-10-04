@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import os
+import signal
+import subprocess
 import sys
 import time
 
@@ -249,6 +251,49 @@ def test_stop_grace_must_fit_inside_the_deadline(tmp_path):
         run_under_watchdog(cmd, deadline_s=1.0, stop_grace_s=1.0)
     with pytest.raises(ValueError, match=">= 0"):
         run_under_watchdog(cmd, deadline_s=1.0, stop_grace_s=-1.0)
+
+
+# ── the watchdog itself being signalled must not orphan the run ──
+
+@pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGINT])
+def test_signalling_the_watchdog_reaps_the_child_instead_of_orphaning_it(
+        tmp_path, signum):
+    import psutil
+
+    child = tmp_path / "child.py"
+    child.write_text(
+        "import os, time\n"
+        f"open({str(tmp_path / 'child.pid')!r}, 'w').write(str(os.getpid()))\n"
+        "time.sleep(60)\n"
+    )
+    harness = tmp_path / "harness.py"
+    harness.write_text(
+        "import sys\n"
+        "from adda._src.infra.watchdog_launcher import run_under_watchdog\n"
+        f"r = run_under_watchdog([sys.executable, {str(child)!r}],"
+        " deadline_s=60.0, kill_grace_s=1.0)\n"
+        "sys.exit(r.interrupted_by or 0)\n"
+    )
+    proc = subprocess.Popen([sys.executable, str(harness)])
+    pid_file = tmp_path / "child.pid"
+    deadline = time.monotonic() + 15
+    while not pid_file.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    time.sleep(0.2)
+    child_pid = int(pid_file.read_text())
+    assert psutil.pid_exists(child_pid)
+
+    proc.send_signal(signum)
+    assert proc.wait(timeout=15) == int(signum)
+
+    gone = time.monotonic() + 5
+    while psutil.pid_exists(child_pid) and time.monotonic() < gone:
+        time.sleep(0.05)
+    try:
+        status = psutil.Process(child_pid).status()
+    except psutil.NoSuchProcess:
+        status = psutil.STATUS_ZOMBIE
+    assert status == psutil.STATUS_ZOMBIE  # dead (a zombie awaiting its reaper)
 
 
 # ── the CLI: budget resolution, deadline derivation, distinguishable exit codes ──

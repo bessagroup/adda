@@ -32,6 +32,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,6 +65,17 @@ DEFAULT_WATCHDOG_MULTIPLE = 2.0
 # a caller (a shell, a Slurm epilog, a benchmarks harness) can tell "the
 # watchdog killed this" from "the run failed on its own" without parsing text.
 EXIT_TIMEOUT = 124
+# The watchdog itself was told to stop (SIGINT / SIGTERM): shell convention,
+# 128 + signal number.
+EXIT_INTERRUPTED = {signal.SIGINT: 130, signal.SIGTERM: 143}
+
+
+class _Interrupted(BaseException):
+    """Raised by the watchdog's own signal handler to leave the poll loop."""
+
+    def __init__(self, signum: int):
+        super().__init__(signum)
+        self.signum = signum
 
 
 @dataclass(frozen=True)
@@ -74,12 +86,15 @@ class WatchdogResult:
     is then whatever the child reported after being signalled (often ``None``
     if it never even got to exit cleanly), not a verdict on the work. When
     ``timed_out=False``, ``returncode`` is the child's own real exit status,
-    propagated unchanged.
+    propagated unchanged. ``interrupted_by`` is the signal number when the
+    watchdog itself was signalled (SIGINT/SIGTERM) and took the run down with
+    it instead of leaving it orphaned.
     """
 
     timed_out: bool
     returncode: int | None
     pgid: int | None = None
+    interrupted_by: int | None = None
 
 
 def resolve_deadline_seconds(
@@ -189,25 +204,44 @@ def run_under_watchdog(
 
     deadline = time.monotonic() + deadline_s
     stop_at = deadline - stop_grace_s if stop_grace_s else None
-    while True:
-        rc = proc.poll()
-        if rc is not None:
-            return WatchdogResult(timed_out=False, returncode=rc, pgid=pgid)
-        if resolved_run_dir is None and hint_dir is not None:
-            resolved_run_dir = _discover_new_run_dir(hint_dir, existing_run_dirs)
-        if stop_at is not None and time.monotonic() >= stop_at:
-            stop_at = None  # once, whether or not it could be written
-            if resolved_run_dir is not None:
-                write_stop_request(
-                    resolved_run_dir, by="watchdog",
-                    reason=f"{stop_grace_s:g}s before the "
-                           f"{deadline_s:g}s wall-clock deadline",
-                    grace_s=stop_grace_s / 2,
-                )
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
-        time.sleep(min(poll_interval, remaining))
+
+    def _raise_interrupted(signum, _frame):
+        raise _Interrupted(signum)
+
+    # The child is its own session, so without this a SIGTERM/SIGINT to the
+    # watchdog (a terminal Ctrl-C, the viewer's Kill) ends the watchdog and
+    # orphans the run. Handlers can only be installed from the main thread.
+    previous: dict[int, object] = {}
+    if threading.current_thread() is threading.main_thread():
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            previous[sig] = signal.signal(sig, _raise_interrupted)
+    interrupted_by: int | None = None
+    try:
+        while True:
+            rc = proc.poll()
+            if rc is not None:
+                return WatchdogResult(timed_out=False, returncode=rc, pgid=pgid)
+            if resolved_run_dir is None and hint_dir is not None:
+                resolved_run_dir = _discover_new_run_dir(
+                    hint_dir, existing_run_dirs)
+            if stop_at is not None and time.monotonic() >= stop_at:
+                stop_at = None  # once, whether or not it could be written
+                if resolved_run_dir is not None:
+                    write_stop_request(
+                        resolved_run_dir, by="watchdog",
+                        reason=f"{stop_grace_s:g}s before the "
+                               f"{deadline_s:g}s wall-clock deadline",
+                        grace_s=stop_grace_s / 2,
+                    )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(poll_interval, remaining))
+    except _Interrupted as exc:
+        interrupted_by = exc.signum
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
 
     # TIMEOUT — the run has genuinely wedged (or is merely slow; the deadline
     # is a 2x-floor multiple of the run's own budget precisely so a merely
@@ -234,9 +268,12 @@ def run_under_watchdog(
         # signal (the #14 escape reap_process_group's own docstring names) —
         # reap_governor_pids's recursive, ownership-verified kill catches them.
         reap_governor_pids(resolved_run_dir)
-        write_watchdog_retrospective(resolved_run_dir, int(deadline_s))
+        if interrupted_by is None:
+            write_watchdog_retrospective(resolved_run_dir, int(deadline_s))
 
-    return WatchdogResult(timed_out=True, returncode=proc.poll(), pgid=pgid)
+    return WatchdogResult(
+        timed_out=interrupted_by is None, returncode=proc.poll(), pgid=pgid,
+        interrupted_by=interrupted_by)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -394,6 +431,14 @@ def main(argv: list[str] | None = None) -> int:
         existing_run_dirs=existing,
         stop_grace_s=stop_grace_s,
     )
+
+    if result.interrupted_by is not None:
+        print(
+            f"adda.watchdog: interrupted by signal {result.interrupted_by} — "
+            "the run's process tree was reaped rather than left orphaned.",
+            file=sys.stderr,
+        )
+        return EXIT_INTERRUPTED.get(result.interrupted_by, 1)
 
     if result.timed_out:
         print(

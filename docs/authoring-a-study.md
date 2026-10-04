@@ -258,3 +258,7 @@ last-resort kill switch for a hang, not a way to police a slow run. `python -m
 adda <study-dir>` on its own still works exactly as before; this is an
 additional, safer way to launch the same run when you want a hard outer
 backstop.
+
+Stopping the watchdog (Ctrl-C, or `kill` on its PID) takes the run down with
+it: the whole process tree is reaped and the watchdog exits `130` (SIGINT) or
+`143` (SIGTERM). A run is never left running with nothing watching it.

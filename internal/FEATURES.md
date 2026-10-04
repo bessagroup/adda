@@ -1018,6 +1018,10 @@ against the SDK's cost on calls it did price.
   `run_setup._parse_budget_str`) at the 2× floor (`--watchdog-multiple`, never
   settable below 2.0) — the two values can never silently disagree. Refuses to
   run at all if no budget can be resolved.
+- **Interrupt:** a SIGINT/SIGTERM to the watchdog itself (terminal Ctrl-C, the
+  viewer's Kill) reaps the child's whole tree (same path as a timeout, minus
+  the timeout post-mortem) and exits 130/143. The child is its own session, so
+  before this the watchdog's death orphaned the run.
 - **Where:** `_src/infra/watchdog_launcher.py` (`run_under_watchdog`,
   `resolve_deadline_seconds`, `main`); thin top-level forwarding package
   `adda/watchdog/` mirrors `adda/viewer/`'s own convention.
