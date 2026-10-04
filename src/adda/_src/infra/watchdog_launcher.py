@@ -28,6 +28,7 @@ budget"). :func:`resolve_deadline_seconds` refuses a multiple below that floor
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import signal
 import subprocess
@@ -49,6 +50,7 @@ __all__ = [
     "DEFAULT_WATCHDOG_MULTIPLE",
     "EXIT_TIMEOUT",
     "WatchdogResult",
+    "default_stop_grace_s",
     "resolve_deadline_seconds",
     "run_under_watchdog",
     "main",
@@ -95,6 +97,17 @@ class WatchdogResult:
     returncode: int | None
     pgid: int | None = None
     interrupted_by: int | None = None
+
+
+# A run that is asked to stop needs time for its workers to report and for the
+# entry node to take its retrospective round; a tenth of the deadline, never
+# more than a quarter of an hour, so a short study still has a deadline.
+STOP_GRACE_CAP_S = 900.0
+
+
+def default_stop_grace_s(deadline_s: float) -> float:
+    """The stop window used when ``runtime.stop_grace_s`` is not set."""
+    return min(STOP_GRACE_CAP_S, deadline_s / 10)
 
 
 def resolve_deadline_seconds(
@@ -392,11 +405,13 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         settings.configure(cfg.get("runtime") or {})
-        stop_grace_s = settings.get_float("stop_grace_s", 0)
+        stop_grace_s = settings.get_float("stop_grace_s", math.nan)
     except (TypeError, ValueError):
         print("Error: runtime.stop_grace_s must be a number of seconds.",
               file=sys.stderr)
         return 2
+    if math.isnan(stop_grace_s):
+        stop_grace_s = default_stop_grace_s(deadline_s)
     if stop_grace_s < 0 or (stop_grace_s and stop_grace_s >= deadline_s):
         print(
             f"Error: runtime.stop_grace_s ({stop_grace_s:g}s) must be >= 0 "

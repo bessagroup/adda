@@ -1335,7 +1335,7 @@ Not covered: the backstop halts (time/USD/repeated errors) still go straight
 to END with no real retrospectives. **Where:** `infra/stop_request.py`,
 `nodes/stop.py` (`StopMixin`), the `Done` stop path in
 `nodes/tools/routing/feedback.py`, `terminal.STOPPED`. **Watchdog:**
-`runtime.stop_grace_s` (default 0 = off, only under `watchdog_launcher`) writes
+`runtime.stop_grace_s` (only under `watchdog_launcher`; ON by default at `min(900 s, deadline/10)`, an explicit value overrides it, `0` opts out, a value at or past the deadline is refused) writes
 the request that many seconds before the deadline (`by="watchdog"`,
 `grace_s = stop_grace_s/2`: half for workers to wind down, half for the entry
 node's retrospective round); the deadline and the kill do not move.

@@ -446,3 +446,62 @@ def test_cli_without_entrypoint_behaviour_is_unchanged(tmp_path, monkeypatch):
         sys.executable, "-m", "adda", str(study_dir),
         "--budget", "100.0", "--model", "some-model",
     ]
+
+
+# ── stop_grace_s is on by default ──
+
+def _stop_grace_the_cli_passes(tmp_path, monkeypatch, config: str,
+                               budget: str = "100") -> float:
+    import adda._src.infra.watchdog_launcher as wl
+
+    study_dir = tmp_path / "study"
+    study_dir.mkdir(exist_ok=True)
+    (study_dir / "PROBLEM_STATEMENT.md").write_text("x")
+    (study_dir / "config.yaml").write_text(f"budget: {budget}\n{config}")
+    seen = {}
+
+    def fake(cmd, *, deadline_s, **kwargs):
+        seen.update(kwargs, deadline_s=deadline_s)
+        return wl.WatchdogResult(timed_out=False, returncode=0, pgid=1)
+
+    monkeypatch.setattr(wl, "run_under_watchdog", fake)
+    assert wl.main([str(study_dir)]) == 0
+    return seen["stop_grace_s"]
+
+
+def test_unset_stop_grace_is_a_tenth_of_the_deadline(tmp_path, monkeypatch):
+    # budget 100 -> deadline 200 -> 20 s: a short study still has a deadline.
+    assert _stop_grace_the_cli_passes(tmp_path, monkeypatch, "") == 20.0
+
+
+def test_unset_stop_grace_is_capped_at_fifteen_minutes(tmp_path, monkeypatch):
+    # budget 100000 -> deadline 200000 -> a tenth would be 20000 s.
+    assert _stop_grace_the_cli_passes(
+        tmp_path, monkeypatch, "", budget="100000") == 900.0
+
+
+def test_an_explicit_stop_grace_overrides_the_default(tmp_path, monkeypatch):
+    got = _stop_grace_the_cli_passes(
+        tmp_path, monkeypatch, "runtime:\n  stop_grace_s: 7\n")
+    assert got == 7.0
+
+
+def test_stop_grace_zero_opts_out(tmp_path, monkeypatch):
+    got = _stop_grace_the_cli_passes(
+        tmp_path, monkeypatch, "runtime:\n  stop_grace_s: 0\n")
+    assert got == 0.0
+
+
+def test_an_explicit_stop_grace_at_the_deadline_is_still_refused(
+    tmp_path, monkeypatch, capsys,
+):
+    import adda._src.infra.watchdog_launcher as wl
+
+    study_dir = tmp_path / "study"
+    study_dir.mkdir()
+    (study_dir / "PROBLEM_STATEMENT.md").write_text("x")
+    (study_dir / "config.yaml").write_text(
+        "budget: 100\nruntime:\n  stop_grace_s: 200\n")
+    monkeypatch.setattr(wl, "run_under_watchdog", lambda *a, **k: 1 / 0)
+    assert wl.main([str(study_dir)]) == 2
+    assert "stop_grace_s" in capsys.readouterr().err

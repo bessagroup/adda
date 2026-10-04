@@ -30,6 +30,11 @@ _CALL = re.compile(
     r"_?get_(?:bool|int|float|str)\(\s*[\"']([a-z0-9_]+)[\"']\s*,\s*([^)]*)\)")
 
 
+# A default computed from other settings cannot be a literal at the call site:
+# the key is read with this sentinel and the documented rule replaces it.
+_DERIVED_DEFAULTS = {"stop_grace_s": ("math.nan", "min(900, deadline/10)")}
+
+
 def _keys_read_in_source() -> set[str]:
     found: set[str] = set()
     for path in _SRC.rglob("*.py"):
@@ -149,6 +154,13 @@ def test_documented_default_matches_the_source(key):
     documented = row.rsplit("|", 2)[1].strip().strip("`")
 
     norm = {"False": "false", "True": "true", '""': "none", "''": "none"}
+    if key in _DERIVED_DEFAULTS:
+        sentinel, expected = _DERIVED_DEFAULTS[key]
+        assert src_default == sentinel, (
+            f"{key}: source reads {src_default!r}, the derived-default "
+            f"sentinel is {sentinel!r}")
+        assert documented == expected
+        return
     expected = norm.get(src_default, src_default)
     # A non-empty string default reads naturally in the table without its
     # quote characters (`auto`, not `"auto"`); the empty string keeps its
