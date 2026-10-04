@@ -8,7 +8,9 @@ The study directory must contain a ``PROBLEM_STATEMENT.md`` file.
 
 Options
 -------
---model <id>      LLM model identifier (default: claude-haiku-4-5-20251001).
+--model <id>      LLM model identifier (default: the study's config.yaml
+                  `model:`, else claude-haiku-4-5-20251001).
+--set KEY=VALUE   Override a runtime knob for this run (repeatable).
 --budget DURATION Wall-clock budget: seconds or HH:MM:SS (default: unlimited).
 """
 
@@ -48,6 +50,7 @@ def _budget(value: str) -> float:
 
 def _build_parser() -> argparse.ArgumentParser:
     from ._src.runtime.agent_runtime import DEFAULT_MODEL
+    from ._src.runtime.cli_overrides import add_set_argument
 
     parser = argparse.ArgumentParser(
         prog="python -m adda",
@@ -61,9 +64,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--model",
-        default=DEFAULT_MODEL,
+        default=None,
         metavar="MODEL",
-        help=f"LLM model identifier (default: {DEFAULT_MODEL}).",
+        help="LLM model identifier. Default: the study's config.yaml "
+             f"`model:`, else {DEFAULT_MODEL}.",
     )
     parser.add_argument(
         "--budget",
@@ -73,6 +77,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Wall-clock time budget: seconds, or HH:MM:SS "
              "(default: unlimited).",
     )
+    add_set_argument(parser)
     return parser
 
 
@@ -82,10 +87,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    from ._src.runtime.cli_overrides import as_runtime
+
+    try:
+        runtime = as_runtime(args.overrides)
+    except ValueError as exc:
+        parser.error(str(exc))
     run = AgenticRun(
         study_dir=Path(args.study_dir),
         model=args.model,
         budget=args.budget,
+        runtime=runtime or None,
     )
 
     try:

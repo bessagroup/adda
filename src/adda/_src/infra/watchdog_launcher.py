@@ -351,10 +351,13 @@ def _build_parser() -> argparse.ArgumentParser:
             "the study's config.yaml `budget:` only.",
         ),
     )
+    from ..runtime.cli_overrides import add_set_argument
+    add_set_argument(parser)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
+    from ..runtime.cli_overrides import as_runtime, format_set
     from ..runtime.run_setup import _load_study_config, _parse_budget_str
 
     parser = _build_parser()
@@ -363,9 +366,10 @@ def main(argv: list[str] | None = None) -> int:
 
     entry_path: Path | None = None
     if args.entrypoint is not None:
-        if args.model or args.budget:
+        if args.model or args.budget or args.overrides:
             print(
-                "Error: --entrypoint can't be combined with --model/--budget "
+                "Error: --entrypoint can't be combined with "
+                "--model/--budget/--set "
                 "— an arbitrary entrypoint script takes no CLI arguments of "
                 "its own to forward them to. Set `budget:` in the study's "
                 "config.yaml instead (the entrypoint's own AgenticRun call "
@@ -404,7 +408,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        settings.configure(cfg.get("runtime") or {})
+        overrides = as_runtime(args.overrides)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+    try:
+        settings.configure(cfg.get("runtime") or {}, overrides)
         stop_grace_s = settings.get_float("stop_grace_s", math.nan)
     except (TypeError, ValueError):
         print("Error: runtime.stop_grace_s must be a number of seconds.",
@@ -431,6 +440,7 @@ def main(argv: list[str] | None = None) -> int:
         cmd = [sys.executable, "-m", "adda", str(study_dir), "--budget", str(budget_s)]
         if args.model:
             cmd += ["--model", args.model]
+        cmd += format_set(args.overrides)
 
     print(
         f"adda.watchdog: launching {' '.join(cmd)} under a "

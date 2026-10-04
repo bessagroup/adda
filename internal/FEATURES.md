@@ -218,6 +218,13 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   `studies/run_ledger.csv`. A resume under different arms raises unless
   `runtime.allow_arm_drift` is set, in which case the first arms stay in
   `arms_initial`.
+- **`--set key=value` on both CLIs:** `python -m adda` and `python -m adda.watchdog`
+  take a repeatable `--set` (`runtime/cli_overrides.py`), the command-line
+  spelling of `AgenticRun(runtime=...)`: explicit precedence, validated against
+  `KNOWN_KEYS` before launch, forwarded by the watchdog to its child (refused
+  with `--entrypoint`). `python -m adda --model` now defaults to None, so the
+  study's `config.yaml` `model:` is no longer silently overridden by the
+  haiku default.
 - **Grounded in code, not paraphrased:** what the gate mechanically checks
   (the canonical store must hold ≥1 row before it will even run the
   notebook; zero new evals on replay; no modified/deleted rows; headline

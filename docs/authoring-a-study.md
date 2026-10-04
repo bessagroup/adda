@@ -121,6 +121,8 @@ normal run worse by construction. They are the arms of an ablation — the
 question "does this machinery earn its cost" — so an experiment sweeps them
 and a study author leaves them alone.
 
+To run an arm without editing the committed study, pass it on the command line: `python -m adda studies/example_study --set hypothesis_ledger=false` (repeatable; `python -m adda.watchdog` takes the same flag and forwards it). A `--set` outranks the environment and `config.yaml`, an unknown knob is an error, and the value lands in `run_config.json` like any explicit knob. For a replicate sweep, launch each replicate from a clean copy of the study (no `runs/`, no `workspace/`, no archived `pipeline_*.ipynb`), because the literature notes under `runs/lit_reviewer_notes` and the archives are study-scoped and would otherwise carry one arm's work into the next.
+
 Each one withholds everything it owns at once: its runtime object, the tools
 that exist only because of it, and the prompt section that tells the agent to
 use them. An agent in an arm is never left calling a tool that is gone. How
