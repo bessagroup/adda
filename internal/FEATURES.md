@@ -1315,8 +1315,12 @@ to END with no real retrospectives. **Where:** `infra/stop_request.py`,
 the request that many seconds before the deadline (`by="watchdog"`,
 `grace_s = stop_grace_s/2`: half for workers to wind down, half for the entry
 node's retrospective round); the deadline and the kill do not move.
-**Status:** node side and watchdog are done; the viewer's Stop button writes
-the same file and follows as its own change.
+**Viewer:**
+`POST /api/runs/{id}/stop` (write-token gated like notes) writes the same file
+with `by="viewer"`, refuses a closed run or an already-pending stop (409), and
+appends the action to `studies/<study>/viewer_actions.jsonl`. **Status:** node
+side, watchdog and the endpoint are done; the Stop button (front end) and
+Kill (needs the PID registry that Start, 5.3, creates) follow.
 
 ---
 

@@ -13,6 +13,7 @@ import queue
 import re
 import secrets
 import threading
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -27,7 +28,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
-from ..infra import operator_channel
+from ..infra import operator_channel, stop_request
 from ..nodes.notices import split_notices
 from . import readers
 
@@ -45,6 +46,19 @@ def _run_dir(study_dir: Path, run_id: str) -> Path | None:
 
 
 TOKEN_COOKIE = "adda_viewer_token"
+
+AUDIT_LOG = "viewer_actions.jsonl"
+
+
+def _audit(study_dir: Path, action: str, **fields) -> None:
+    """One line per write that reaches beyond the viewer (spec 14 §3.0): what
+    was done, to which run, when, and the exact thing written or run."""
+    row = {"ts": time.time(), "action": action, **fields}
+    try:
+        with open(study_dir / AUDIT_LOG, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, default=str) + "\n")
+    except OSError:
+        pass
 
 
 def _check_write(request, token: str) -> JSONResponse | None:
@@ -771,6 +785,33 @@ def create_app(
             return JSONResponse({"error": "empty note"}, status_code=400)
         return JSONResponse({"ok": True})
 
+    async def post_stop(request):
+        refused = _check_write(request, token)
+        if refused is not None:
+            return refused
+        run_id = request.path_params["run_id"]
+        run_dir = _run_dir(study_dir, run_id)
+        if run_dir is None:
+            return _not_found(f"no such run {run_id!r}")
+        if readers.read_run_status(run_dir) is not None:
+            return JSONResponse(
+                {"error": "run already closed"}, status_code=409)
+        pending = stop_request.read_stop_request(run_dir)
+        if pending is not None:
+            return JSONResponse(
+                {"error": "a stop is already requested", "stop_request": pending},
+                status_code=409)
+        reason = "operator pressed Stop in the viewer"
+        if not stop_request.write_stop_request(
+                run_dir, by="viewer", reason=reason):
+            return JSONResponse(
+                {"error": "could not write the stop request"}, status_code=500)
+        written = stop_request.read_stop_request(run_dir)
+        _audit(study_dir, "stop", run_id=run_id,
+               wrote=str(run_dir / "debug" / "stop_request.json"),
+               stop_request=written)
+        return JSONResponse({"ok": True, "stop_request": written})
+
     async def get_oracle(request):
         run_id = request.path_params["run_id"]
         run_dir = _run_dir(study_dir, run_id)
@@ -1017,6 +1058,7 @@ def create_app(
         Route("/api/runs/{run_id}/operator", get_operator),
         Route("/api/runs/{run_id}/answer", post_answer, methods=["POST"]),
         Route("/api/runs/{run_id}/note", post_note, methods=["POST"]),
+        Route("/api/runs/{run_id}/stop", post_stop, methods=["POST"]),
         Route("/api/runs/{run_id}/vitals", get_vitals),
         Route("/api/runs/{run_id}/oracle", get_oracle),
         Route("/api/runs/{run_id}/trajectory", get_trajectory),

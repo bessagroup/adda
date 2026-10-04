@@ -688,6 +688,48 @@ def test_an_empty_note_is_rejected_by_the_endpoint(tmp_path):
                        json={"text": "   "}).status_code == 400
 
 
+def test_stop_writes_the_request_the_run_reads_and_is_audited(tmp_path):
+    from adda._src.infra.stop_request import read_stop_request
+
+    study = _make_study(tmp_path)
+    run = _make_run(study, "20260904T120000")
+    resp = _writer(study).post("/api/runs/20260904T120000/stop", json={})
+    assert resp.status_code == 200
+    req = read_stop_request(run)
+    assert req is not None and req["by"] == "viewer"
+    rows = [json.loads(line) for line in
+            (study / "viewer_actions.jsonl").read_text().splitlines()]
+    assert rows[-1]["action"] == "stop"
+    assert rows[-1]["run_id"] == "20260904T120000"
+    assert rows[-1]["wrote"].endswith("debug/stop_request.json")
+
+
+def test_a_second_stop_is_a_conflict_not_a_second_request(tmp_path):
+    study = _make_study(tmp_path)
+    _make_run(study, "20260904T120000")
+    client = _writer(study)
+    assert client.post("/api/runs/20260904T120000/stop", json={}).status_code == 200
+    assert client.post("/api/runs/20260904T120000/stop", json={}).status_code == 409
+
+
+def test_stopping_a_closed_run_is_refused(tmp_path):
+    study = _make_study(tmp_path)
+    run = _make_run(study, "20260904T120000")
+    (run / "debug" / "run_status.json").write_text('{"status": "GATED"}')
+    resp = _writer(study).post("/api/runs/20260904T120000/stop", json={})
+    assert resp.status_code == 409
+    assert not (run / "debug" / "stop_request.json").exists()
+
+
+def test_stop_needs_the_write_token(tmp_path):
+    study = _make_study(tmp_path)
+    run = _make_run(study, "20260904T120000")
+    client = TestClient(create_app(study))
+    resp = client.post("/api/runs/20260904T120000/stop", json={})
+    assert resp.status_code == 403
+    assert not (run / "debug" / "stop_request.json").exists()
+
+
 def test_transcript_key_cannot_escape_the_run_directory(tmp_path):
     """The severe one: {key:path} reaches read_transcript raw.
 
