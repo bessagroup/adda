@@ -183,6 +183,74 @@ def test_run_dir_is_discovered_via_hint_when_not_known_up_front(tmp_path):
     assert not old_retro.exists()
 
 
+# ── stop_grace_s: ask the run to wind down ahead of the kill ──
+
+def _run_dir_child(tmp_path, body):
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir()
+    new_run_dir = runs_dir / "20260101T000000"
+    script = tmp_path / "child.py"
+    script.write_text(
+        "import os, sys, time\n"
+        f"run = {str(new_run_dir)!r}\n"
+        "os.makedirs(os.path.join(run, 'debug'))\n" + body
+    )
+    return script, runs_dir, new_run_dir
+
+
+def test_stop_request_is_written_ahead_of_the_deadline_and_kill_is_unchanged(tmp_path):
+    from adda._src.infra.stop_request import read_stop_request
+
+    script, runs_dir, run = _run_dir_child(tmp_path, "time.sleep(30)\n")
+    t0 = time.monotonic()
+    result = run_under_watchdog(
+        [sys.executable, str(script)], deadline_s=2.0, kill_grace_s=0.5,
+        run_dir_hint=runs_dir, existing_run_dirs=frozenset(),
+        stop_grace_s=1.0,
+    )
+    assert result.timed_out is True
+    assert time.monotonic() - t0 >= 2.0  # the deadline did not move
+    req = read_stop_request(run)
+    assert req is not None
+    assert req["by"] == "watchdog"
+    assert req["grace_s"] == 0.5
+
+
+def test_a_run_that_closes_on_the_request_is_not_a_timeout(tmp_path):
+    script, runs_dir, _ = _run_dir_child(
+        tmp_path,
+        "p = os.path.join(run, 'debug', 'stop_request.json')\n"
+        "while not os.path.exists(p):\n"
+        "    time.sleep(0.02)\n"
+        "sys.exit(0)\n",
+    )
+    result = run_under_watchdog(
+        [sys.executable, str(script)], deadline_s=3.0,
+        run_dir_hint=runs_dir, existing_run_dirs=frozenset(),
+        stop_grace_s=1.5,
+    )
+    assert result.timed_out is False
+    assert result.returncode == 0
+
+
+def test_no_run_dir_means_no_request_and_the_same_kill(tmp_path):
+    script = tmp_path / "slow.py"
+    script.write_text("import time; time.sleep(30)\n")
+    result = run_under_watchdog(
+        [sys.executable, str(script)], deadline_s=0.6, kill_grace_s=0.5,
+        stop_grace_s=0.3,
+    )
+    assert result.timed_out is True
+
+
+def test_stop_grace_must_fit_inside_the_deadline(tmp_path):
+    cmd = [sys.executable, "-c", "pass"]
+    with pytest.raises(ValueError, match="shorter"):
+        run_under_watchdog(cmd, deadline_s=1.0, stop_grace_s=1.0)
+    with pytest.raises(ValueError, match=">= 0"):
+        run_under_watchdog(cmd, deadline_s=1.0, stop_grace_s=-1.0)
+
+
 # ── the CLI: budget resolution, deadline derivation, distinguishable exit codes ──
 
 def test_cli_refuses_to_run_without_a_resolvable_budget(tmp_path, capsys):

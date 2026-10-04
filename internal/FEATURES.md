@@ -1310,9 +1310,13 @@ resumed run does not stop on arrival; the file is renamed
 Not covered: the backstop halts (time/USD/repeated errors) still go straight
 to END with no real retrospectives. **Where:** `infra/stop_request.py`,
 `nodes/stop.py` (`StopMixin`), the `Done` stop path in
-`nodes/tools/routing/feedback.py`, `terminal.STOPPED`. **Status:** the node
-side is done; the watchdog's `runtime.stop_grace_s` and the viewer's Stop
-button write the same file and follow as their own changes.
+`nodes/tools/routing/feedback.py`, `terminal.STOPPED`. **Watchdog:**
+`runtime.stop_grace_s` (default 0 = off, only under `watchdog_launcher`) writes
+the request that many seconds before the deadline (`by="watchdog"`,
+`grace_s = stop_grace_s/2`: half for workers to wind down, half for the entry
+node's retrospective round); the deadline and the kill do not move.
+**Status:** node side and watchdog are done; the viewer's Stop button writes
+the same file and follows as its own change.
 
 ---
 

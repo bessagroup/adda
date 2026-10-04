@@ -36,6 +36,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..runtime import settings
+from .stop_request import write_stop_request
 from .watchdog_cleanup import (
     reap_governor_pids,
     reap_process_group,
@@ -135,6 +137,7 @@ def run_under_watchdog(
     env: dict | None = None,
     poll_interval: float = 0.05,
     kill_grace_s: float = 1.0,
+    stop_grace_s: float = 0.0,
 ) -> WatchdogResult:
     """Run ``cmd`` as a child process, in its own process group, with a hard
     wall-clock ``deadline_s``.
@@ -158,7 +161,24 @@ def run_under_watchdog(
     ``existing_run_dirs`` (the run-dir names that existed BEFORE this child
     was spawned) instead; the new run dir is discovered opportunistically
     during the wait, with one final attempt right before escalation.
+
+    ``stop_grace_s`` (default 0 = today's behaviour) asks the run to wind down
+    BEFORE the kill: ``stop_grace_s`` ahead of the deadline a stop request is
+    written into the run's ``debug/`` (``infra/stop_request.py``), so a run
+    that is merely slow can hand over its agents' real retrospectives instead
+    of losing them to SIGTERM. The deadline itself does not move and the kill
+    below is unchanged; a run that closes inside the grace is simply a
+    finished run. The run gets half the window to wind its workers down and
+    the other half to take its own retrospective round. A run directory not
+    found by then is not guessed at — the kill proceeds as before.
     """
+    if stop_grace_s < 0:
+        raise ValueError(f"stop_grace_s must be >= 0; got {stop_grace_s}")
+    if stop_grace_s and stop_grace_s >= deadline_s:
+        raise ValueError(
+            f"stop_grace_s ({stop_grace_s:g}s) must be shorter than the "
+            f"deadline ({deadline_s:g}s): the request is written "
+            "stop_grace_s BEFORE the deadline, so it would predate the run")
     proc = subprocess.Popen(  # noqa: S603 — cmd is caller-constructed, not shell text
         cmd, cwd=cwd, env=env, start_new_session=True,
     )
@@ -168,12 +188,22 @@ def run_under_watchdog(
     hint_dir = Path(run_dir_hint) if run_dir_hint is not None else None
 
     deadline = time.monotonic() + deadline_s
+    stop_at = deadline - stop_grace_s if stop_grace_s else None
     while True:
         rc = proc.poll()
         if rc is not None:
             return WatchdogResult(timed_out=False, returncode=rc, pgid=pgid)
         if resolved_run_dir is None and hint_dir is not None:
             resolved_run_dir = _discover_new_run_dir(hint_dir, existing_run_dirs)
+        if stop_at is not None and time.monotonic() >= stop_at:
+            stop_at = None  # once, whether or not it could be written
+            if resolved_run_dir is not None:
+                write_stop_request(
+                    resolved_run_dir, by="watchdog",
+                    reason=f"{stop_grace_s:g}s before the "
+                           f"{deadline_s:g}s wall-clock deadline",
+                    grace_s=stop_grace_s / 2,
+                )
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
@@ -323,6 +353,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
 
+    try:
+        settings.configure(cfg.get("runtime") or {})
+        stop_grace_s = settings.get_float("stop_grace_s", 0)
+    except (TypeError, ValueError):
+        print("Error: runtime.stop_grace_s must be a number of seconds.",
+              file=sys.stderr)
+        return 2
+    if stop_grace_s < 0 or (stop_grace_s and stop_grace_s >= deadline_s):
+        print(
+            f"Error: runtime.stop_grace_s ({stop_grace_s:g}s) must be >= 0 "
+            f"and shorter than the watchdog deadline ({deadline_s:g}s).",
+            file=sys.stderr,
+        )
+        return 2
+
     runs_dir = study_dir / "runs"
     existing: frozenset[str] = frozenset(
         p.name for p in runs_dir.iterdir() if p.is_dir()
@@ -347,6 +392,7 @@ def main(argv: list[str] | None = None) -> int:
         deadline_s=deadline_s,
         run_dir_hint=runs_dir,
         existing_run_dirs=existing,
+        stop_grace_s=stop_grace_s,
     )
 
     if result.timed_out:
