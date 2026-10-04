@@ -97,6 +97,7 @@ class OrchestrationMixin:
         # Budget state — set at the start of each __call__ from AgenticState
         self._budget_seconds: float | None = None
         self._run_start: float | None = None
+        self._stop: dict | None = None
         # Hard USD cost ceiling (None = inactive). Set each __call__ from state.
         self._budget_usd: float | None = None
         # True once any LLM call reports a real cost (claude). Stays False under
@@ -427,6 +428,7 @@ class OrchestrationMixin:
         if _confer:
             text = "\n\n".join(_confer) + "\n\n" + text
         text = self._drain_operator_notes() + text
+        text = self._stop_tick() + text
         if self._science_monitor is not None:
             offenders = self._science_monitor.escalation_due()
             _critic_name = self._find_critic_name()
@@ -770,6 +772,9 @@ class OrchestrationMixin:
         if halt is not None:
             return halt
         pending_notifs = self._reset_for_turn()
+        stop_notice = self._stop_tick()
+        if stop_notice:
+            pending_notifs.append(stop_notice)
         messages = self._compose_messages(state, budget_warnings, pending_notifs)
         ai_msg = self._invoke_turn(messages)
         return self._route_turn(state, ai_msg)

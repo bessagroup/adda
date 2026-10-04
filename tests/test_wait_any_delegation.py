@@ -279,6 +279,9 @@ def test_a_routine_notification_does_not_wake_the_wait():
         def _drain_operator_notes(self):
             return ""
 
+        def _stop_tick(self):
+            return ""
+
     text, wake = DelegationTools._drain_while_waiting(
         type("T", (), {"node": _N()})())
     assert "report ready" in text

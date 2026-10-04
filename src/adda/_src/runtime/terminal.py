@@ -39,6 +39,7 @@ __all__ = [
     "RECURSION_LIMIT",
     "CRASHED",
     "KILLED",
+    "STOPPED",
     "TERMINATIONS",
     "HALT_TERMINATIONS",
     "ungated_banner",
@@ -63,10 +64,11 @@ REPEATED_ERRORS = "repeated_errors"  # max_consecutive_errors to one target
 RECURSION_LIMIT = "recursion_limit"  # LangGraph step ceiling
 CRASHED = "crashed"                  # unhandled exception
 KILLED = "killed"                    # external supervisor (wall-clock watchdog)
+STOPPED = "stopped"                  # operator/watchdog stop request, wound down
 
 TERMINATIONS = (
     DONE, NO_CLOSE, BACKSTOP_TIME, BACKSTOP_USD,
-    REPEATED_ERRORS, RECURSION_LIMIT, CRASHED, KILLED,
+    REPEATED_ERRORS, RECURSION_LIMIT, CRASHED, KILLED, STOPPED,
 )
 
 # Terminations that mean the run was stopped rather than finished. None of
@@ -75,7 +77,7 @@ TERMINATIONS = (
 # a killed run may have been minutes from a PASS (see internal/AUDIT-20260623).
 HALT_TERMINATIONS = (
     BACKSTOP_TIME, BACKSTOP_USD, REPEATED_ERRORS,
-    RECURSION_LIMIT, CRASHED, KILLED,
+    RECURSION_LIMIT, CRASHED, KILLED, STOPPED,
 )
 
 

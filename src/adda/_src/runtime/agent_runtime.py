@@ -1026,8 +1026,15 @@ class AgenticRun:
         # cleanly-closed run leaves no run_status.json and the §1 protocol's
         # first KPI (gate outcome) is unreadable — the outcome would live only in
         # the notebook metadata + the ledger. (audit: 3 GATED runs, none had it.)
+        # A stop is not a verdict on the work: it is recorded as STOPPED, with
+        # the outcome (UNGATED) alongside and the run marked resumable.
+        _stopped = termination == terminal.STOPPED
         self._write_run_status(
-            ctx.debug_dir, status=gate_outcome, model=self._model,
+            ctx.debug_dir,
+            status="STOPPED" if _stopped else gate_outcome,
+            **({"outcome": gate_outcome, "resumable": True}
+               if _stopped else {}),
+            model=self._model,
             evals_used=evals, timestamp=now_ts, run=str(ctx.run_dir),
             thread_id=ctx.thread_id, stop_reason=stop_reason,
             # HOW the run stopped, kept separate from what its conclusions are

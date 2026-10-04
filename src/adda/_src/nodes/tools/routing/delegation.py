@@ -1717,6 +1717,12 @@ class DelegationTools:
         without a graph spec (tests).
         """
         node = self.node
+        stop_notice = node._stop_tick()
+        stop_refusal = node._stop_refusal()
+        if stop_refusal is not None:
+            node._record_intervention(
+                "DELEGATE_REFUSED_STOP", target, "operator stop active")
+            return wrap_notice(stop_notice) + stop_refusal
         review_refusal = self._check_open_reviews()
         if review_refusal is not None:
             return review_refusal
@@ -2634,7 +2640,9 @@ class DelegationTools:
         # An operator note already queued as this Wait starts is delivered
         # now, and (like one arriving mid-wait) must not sit unread while
         # the Wait blocks.
-        operator = self.node._drain_operator_notes()
+        stop = self.node._stop_tick()
+        operator = (
+            wrap_notice(stop) if stop else "") + self.node._drain_operator_notes()
         prefix = operator + self.node._drain_notifications()
         with self._yield_slot_if_child_queued():
             if delegation_id is None:
@@ -2905,6 +2913,10 @@ class DelegationTools:
         operator = node._drain_operator_notes()
         if operator:
             out += wrap_notice(operator.strip())
+            wake = True
+        stop = node._stop_tick()
+        if stop:
+            out += wrap_notice(stop)
             wake = True
         if node._science_monitor is not None:
             drift = node._science_monitor.drain()

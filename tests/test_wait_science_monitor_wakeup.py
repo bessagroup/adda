@@ -133,6 +133,9 @@ def test_an_unchanged_violation_wakes_the_wait_once_a_changed_one_again():
         def _drain_operator_notes(self):
             return ""
 
+        def _stop_tick(self):
+            return ""
+
     node = _N()
     tools = type("T", (), {"node": node})()
     wakes = [DelegationTools._drain_while_waiting(tools)[1] for _ in range(15)]

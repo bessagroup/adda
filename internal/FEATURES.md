@@ -1279,6 +1279,43 @@ against the SDK's cost on calls it did price.
 
 ---
 
+## Graceful stop (`debug/stop_request.json`)
+
+SIGTERM unwinds nothing in a run, so a watchdog or operator kill used to lose
+every agent's real retrospective. A **stop request** is the graceful
+alternative: whoever wants the run over writes `debug/stop_request.json`
+(`{requested_at, by, reason, grace_s}`, `infra/stop_request.py`); the entry
+node notices it at its next checkpoint — the start of a turn, every tool
+result, and each tick of a blocking `Wait` — and:
+
+1. tells every live delegation, on the per-delegation queue Confer and the
+   budget warnings use, to report what it has and finish (a worker mid a
+   single long tool call sees it at its next tool boundary);
+2. refuses new `Delegate` calls (a refusal by design, not an `ERROR:`);
+3. returns a blocking `Wait` early, once, on first sight;
+4. lets `Done()` skip the milestone, first-call, reproduction and critic
+   gates and take only the retrospective round, then close **STOPPED** —
+   `run_status.json` `status: STOPPED`, `outcome: UNGATED`, `termination:
+   stopped`, `resumable: true`. `terminal.STOPPED` is a censored termination
+   like the backstops: never GATED, never a failure.
+
+A worker's report is its retrospective, so winding down first is what saves
+them. Only a delegation still running after `grace_s` is cancelled (registry
+`Cancelled`, a delegation-log row `CANCELLED` stating "operator stop … no
+retrospective was given"); no placeholder retrospective is invented for it.
+A request stamped before the run's start is a leftover and is ignored, so a
+resumed run does not stop on arrival; the file is renamed
+`stop_request.consumed.json` once honoured.
+
+Not covered: the backstop halts (time/USD/repeated errors) still go straight
+to END with no real retrospectives. **Where:** `infra/stop_request.py`,
+`nodes/stop.py` (`StopMixin`), the `Done` stop path in
+`nodes/tools/routing/feedback.py`, `terminal.STOPPED`. **Status:** the node
+side is done; the watchdog's `runtime.stop_grace_s` and the viewer's Stop
+button write the same file and follow as their own changes.
+
+---
+
 - **Thinking display (`runtime.thinking_display`):** `summarized` (default) or
   `omitted`, passed as `thinking={"type": "adaptive", "display": ...}` to
   `ClaudeAgentOptions` on models that support adaptive thinking (Opus/Sonnet

@@ -58,6 +58,7 @@ from .lifecycle import LifecycleMixin
 from .orchestration import OrchestrationMixin
 from .recording import RecordingMixin
 from .reproduction_gate import ReproductionGateMixin
+from .stop import StopMixin
 
 
 class Node(
@@ -66,6 +67,7 @@ class Node(
     LifecycleMixin,
     ReproductionGateMixin,
     OrchestrationMixin,
+    StopMixin,
 ):
     """One node in the agent graph.
 

@@ -76,6 +76,23 @@ _FAILED_RETROSPECTIVE = (
     "This will NOT reopen the run."
 )
 
+# Retrospective when an operator/watchdog stop closes the run. Same fields as
+# the failed-close interview, but it names the real reason so the agent does
+# not read its own interruption as a failure of its work.
+_STOP_RETROSPECTIVE = (
+    "The run is being STOPPED on request (recorded as UNGATED, termination "
+    "'stopped'; it can be resumed). Before it finalises, a quick "
+    "retrospective about the SYSTEM, not the science. Call Done() ONE more "
+    "time with a summary containing only a ### Retrospective block:\n"
+    "- BLOCKED: the single biggest thing you NEEDED but COULDN'T do — a "
+    "missing tool, permission, or way to test/inspect your own work. Name it "
+    "specifically.\n"
+    "- DECISION: what you would have done next had the run continued.\n"
+    "- FRICTION: any rule/tool that worked against you, INCLUDING what you "
+    "recovered from; 'none' only if truly zero.\n"
+    "This will NOT reopen the run."
+)
+
 # Bounce budget before a never-reproducing deliverable closes the run FAILED.
 _REPRO_MAX = 6
 
@@ -119,6 +136,8 @@ class FeedbackTools:
         wait=True would already be collected here, with no pending poll.)
         """
         prefix = self.node._drain_notifications() + self._open_hypotheses_notice()
+        if self.node._stop is not None:
+            return self._close_stopped(summary, prefix)
         for gate in (
             self._pending_refusal,
             self._capture_retrospective,
@@ -157,6 +176,52 @@ class FeedbackTools:
             "Re-call Done() once none are still running."
         )
 
+    def _close_stopped(self, summary: str, prefix: str) -> str:
+        """Done() under a stop request: the gates a finished run must pass
+        are skipped — nothing is being claimed, only the record is closed."""
+        for gate in (
+            self._stop_pending,
+            self._capture_retrospective,
+            self._enter_stop_retrospective,
+        ):
+            held = gate(summary, prefix)
+            if held is not None:
+                return held
+        return prefix + "Run complete."
+
+    def _stop_pending(self, summary: str, prefix: str) -> str | None:
+        """While a stop is winding workers down, Done() waits for their
+        reports — until the grace passes and the stragglers are cancelled."""
+        self.node._stop_tick()
+        pending = self.node._pending_delegations()
+        if not pending:
+            return None
+        return (
+            prefix + f"Operator stop: {len(pending)} delegation(s) still "
+            f"reporting: {pending}. Wait() for them, then call Done() again "
+            "— any still running when the grace period ends are cancelled."
+        )
+
+    def _enter_stop_retrospective(
+        self, summary: str, prefix: str,
+    ) -> str | None:
+        node = self.node
+        stop = node._stop or {}
+        banner = (
+            "## ⚠ STOPPED — run closed on request"
+            + (f" ({stop['reason']})" if stop.get("reason") else "")
+            + "\n\nThis run was stopped, not finished: nothing below was "
+            "reviewed, and it can be resumed.\n\n---\n\n"
+        )
+        node._terminal = {
+            "outcome": terminal.UNGATED,
+            "reviewed": False,
+            "termination": terminal.STOPPED,
+        }
+        node._awaiting_retro = True
+        node._final_summary = banner + summary
+        return prefix + _STOP_RETROSPECTIVE
+
     def _capture_retrospective(self, summary: str, prefix: str) -> str | None:
         """Final stage: this Done() carries ONLY the retrospective.
 
@@ -176,7 +241,9 @@ class FeedbackTools:
         # PASS, 3-strike, or a failed reproduction). The retrospective round is
         # a courier, not a judge — it must not invent an outcome of its own.
         node._route.update(getattr(node, "_terminal", {}))
-        node._route["termination"] = terminal.DONE
+        node._route.setdefault("termination", terminal.DONE)
+        if node._route["termination"] == terminal.STOPPED:
+            node._stop_consume()
         return prefix + "Run complete."
 
     def _milestone_gate(self, summary: str, prefix: str) -> str | None:
