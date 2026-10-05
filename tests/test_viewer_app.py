@@ -1554,3 +1554,61 @@ def test_docs_endpoint_runs_the_same_lookup_as_adda_docs(tmp_path):
     assert r.status_code == 200
     assert r.json()["text"] == explain("AgenticRun")
     assert client.get("/api/docs", params={"q": " "}).status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# /api/studies: new and duplicate study (spec 14 Phase 5.1, 5.2)
+# ---------------------------------------------------------------------------
+
+def _studies_repo(tmp_path, monkeypatch):
+    import subprocess
+
+    cfg = tmp_path / "gitconfig"
+    cfg.write_text("[user]\n\tname = Op\n\temail = op@x\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(cfg))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    root = tmp_path / "repo"
+    cur = root / "studies" / "cur"
+    cur.mkdir(parents=True)
+    (cur / "PROBLEM_STATEMENT.md").write_text("# minimise y\n")
+    (cur / "config.yaml").write_text("model: m1\nbudget: '00:10:00'\n")
+    for argv in (["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-q", "-m", "x"]):
+        subprocess.run(["git", "-C", str(root), *argv], check=True, capture_output=True)
+    return root, cur
+
+
+def test_new_and_duplicate_study_commit_exactly_two_files(tmp_path, monkeypatch):
+    import subprocess
+
+    root, cur = _studies_repo(tmp_path, monkeypatch)
+    client = TestClient(create_app(cur, token="t"))
+    assert client.get("/api/studies").json() == {"current": "cur", "studies": ["cur"]}
+    client.get("/session?token=t&next=/ui")
+
+    r = client.post("/api/studies", json={"name": "copy", "template": "cur"})
+    assert r.status_code == 200, r.text
+    assert (root / "studies" / "copy" / "config.yaml").read_text() == (cur / "config.yaml").read_text()
+    assert r.json()["open"].endswith("studies/copy")
+    files = subprocess.run(["git", "-C", str(root), "show", "--name-only", "--format=", "HEAD"],
+                           capture_output=True, text=True).stdout.split()
+    assert sorted(files) == ["studies/copy/PROBLEM_STATEMENT.md", "studies/copy/config.yaml"]
+
+    blank = client.post("/api/studies", json={
+        "name": "fresh", "problem_statement": "# p", "config": "budget: 60\n"})
+    assert blank.status_code == 200 and blank.json()["name"] == "fresh"
+
+    for body, status in (
+        ({"name": "copy", "template": "cur"}, 409),
+        ({"name": "../evil", "problem_statement": "p", "config": "budget: 1"}, 400),
+        ({"name": "bad", "problem_statement": "p", "config": "runtime: {nope: 1}"}, 422),
+        ({"name": "empty", "config": "budget: 1"}, 400),
+        ({"name": "t2", "template": "../../etc"}, 404),
+    ):
+        assert client.post("/api/studies", json=body).status_code == status, body
+    assert not (root / "studies" / "bad").exists()
+
+
+def test_new_study_needs_the_session_token(tmp_path, monkeypatch):
+    _root, cur = _studies_repo(tmp_path, monkeypatch)
+    client = TestClient(create_app(cur, token="t"))
+    assert client.post("/api/studies", json={"name": "x", "template": "cur"}).status_code in (401, 403)

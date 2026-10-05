@@ -1129,6 +1129,45 @@ def create_app(
                      if r["op"] != "same"])
         return JSONResponse({"ok": True, **done})
 
+    async def get_studies(request):
+        names = await asyncio.to_thread(study_edit.sibling_studies, study_dir)
+        return JSONResponse({"current": study_dir.resolve().name, "studies": names})
+
+    async def post_studies(request):
+        refused = _check_write(request, token)
+        if refused is not None:
+            return refused
+        try:
+            body = await request.json()
+            name = body["name"]
+            template = body.get("template")
+            ps, cfg = body.get("problem_statement"), body.get("config")
+            if not isinstance(name, str) or any(
+                    x is not None and not isinstance(x, str) for x in (template, ps, cfg)):
+                raise TypeError
+        except Exception:  # noqa: BLE001 — any malformed body
+            return JSONResponse(
+                {"error": "malformed body: need {name, template?, problem_statement?, config?}"},
+                status_code=400)
+        if template is not None:
+            if template not in await asyncio.to_thread(study_edit.sibling_studies, study_dir):
+                return JSONResponse({"error": f"no study {template!r} to copy from"},
+                                    status_code=404)
+            src = study_dir.resolve().parent / template
+            def _copy(key, given):
+                f = src / study_edit.FILES[key]
+                return given if given is not None else (
+                    f.read_text(encoding="utf-8") if f.is_file() else None)
+            ps, cfg = _copy("problem_statement", ps), _copy("config", cfg)
+        try:
+            done = await asyncio.to_thread(
+                study_edit.create_study, study_dir, name, ps or "", cfg or "")
+        except study_edit.StudyEditError as exc:
+            return _edit_error(exc)
+        _audit(study_dir, "create_study", name=name, template=template, sha=done["sha"],
+               path=done["path"])
+        return JSONResponse({"ok": True, **done})
+
     async def get_study_commit(request):
         from . import safe_git
         sha = request.query_params.get("sha", "")
@@ -1444,6 +1483,8 @@ def create_app(
         Route("/api/runs/{run_id}/figure_of_merit", get_figure_of_merit),
         Route("/api/runs/{run_id}/monitor", get_monitor),
         Route("/api/docs", get_docs),
+        Route("/api/studies", get_studies),
+        Route("/api/studies", post_studies, methods=["POST"]),
         Route("/api/runs/{run_id}/download", get_download),
         Route("/api/runs/{run_id}/artifacts", get_artifacts),
         Route("/api/runs/{run_id}/artifact", get_artifact),

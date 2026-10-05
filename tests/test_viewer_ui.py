@@ -145,6 +145,31 @@ def test_ask_docs_box_shows_the_lookup_and_closes_on_escape(tmp_path, page):
         assert page.is_hidden("#docs")
 
 
+def test_new_study_sheet_copies_a_study_and_says_how_to_open_it(tmp_path, page, monkeypatch):
+    import subprocess
+    study, _run_dir = _study(tmp_path)
+    cfg = tmp_path / "gitconfig"
+    cfg.write_text("[user]\n\tname = Op\n\temail = op@x\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(cfg))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    (study / "PROBLEM_STATEMENT.md").write_text("# p\n")
+    (study / "config.yaml").write_text("budget: 60\n")
+    for argv in (["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-q", "-m", "x"]):
+        subprocess.run(["git", "-C", str(tmp_path), *argv], check=True, capture_output=True)
+    with _LiveServer(create_app(study, token="t")) as srv:
+        page.goto(f"{srv.url}/session?token=t&next=/ui?run={RUN}")
+        page.click("#opennew")
+        page.wait_for_selector("#nstpl option:nth-child(2)", state="attached")
+        page.fill("#nsname", "variant")
+        page.select_option("#nstpl", label=page.inner_text("#nstpl option:nth-child(2)"))
+        page.click("#nsform button[type=submit]")
+        page.wait_for_selector("#newstudy pre")
+        assert "adda.viewer" in page.inner_text("#newstudy pre")
+        assert (study.parent / "variant" / "config.yaml").read_text() == "budget: 60\n"
+        page.keyboard.press("Escape")
+        assert page.is_hidden("#newstudy")
+
+
 def _git_study(study, monkeypatch):
     import subprocess
     cfg = study.parent / "gitconfig"

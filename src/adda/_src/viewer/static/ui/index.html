@@ -18,7 +18,7 @@
       <button class="btn ghost" id="theme" title="Toggle light / dark">◐</button>
       <button class="btn ghost" id="rail" title="Collapse the run list" aria-label="Collapse the run list">‹</button>
       <button class="btn" id="opendocs" title="Ask adda’s documentation (the adda-docs command).">Docs</button>
-      <button class="btn" disabled title="This action isn't available in this version of the viewer yet."><span class="keep-hide">New study</span></button>
+      <button class="btn" id="opennew" title="Create a study next to this one, blank or copied from an existing study.">New study</button>
     </div>
   </nav>
   <div class="main">
@@ -34,6 +34,7 @@
   </div>
 </div>
 <aside class="sheet" id="sheet" aria-label="Start run" hidden></aside>
+<aside class="sheet" id="newstudy" aria-label="New study" hidden></aside>
 <aside class="sheet" id="docs" aria-label="Ask the docs" hidden></aside>
 <div class="pop" id="pop" role="dialog" aria-label="Stop this run" hidden></div>
 <script src="/static/ui/ui.js"></script>

@@ -1460,6 +1460,45 @@ async function doStart() {
   paintSheet();
 }
 
+/* New / duplicate study */
+S.newst = { open: false, list: null, err: null, busy: false, done: null, name: "", tpl: "", ps: "", cfg: "budget: 3600\n" };
+function paintNew() {
+  const el = $("newstudy"), s = S.newst;
+  el.hidden = !s.open; if (!s.open) { el.innerHTML = ""; return; }
+  const opts = ['<option value="">Blank</option>'].concat((s.list || []).map((n) =>
+    `<option value="${esc(n)}" ${n === s.tpl ? "selected" : ""}>Copy of ${esc(n)}${n === (S.vitals && S.vitals.study) ? " (this study)" : ""}</option>`)).join("");
+  el.innerHTML = `<div class="dhd"><b>New study</b><span class="sp"></span><button type="button" class="btn ghost" data-ns-close aria-label="Close">Close</button></div><div class="sbody">` +
+    `<form id="nsform"><label class="dcap" for="nsname">Name (letters, digits, - and _)</label><input type="text" id="nsname" class="mono" style="width:100%;min-height:40px" value="${esc(s.name)}">` +
+    `<label class="dcap" for="nstpl">Start from</label><select id="nstpl" style="width:100%;min-height:40px">${opts}</select>` +
+    (s.tpl ? '<p class="dcap">The problem statement and config.yaml are copied as committed to disk; edit them in the new study’s Setup.</p>' :
+      `<label class="dcap" for="nsps">Problem statement</label><textarea id="nsps" class="mono" rows="6" style="width:100%">${esc(s.ps)}</textarea>` +
+      `<label class="dcap" for="nscfg">config.yaml</label><textarea id="nscfg" class="mono" rows="5" style="width:100%">${esc(s.cfg)}</textarea>`) +
+    (s.err ? `<p class="st bad">${esc(s.err)}</p>` : "") +
+    (s.done ? `<p class="st ok">Created and committed ${esc(s.done.name)} (${esc(s.done.sha.slice(0, 7))}). To view it, run:</p><pre class="mono" style="white-space:pre-wrap">${esc(s.done.open)}</pre>` : "") +
+    `<div class="sfoot"><button type="submit" class="btn primary" ${s.busy || s.done ? "disabled" : ""}>${s.busy ? "Creating…" : "Create and commit"}</button></div></form></div>`;
+}
+async function openNew() {
+  S.newst = Object.assign(S.newst, { open: true, err: null, done: null, busy: false });
+  paintNew();
+  try { S.newst.list = (await get("/api/studies")).studies; } catch (e) { S.newst.err = "Could not list studies (" + e.message + ")."; }
+  paintNew();
+}
+function readNew() {
+  const s = S.newst, v = (id) => { const x = $(id); return x ? x.value : null; };
+  s.name = v("nsname"); const t = v("nstpl"); if (t !== null) s.tpl = t;
+  if (v("nsps") !== null) s.ps = v("nsps");
+  if (v("nscfg") !== null) s.cfg = v("nscfg");
+}
+async function createNew() {
+  const s = S.newst; readNew(); s.busy = true; s.err = null; paintNew();
+  const body = { name: s.name };
+  if (s.tpl) body.template = s.tpl; else { body.problem_statement = s.ps; body.config = s.cfg; }
+  const r = await send("/api/studies", body);
+  s.busy = false;
+  if (r.ok) s.done = r.json; else s.err = r.error || ("Not created (" + r.status + ").");
+  paintNew();
+}
+
 /* Ask the docs: the same lookup `adda-docs` runs */
 S.docs = { open: false, q: "", out: null, err: null, busy: false };
 function paintDocs() {
@@ -1533,6 +1572,8 @@ document.addEventListener("click", (e) => {
   const sg = t.closest("[data-su-goto]");
   if (sg) { e.preventDefault(); S.su.file = sg.dataset.suGoto; closeSheet(); nav({ view: "setup", sel: null }); return; }
   if (t.closest("#openstart")) { openSheet(); return; }
+  if (t.closest("#opennew")) { openNew(); return; }
+  if (t.closest("[data-ns-close]")) { S.newst.open = false; paintNew(); return; }
   if (t.closest("#opendocs")) { openDocs(); return; }
   if (t.closest("[data-docs-close]")) { S.docs.open = false; paintDocs(); return; }
   if (t.closest("[data-sheet-close]")) { closeSheet(); return; }
@@ -1565,6 +1606,7 @@ document.addEventListener("change", (e) => {
 let gPending = false;
 document.addEventListener("keydown", (e) => {
   if (e.target.closest("input,textarea,select")) return;
+  if (e.key === "Escape" && S.newst.open) { S.newst.open = false; paintNew(); return; }
   if (e.key === "Escape" && S.docs.open) { S.docs.open = false; paintDocs(); return; }
   if (e.key === "Escape" && (S.sheet.open || S.pop.open)) { if (S.pop.open) { S.pop.open = false; paintPop(); paintTitle(); } else closeSheet(); return; }
   if ((e.key === "Enter" || e.key === " ") && e.target.matches("[data-sel][role=button]")) {
@@ -1620,6 +1662,8 @@ let lastRun = null;
 function resetRunIfChanged() { if (S.run !== lastRun) { lastRun = S.run; resetRun(); } }
 document.addEventListener("visibilitychange", () => { if (visible()) tick(); else { clearTimeout(S.timer); flushPending(); } });
 window.addEventListener("pagehide", flushPending);
+$("newstudy").addEventListener("submit", (e) => { e.preventDefault(); createNew(); });
+$("newstudy").addEventListener("change", (e) => { if (e.target.id === "nstpl") { readNew(); paintNew(); } });
 $("docs").addEventListener("submit", (e) => { e.preventDefault(); askDocs(); });
 $("banner").addEventListener("submit", (e) => {
   e.preventDefault();

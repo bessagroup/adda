@@ -1483,6 +1483,9 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   folder, i.e. files that already exist on disk; 404 when the run has none, 400 for an unknown kind. The Deliverable header carries the three links (`viewer/downloads.py`). **Status:** done.
   **Ask the docs (spec 14 Phase 5.9):** `GET /api/docs?q=<question or exact name>[&source=1]` (read-only) returns `{text}` from the same `adda.explain.explain` that
   `adda-docs` runs; the nav's `Docs` button opens a sheet with the box and a Source toggle. **Status:** done.
+  **New / duplicate study (spec 14 Phase 5.1, 5.2):** `GET /api/studies` lists the studies beside this one; `POST /api/studies` (write-token gated, audited as `create_study`)
+  takes `{name, template?, problem_statement?, config?}`, makes `<studies>/<name>/`, validates `config.yaml` as the Setup commit does, and commits exactly the two files (rolled back on failure).
+  `template` copies a sibling study's two files (a duplicate); the response carries `python -m adda.viewer <path>` because one viewer serves one study. The nav's `New study` opens the sheet. **Status:** done.
   **Timeline (spec 15):** any span over 30 min with no delegation running (and no gate) is drawn as a 24 px break
   band labelled "<duration> with no delegation running"; hour ticks inside it are skipped, the ruler resumes after
   it and the now line stays at the true end. Gate chips are laid out right to left so none overlap, each on its own

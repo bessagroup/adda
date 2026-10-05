@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import difflib
 import os
+import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -252,3 +254,52 @@ def commit(study_dir: Path | str, name: str, text: str, message: str,
         raise
     sha = _git(root, "rev-parse", "HEAD").strip()
     return {"sha": sha, "subject": message.splitlines()[0], "file": fname}
+
+
+_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+
+
+def sibling_studies(study_dir: Path | str) -> list[str]:
+    """Names of the studies next to this one (they hold a problem statement or
+    a config), the candidates for a template."""
+    parent = Path(study_dir).resolve().parent
+    return sorted(
+        p.name for p in parent.iterdir()
+        if p.is_dir() and not p.name.startswith((".", "_"))
+        and any((p / f).is_file() for f in FILES.values()))
+
+
+def create_study(study_dir: Path | str, name: str, problem_statement: str,
+                 config: str, message: str | None = None) -> dict[str, Any]:
+    """``mkdir <studies>/<name>`` beside this study, write the two files and
+    commit exactly them. Removes what it made if the commit fails."""
+    if not _NAME_RE.fullmatch(name or ""):
+        raise StudyEditError(
+            "a study name is letters, digits, '_' and '-' (it starts with a "
+            "letter or digit, at most 64 characters)", 400)
+    v = validate_config(config)
+    if not v["ok"]:
+        raise StudyEditError("config.yaml is not valid: " + "; ".join(v["errors"]),
+                             422, errors=v["errors"])
+    if not problem_statement.strip():
+        raise StudyEditError("the problem statement is empty", 400)
+    new = Path(study_dir).resolve().parent / name
+    if new.exists():
+        raise StudyEditError(f"a study named {name!r} already exists", 409)
+    root, _ = repo_of(new.parent)
+    rels = [new.relative_to(root).as_posix() + "/" + f for f in FILES.values()]
+    new.mkdir()
+    try:
+        (new / FILES["problem_statement"]).write_text(problem_statement, encoding="utf-8")
+        (new / FILES["config"]).write_text(config, encoding="utf-8")
+        _git(root, "add", "--", *rels)
+        _git(root, "commit", "--only", "-m", (message or f"studies: add {name}"), "--", *rels)
+    except (StudyEditError, OSError):
+        try:
+            _git(root, "reset", "-q", "--", *rels)
+        except StudyEditError:
+            pass
+        shutil.rmtree(new, ignore_errors=True)
+        raise
+    return {"sha": _git(root, "rev-parse", "HEAD").strip(), "name": name,
+            "path": str(new), "open": f"python -m adda.viewer {new}"}
