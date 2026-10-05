@@ -600,6 +600,18 @@ def test_on_a_phone_the_inputs_precede_the_outputs_and_bookkeeping_is_behind_col
         assert "Delegation" not in labels and "When" not in labels
 
 
+def test_the_store_table_takes_the_remaining_height_of_the_pane(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _with_store(run_dir, n=600, objective=None)
+    with _LiveServer(create_app(study)) as srv:
+        page.set_viewport_size({"width": 1600, "height": 1000})
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector(".trow")
+        box = page.locator("#tbl").bounding_box()
+        work = page.locator("#work").bounding_box()
+        assert box["y"] + box["height"] > work["y"] + work["height"] - 40, (box, work)
+
+
 def test_data_view_draws_no_chart_and_no_lines_when_nothing_is_declared(tmp_path, page):
     study, run_dir = _study(tmp_path)
     _with_store(run_dir, objective=None)

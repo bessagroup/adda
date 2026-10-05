@@ -951,7 +951,7 @@ function paintDrawer() {
 }
 
 /* ── Data view (spec 15 4.3) ─────────────────────────────────────────────── */
-const SENTINEL = 1e8, ROW_H = 28, TBL_H = 420, HEAD_H = 44;
+const SENTINEL = 1e8, ROW_H = 28, HEAD_H = 44;
 const unitOf = () => { const u = S.fom && S.fom.declared && S.fom.unit_label; return u && u.divide_by > 0 ? u : null; };
 /* The ONE place a raw objective value becomes a display value: the chart axis,
    its reference lines, the tooltip, the table cell and the title all go through
@@ -1186,7 +1186,7 @@ let TBL = null;
 function paintRows() {
   const box = $("tbl"), body = $("tbody"); if (!box || !body || !TBL) return;
   const { st, m, order, cols } = TBL, top = Math.max(0, box.scrollTop - HEAD_H);
-  const first = Math.max(0, Math.floor(top / ROW_H) - 6), last = Math.min(st.n, first + Math.ceil(TBL_H / ROW_H) + 14);
+  const first = Math.max(0, Math.floor(top / ROW_H) - 6), last = Math.min(st.n, first + Math.ceil(box.clientHeight / ROW_H) + 14);
   const tpl = body.dataset.tpl, out = [];
   for (let k = first; k < last; k++) {
     const i = order[k], key = rowKey(st, i);
@@ -1221,11 +1221,14 @@ function paintData(w) {
   const sel = ROW_RE.exec(S.sel || "");
   if (sel && (sel[1] || null) === nsOf(st) && S.lastRowSel !== S.sel) {
     const k = TBL.order.indexOf(+sel[2]);
-    if (k >= 0) { const y = HEAD_H + k * ROW_H; if (y < box.scrollTop + HEAD_H || y > box.scrollTop + TBL_H - ROW_H) box.scrollTop = Math.max(0, y - TBL_H / 2); }
+    if (k >= 0) { const y = HEAD_H + k * ROW_H; if (y < box.scrollTop + HEAD_H || y > box.scrollTop + box.clientHeight - ROW_H) box.scrollTop = Math.max(0, y - box.clientHeight / 2); }
   }
   S.lastRowSel = S.sel;
   paintRows();
 }
+  const scrolls = getComputedStyle(w).overflowY !== "visible";
+  const top = box.getBoundingClientRect().top - w.getBoundingClientRect().top + w.scrollTop;
+  box.style.height = (scrolls ? Math.max(280, w.clientHeight - top - 16) : Math.max(320, window.innerHeight - 160)) + "px";
 function tipHtml(st, i) {
   const m = model(st), r = DM.get(st.delegation[i]);
   const keys = visibleCols(st, m).filter((c) => c.key !== "#" && c.key !== "delegation").slice(0, 5);
