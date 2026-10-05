@@ -68,8 +68,8 @@ script against the shipped ledger and asserting zero new evals — the
 load-or-create create step is exactly what passes it. Derive your `REPRODUCED:`
 headline from the ledger too: for a CONSTRAINED objective it is the best
 FEASIBLE value (e.g. `out[out['coilable']==1]['f'].max()`), NOT necessarily an
-objective extremum. The critic checks the headline's provenance; the runtime
-does not machine-match the value, so a constrained optimum is a valid headline.
+objective extremum. [[if node:critic]]The critic checks the headline's provenance; the runtime
+does not[[else]]The runtime does not[[/if]] machine-match the value, so a constrained optimum is a valid headline.
 
 ## The composition API (the actual idioms)
 - **`Step(block=, name=, parallel=, kwargs=)`** wraps a callable, a `Block`, or a

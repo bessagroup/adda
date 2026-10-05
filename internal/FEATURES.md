@@ -243,7 +243,9 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   `settings.configure`), so with the critic or the literature reviewer removed the
   remaining prompts no longer mention or rely on it; `ConsultLiterature` stays
   (it reads whatever corpus exists) and says the corpus may be empty.
-  `tests/test_prompt_arms.py` assembles both topology arms.
+  `tests/test_prompt_arms.py` assembles both topology arms. Handbook chapter
+  bodies are resolved the same way when served (`KnowledgeBase._live`), so a
+  chapter can carry `[[if node:<name>]]` text too.
 - **Grounded in code, not paraphrased:** what the gate mechanically checks
   (the canonical store must hold ≥1 row before it will even run the
   notebook; zero new evals on replay; no modified/deleted rows; headline

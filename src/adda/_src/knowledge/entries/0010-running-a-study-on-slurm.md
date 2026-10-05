@@ -5,7 +5,7 @@ tags: [slurm, cluster, hpc, pipeline, parallel, resources, get_evaluator, canoni
 audience: [strategizer, implementer]
 ---
 SLURM runs the DELIVERABLE pipeline, not the agentic orchestration. The
-strategizer/critic graph runs LOCAL on one host, and by default each node's
+strategizer[[if node:critic]]/critic[[/if]] graph runs LOCAL on one host, and by default each node's
 LLM is a hosted API (the `claude` CLI). What maps onto SLURM is the f3dasm
 `Pipeline` your deliverable builds: the DoE → `get_evaluator()` → analyze
 recipe (see [[pipeline-building-patterns]]). You change the `.run(...)` call and

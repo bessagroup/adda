@@ -382,3 +382,21 @@ def test_node_gate_follows_the_graph_and_clears_with_configure():
     settings.set_graph_nodes({"strategizer"})
     settings.configure(None)
     assert features.resolve_gates(s) == "aCb"
+
+
+def test_handbook_chapters_do_not_mention_a_critic_that_is_not_in_the_graph():
+    from adda._src.knowledge.kb import KnowledgeBase
+
+    kb = KnowledgeBase.load()
+    present = {e.id: e.render().lower() for e in kb.entries}
+    assert "the critic checks" in present["pipeline-building-patterns"]
+    assert any("critic" in t for t in present.values())
+
+    settings.set_graph_nodes({"strategizer", "implementer"})
+    try:
+        absent = {e.id: e.render().lower() for e in kb.entries}
+        assert {i for i, t in absent.items() if "critic" in t} == set()
+        assert "[[if" not in "".join(absent.values())
+        assert kb.get("pipeline-building-patterns").render()
+    finally:
+        settings.configure(None)

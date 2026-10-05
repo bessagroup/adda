@@ -25,7 +25,7 @@ a human curation gate, never auto-ingest.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .charter import FALSIFICATION_CHARTER
@@ -141,11 +141,19 @@ class KnowledgeBase:
         self._all = entries
         self._by_id = {e.id: e for e in entries}
 
+    @staticmethod
+    def _live(e: KBEntry) -> KBEntry | None:
+        """The entry as this run reads it: ``None`` while its feature is off,
+        else a copy whose body has its ``[[if ...]]`` gates resolved."""
+        from ..runtime import features
+        if e.feature and not features.enabled(e.feature):
+            return None
+        return replace(e, body=features.resolve_gates(e.body))
+
     @property
     def _entries(self) -> list[KBEntry]:
-        from ..runtime import features
-        return [e for e in self._all
-                if not e.feature or features.enabled(e.feature)]
+        return [live for e in self._all
+                if (live := self._live(e)) is not None]
 
     @classmethod
     def load(cls, entries_dir: Path | None = None) -> KnowledgeBase:
@@ -167,7 +175,7 @@ class KnowledgeBase:
 
     def get(self, entry_id: str) -> KBEntry | None:
         e = self._by_id.get(entry_id)
-        return e if e in self._entries else None
+        return self._live(e) if e is not None else None
 
     def toc(self) -> str:
         """The table of contents: one line per chapter (id — title + summary).

@@ -1,7 +1,7 @@
 ---
 id: pipeline-reproduces-from-store
 title: pipeline.ipynb is the deliverable — lazy, and it reproduces the headline from the store
-tags: [pipeline, reproducibility, deliverable, critic, headline, lazy, notebook]
+tags: [pipeline, reproducibility, deliverable, headline, lazy, notebook]
 audience: [strategizer, implementer]
 feature: pipeline_deliverable
 ---
@@ -9,7 +9,7 @@ The single deliverable is `pipeline.ipynb`: a human-readable f3dasm Pipeline
 notebook of the whole data-driven process that ALSO reproduces the headline.
 There is no `pipeline.py` and no `solution.md` — the notebook's markdown cells
 ARE the writeup, its code cells ARE the runnable recipe. The runtime EXECUTES
-the notebook lazily after the critic gate, asserting the headline re-derives
+the notebook lazily[[if node:critic]] after the critic gate[[/if]], asserting the headline re-derives
 from the canonical ledger with ZERO new oracle evaluations. Hand-authored idxmin
 scripts are gone — running the notebook IS the reproduction. (See
 [[pipeline-building-patterns]] for the cell structure: the four f3dasm pillars +
