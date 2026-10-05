@@ -150,6 +150,7 @@ markers = [
   "ollama: marks tests that require a running Ollama server (skip with -m 'not ollama')",
   "integration: wet tests that hit real LLMs and external APIs (skip with -m 'not integration')",
   "corpus: needs a third-party corpus nobody can ship (Abaqus docs, a Basilisk checkout). OPTIONAL in CI -- the f3dasm and adda retrieval suites are not, and are required on every push",
+  "docling: runs real Docling PDF extraction (model inference, minutes per test on a loaded runner). Runs once in CI's check_docling job, not per matrix leg (skip locally with -m 'not docling')",
   "promptmap: rebuilds the whole prompt corpus (~170s) to check internal/promptmap.html's provenance. Runs once in CI's check_promptmap job, not per matrix leg (skip locally with -m 'not promptmap')"
 ]
 minversion = "6.0"

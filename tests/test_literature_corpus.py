@@ -290,6 +290,7 @@ def test_get_paper_returns_content(tmp_path):
 
 
 @pytest.mark.timeout(600)
+@pytest.mark.docling
 @pytest.mark.xdist_group(name="docling_pdf")
 def test_extract_pdf_to_md_page_annotations(tmp_path):
     """If fitz is available, output contains <!-- page N --> annotations.
@@ -380,6 +381,7 @@ def test_pdf_failed_extraction_is_rejected_not_stored_as_fulltext(
 
 
 @pytest.mark.timeout(600)
+@pytest.mark.docling
 @pytest.mark.xdist_group(name="docling_pdf")
 def test_extraction_returns_real_body_from_text_pdf(tmp_path):
     """Regression: a text PDF must extract its full body. The old code tried

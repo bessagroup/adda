@@ -516,6 +516,7 @@ class TestFullTextFlag:
         assert rows[0].get("full_text", "true") == "false"
 
     @pytest.mark.timeout(600)
+    @pytest.mark.docling
     @pytest.mark.xdist_group(name="docling_pdf")
     def test_pdf_full_text_gated_on_real_extraction(self, tmp_path):
         """A PDF is full-text ONLY if extraction yields a real body. A PDF that
