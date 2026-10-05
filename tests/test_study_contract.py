@@ -26,7 +26,7 @@ EXAMPLE = _REPO / "studies" / "example_study"
 # The config surface the contract documents (authoring-a-study.md). Keep in sync.
 DOCUMENTED_TOP_KEYS = {
     "model", "backend", "budget", "budget_usd", "eval_budget",
-    "required_deliverables", "evaluator", "runtime",
+    "required_deliverables", "evaluator", "runtime", "objective",
 }
 DOCUMENTED_EVALUATOR_KEYS = {
     "entrypoint", "output_names", "lookup", "fidelity_column", "name",

@@ -4,5 +4,8 @@ eval_budget: 200
 evaluator:
   entrypoint: "workspace/evaluator.py:evaluate"
   output_names: [y]
+objective:
+  column: y
+  direction: min
 # pipeline.ipynb is the single deliverable and is auto-required — its leading
 # markdown cells hold the writeup. List required_deliverables only for EXTRA files.
