@@ -20,6 +20,10 @@ from tests.test_viewer_app import _make_run, _make_study, _writer
 
 RUN = "20260904T120000"
 
+# Every test here replays in a worker subprocess that starts a real kernel, which
+# an in-process probe cannot see; serialise them with the other kernel tests.
+pytestmark = pytest.mark.xdist_group(name="jupyter_kernel")
+
 _LAZY = (
     "import os\n"
     "from f3dasm._src.experimentdata import ExperimentData\n"
