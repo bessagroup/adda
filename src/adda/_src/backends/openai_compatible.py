@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import threading
 import uuid
 from pathlib import Path
@@ -285,6 +286,17 @@ def _render(out: str, spool: str, *, exit_code=None, interrupted=False,
     return "".join(parts)
 
 
+def _shell_env() -> dict:
+    """The agent's shell must run the SAME interpreter as the agent loop (the
+    Claude backend does the same): else bare ``python`` resolves via the
+    inherited PATH to whatever else is installed, e.g. a stale ``adda``."""
+    env = dict(os.environ)
+    _bin = os.path.dirname(sys.executable)
+    if _bin:
+        env["PATH"] = _bin + os.pathsep + env.get("PATH", "")
+    return env
+
+
 def _make_bash_tool(cwd: Path | None, nudge: Any = None,
                     session: _BashSession | None = None) -> Any:
     import subprocess
@@ -321,7 +333,7 @@ def _make_bash_tool(cwd: Path | None, nudge: Any = None,
         # No start_new_session: the child MUST stay in the run's process group
         # so the watchdog group-kill and governor tree-walk can reach it.
         proc = subprocess.Popen(
-            command, shell=True, cwd=sess.cwd,
+            command, shell=True, cwd=sess.cwd, env=_shell_env(),
             stdout=handle, stderr=subprocess.STDOUT)
 
         def _nudge_msg():

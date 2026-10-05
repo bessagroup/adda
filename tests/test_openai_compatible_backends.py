@@ -741,3 +741,37 @@ def test_download_paper_creates_a_missing_output_dir(monkeypatch, tmp_path):
     assert written.exists()
     assert written.read_bytes() == b"%PDF-1.4"
     assert str(written) in out
+
+
+def test_bash_tool_runs_the_loops_interpreter_first_on_path(monkeypatch):
+    """Bare ``python`` in the agent's shell must be the run's interpreter."""
+    import os
+    import sys
+
+    from adda._src.backends.openai_compatible import _make_bash_tool
+
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    out = _make_bash_tool(None).func(command="echo $PATH")
+    assert out.strip().split(os.pathsep)[0] == os.path.dirname(sys.executable)
+
+
+def test_bash_tool_backgrounds_a_command_that_outlives_its_timeout():
+    """The shell call is bounded: past ``timeout`` it returns a bash_id."""
+    import time
+
+    from adda._src.backends.openai_compatible import (
+        _BashSession,
+        _make_bash_tool,
+    )
+
+    sess = _BashSession(None)
+    tool = _make_bash_tool(None, session=sess)
+    t0 = time.monotonic()
+    out = tool.func(command="sleep 30", timeout=1000)
+    try:
+        assert time.monotonic() - t0 < 10
+        assert "bash_id" in out
+    finally:
+        for bg in list(sess._bg.values()):
+            bg["proc"].kill()
+            bg["proc"].wait()
