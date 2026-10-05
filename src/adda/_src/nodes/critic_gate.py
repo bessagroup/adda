@@ -219,6 +219,7 @@ class CriticGateMixin:
         # Cleared up front so a failed invoke cannot leave the PREVIOUS
         # call's usage to be logged against this delegation.
         self._last_critic_usage = {}
+        self._last_critic_review = None
         _ok = False
         if _dbg() and _notes is not None:
             _set_sink(str(
@@ -270,7 +271,7 @@ class CriticGateMixin:
             delegation_id=f"critic-{_n}",
         )
         # Always-on: persist the verdict/review to disk + record retrospective.
-        self._persist_critic_review(_n, critique)
+        self._last_critic_review = self._persist_critic_review(_n, critique)
         self._record_retrospective("critic", f"critic-{_n}", critique)
         return critique
 
@@ -406,19 +407,22 @@ class CriticGateMixin:
         except Exception:  # noqa: BLE001
             return ""  # advisory must never break the update
 
-    def _persist_critic_review(self, n: int, critique_text: str) -> None:
+    def _persist_critic_review(self, n: int, critique_text: str) -> str | None:
         """Write the critic's full review to debug/critic_reviews/ so the
-        deciding verdict is auditable regardless of PASS/REVISE. Best-effort."""
+        deciding verdict is auditable regardless of PASS/REVISE. Best-effort.
+        Returns the file name written (the caller's delegation row records
+        it), or None when nothing was written."""
         try:
             notes = self._current_notes_dir
             if notes is None:
-                return
+                return None
             d = Path(notes).parent / "critic_reviews"
             d.mkdir(parents=True, exist_ok=True)
-            (d / f"call_{n:03d}.md").write_text(
-                critique_text or "", encoding="utf-8")
+            name = f"call_{n:03d}.md"
+            (d / name).write_text(critique_text or "", encoding="utf-8")
+            return name
         except Exception:  # noqa: BLE001
-            pass
+            return None
 
     def _build_feedback_task_msg(
         self, h_ids: list, *, constraints_text: str = ""

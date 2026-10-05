@@ -1352,8 +1352,10 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   **Critic reviews (spec 14 2.5):** `GET /api/runs/<id>/critic_reviews` returns `{reviews}`, one per
   `critic_reviews/call_NNN.md`: `verdict` and `findings` come from the gate's own parsers
   (`nodes/parsing`), `numbers` is the `findings_*` counts, `source_id` (`critic-N`) matches the
-  retrospective of the same call, and `delegation_id` is set only when the run has exactly one critic
-  delegation per review (the pairing is ordinal; nothing on disk names it).
+  retrospective of the same call, and `delegation_id` names the critic delegation with
+  `delegation_id_source`: `recorded` (the delegation row's `critic_review` field, written by every
+  GATE, FEEDBACK and escalation call), `ordinal` (runs that predate the field: Nth critic delegation
+  for the Nth file, only when the counts match) or null.
   **Diagnostics (spec 14 2.4):** `GET /api/runs/<id>/diagnostics?after&limit[&kind=]` pages
   `diagnostics.jsonl` by line cursor (`next_cursor` is always an int, a live run keeps appending;
   compare with `total`). `kind` filters on the row's `error_type`, else `tool`; `counts` is the whole

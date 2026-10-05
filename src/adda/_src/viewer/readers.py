@@ -1378,18 +1378,22 @@ def read_critic_reviews(run_dir: Path | str) -> dict[str, Any]:
     ``findings`` its own ``Findings`` section extractor, so the viewer reads a
     review exactly as the gate did. ``source_id`` (``critic-N``) matches the
     retrospective the same call wrote. ``delegation_id`` is the critic
-    delegation of the same ordinal, set only when the log holds exactly one
-    critic delegation per review (nothing on disk names the pairing, so a
-    count mismatch leaves it ``None`` rather than guessing).
+    delegation that produced the review, with ``delegation_id_source``:
+    ``"recorded"`` when the delegation row names the file (``critic_review``),
+    ``"ordinal"`` for a run that predates that field (the Nth critic
+    delegation paired with the Nth file, only when the counts match), else
+    ``None`` rather than a guess.
     """
     from ..nodes.parsing import _extract_report_section, _parse_verdict
 
     run_dir = Path(run_dir)
     root = run_dir / "debug" / "critic_reviews"
     files = sorted(root.glob("call_*.md")) if root.is_dir() else []
-    critic_rows = [d.get("id") for d in read_delegations(run_dir)
-                   if d.get("to_node") == "critic"]
-    paired = len(critic_rows) == len(files)
+    rows = read_delegations(run_dir)
+    recorded = {d["critic_review"]: d.get("id") for d in rows
+                if d.get("critic_review")}
+    critic_rows = [d.get("id") for d in rows if d.get("to_node") == "critic"]
+    ordinal = (not recorded) and len(critic_rows) == len(files)
     reviews: list[dict[str, Any]] = []
     for i, f in enumerate(files):
         m = re.fullmatch(r"call_(\d+)\.md", f.name)
@@ -1402,10 +1406,16 @@ def read_critic_reviews(run_dir: Path | str) -> dict[str, Any]:
             if nm:
                 numbers[nm.group(1)] = int(nm.group(2))
         n = int(m.group(1))
+        if f.name in recorded:
+            did, source = recorded[f.name], "recorded"
+        elif ordinal:
+            did, source = critic_rows[i], "ordinal"
+        else:
+            did, source = None, None
         reviews.append({
             "call": n, "file": f.name, "mtime": f.stat().st_mtime,
             "source_id": f"critic-{n}",
-            "delegation_id": critic_rows[i] if paired else None,
+            "delegation_id": did, "delegation_id_source": source,
             "verdict": _parse_verdict(text),
             "numbers": numbers,
             "findings": _extract_report_section(text, "Findings"),

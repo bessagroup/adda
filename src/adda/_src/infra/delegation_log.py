@@ -95,8 +95,13 @@ class DelegationLog:
         phase: str | None = None,
         constraints: dict | None = None,
         workspace_sha: str | None = None,
+        critic_review: str | None = None,
     ) -> None:
         """Append one delegation record.
+
+        ``critic_review`` is the ``debug/critic_reviews/`` file a critic
+        delegation (GATE or FEEDBACK) produced, e.g. ``call_003.md``; None
+        for every other delegation and for runs that predate it.
 
         ``workspace_sha`` is the commit this delegation produced in the run's
         workspace repository (spec 11) — the mechanical answer to "which files
@@ -132,6 +137,7 @@ class DelegationLog:
             "phase": phase,
             "constraints": constraints,
             "workspace_sha": workspace_sha,
+            "critic_review": critic_review,
         }
         with self._lock:
             with self._path.open("a", encoding="utf-8") as f:

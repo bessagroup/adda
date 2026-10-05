@@ -717,6 +717,7 @@ class FeedbackTools:
             tokens_out=_critic_usage.get("output_tokens", 0) or 0,
             cost_usd=_critic_usage.get("total_cost_usd"),
             constraints=snapshot.as_dict(),
+            critic_review=getattr(node, "_last_critic_review", None),
         )
 
     # ── Mid-run consultation ─────────────────────────────────────────────────
@@ -781,6 +782,7 @@ class FeedbackTools:
                 tokens_out=_fb_usage.get("output_tokens", 0) or 0,
                 cost_usd=_fb_usage.get("total_cost_usd"),
                 constraints=_snapshot.as_dict(),
+                critic_review=getattr(node, "_last_critic_review", None),
             )
 
         return text

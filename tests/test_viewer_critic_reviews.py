@@ -37,10 +37,30 @@ def test_reviews_are_parsed_as_the_gate_parses_them(tmp_path):
 def test_delegation_pairing_is_set_only_when_counts_match(tmp_path):
     ok = _setup(tmp_path, 2).get(f"/api/runs/{RUN}/critic_reviews").json()
     assert [r["delegation_id"] for r in ok["reviews"]] == ["GATE0", "GATE1"]
+    assert {r["delegation_id_source"] for r in ok["reviews"]} == {"ordinal"}
     tmp2 = tmp_path / "b"
     tmp2.mkdir()
     bad = _setup(tmp2, 3).get(f"/api/runs/{RUN}/critic_reviews").json()
     assert [r["delegation_id"] for r in bad["reviews"]] == [None, None]
+    assert [r["delegation_id_source"] for r in bad["reviews"]] == [None, None]
+
+
+def test_a_recorded_critic_review_wins_over_ordinal_pairing(tmp_path):
+    study = _make_study(tmp_path)
+    debug = _make_run(study, RUN) / "debug"
+    (debug / "critic_reviews").mkdir()
+    (debug / "critic_reviews" / "call_001.md").write_text(REVISE)
+    (debug / "critic_reviews" / "call_002.md").write_text(PASS)
+    _write_jsonl(debug / "delegation_log.jsonl", [
+        {"id": "FB1", "status": "FEEDBACK", "to_node": "critic",
+         "critic_review": "call_001.md"},
+        {"id": "GATE2", "status": "GATE:PASS", "to_node": "critic",
+         "critic_review": "call_002.md"}])
+    body = TestClient(create_app(study)).get(
+        f"/api/runs/{RUN}/critic_reviews").json()
+    assert [(r["delegation_id"], r["delegation_id_source"])
+            for r in body["reviews"]] == [("FB1", "recorded"),
+                                          ("GATE2", "recorded")]
 
 
 def test_no_reviews_dir_and_unknown_run(tmp_path):

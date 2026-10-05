@@ -61,8 +61,8 @@ class _Node(CriticGateMixin):
     def _record_usage(self, usage, **kw):
         self.recorded_usage.append((usage, kw))
 
-    def _persist_critic_review(self, _n, _text):
-        pass
+    def _persist_critic_review(self, n, _text):
+        return f"call_{n:03d}.md"
 
     def _record_retrospective(self, *_a, **_kw):
         pass
@@ -124,3 +124,31 @@ def test_gate_and_feedback_rows_read_usage_rather_than_hardcoding_zero():
     # The two rows that used to be hardcoded are the ONLY delegation records
     # in this module; neither may go back to a literal cost of None.
     assert src.count("cost_usd=None") == 0
+
+
+def test_invoke_critic_publishes_the_review_file_for_the_delegation_row():
+    node = _Node(_Worker({}))
+    node._invoke_critic("first")
+    assert node._last_critic_review == "call_001.md"
+    node._invoke_critic("second")
+    assert node._last_critic_review == "call_002.md"
+
+
+def test_a_critic_review_that_was_not_written_is_not_recorded():
+    node = _Node(_Worker({}))
+    node._invoke_critic("first")
+    node._persist_critic_review = lambda _n, _t: None
+    node._invoke_critic("second")
+    assert node._last_critic_review is None
+
+
+def test_delegation_log_round_trips_critic_review(tmp_path):
+    from adda._src.infra.delegation_log import DelegationLog
+
+    log = DelegationLog(tmp_path / "delegation_log.jsonl")
+    for did, review in (("GATE1", "call_001.md"), ("D1", None)):
+        log.record(id=did, from_node="a", to_node="b", task="t",
+                   deliverable="d", hypothesis_ids=[], started_at="s",
+                   completed_at="c", status="DONE", critic_review=review)
+    got = {r["id"]: r.get("critic_review") for r in log.query_all()}
+    assert got == {"GATE1": "call_001.md", "D1": None}

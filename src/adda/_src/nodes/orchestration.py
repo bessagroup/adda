@@ -452,6 +452,7 @@ class OrchestrationMixin:
                         tokens_in=0,
                         tokens_out=0,
                         cost_usd=None,
+                        critic_review=self._last_critic_review,
                     )
                 text += (
                     "[SCIENCE MONITOR — ESCALATION] Repeated drift "
