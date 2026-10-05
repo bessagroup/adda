@@ -612,6 +612,19 @@ def test_the_store_table_takes_the_remaining_height_of_the_pane(tmp_path, page):
         assert box["y"] + box["height"] > work["y"] + work["height"] - 40, (box, work)
 
 
+def test_a_store_without_0_1_columns_draws_no_empty_funnel_section(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _with_store(run_dir, objective=None)
+    out = run_dir / "experiment_data" / "experiment_data" / "output.csv"
+    out.write_text(",score,note,_delegation_id,_ts\n" + "".join(
+        f"{i},{i + 1},n{i},D001,2026-09-17T12:{i:02d}:00+00:00\n" for i in range(6)))
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector(".trow")
+        headings = page.locator(".data .dh h3").all_inner_texts()
+        assert headings == ["Best so far", "Store"], headings
+
+
 def test_data_view_draws_no_chart_and_no_lines_when_nothing_is_declared(tmp_path, page):
     study, run_dir = _study(tmp_path)
     _with_store(run_dir, objective=None)

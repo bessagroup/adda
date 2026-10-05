@@ -1142,7 +1142,7 @@ function chartControls() {
 }
 function funnelHtml(st) {
   const fn = S.data.fun && S.data.fun.stores.find((x) => x.namespace === st.namespace);
-  if (!fn) return note("No 0/1 columns are recorded in this store yet.");
+  if (!fn) return "";
   if (!S.data.fun.declared) return flagsHtml(fn);
   if (!fn.stages.length) return note("None of the declared funnel stages is recorded as a 0/1 column in this store." + (fn.skipped && fn.skipped.length ? " Not 0/1 here: " + esc(fn.skipped.join(", ")) + "." : ""));
   return `<div class="funnel">` + fn.stages.map((s) =>
@@ -1153,7 +1153,7 @@ function funnelHtml(st) {
     `<div class="dcap">Each stage: rows passing every stage up to it (solid bar, large number), and rows passing it alone (line).${fn.skipped && fn.skipped.length ? " Not 0/1 in this store: " + esc(fn.skipped.join(", ")) + "." : ""}</div>`;
 }
 function flagsHtml(fn) {
-  if (!fn.flags || !fn.flags.length) return note("No 0/1 columns are recorded in this store yet.");
+  if (!fn.flags || !fn.flags.length) return "";
   const so = S.fsort, rows = fn.flags.slice();
   if (so) rows.sort((a, b) => (so.key === "column" ? String(a.column).localeCompare(b.column) : a.ones - b.ones) * (so.dir === "asc" ? 1 : -1));
   const th = (key, label, cls) => `<button class="th${cls || ""}" data-fsort="${key}" aria-sort="${so && so.key === key ? (so.dir === "asc" ? "ascending" : "descending") : "none"}" title="Sort by ${esc(label)}">${esc(label)}<span>${so && so.key === key ? (so.dir === "asc" ? "↑" : "↓") : ""}</span></button>`;
@@ -1211,9 +1211,9 @@ function paintData(w) {
   const seg = all.length > 1 ? `<div class="seg" role="group" aria-label="Store">` + all.map((x) =>
     `<button data-store="${esc(nsOf(x) || "")}" aria-pressed="${nsOf(x) === nsOf(st)}" title="Highlight this store’s dots and show its flags and rows. The best-so-far line and every store’s dots stay drawn.">${esc(nsOf(x) || "canonical")}<small>${x.n}</small></button>`).join("") + `</div>` : "";
   const W = Math.max(320, w.clientWidth - 2 * 24);
-  const f = S.fom && S.fom.declared ? S.fom : null;
+  const f = S.fom && S.fom.declared ? S.fom : null, fh = funnelHtml(st);
   w.innerHTML = `<div class="data"><div class="dh"><h3>Best so far${f ? ` · ${esc(f.column)}${unitOf() ? " (" + esc(unitOf().label) + ")" : ""}` : ""}</h3>${f ? `<span class="dcap">${f.direction === "max" ? "higher" : "lower"} is better${f.feasible ? ", counting rows where " + esc(f.feasible) + " = 1" : ""}</span>` : ""}<span class="sp"></span>${seg}${chartControls()}</div>` +
-    chartHtml(W) + `<div class="dh"><h3>${S.data.fun && S.data.fun.declared ? "Stage funnel" : "0/1 columns"}</h3></div>` + funnelHtml(st) + `<div class="dh"><h3>Store</h3></div>` + tableHtml(st, m) + `</div>`;
+    chartHtml(W) + (fh ? `<div class="dh"><h3>${S.data.fun && S.data.fun.declared ? "Stage funnel" : "0/1 columns"}</h3></div>` + fh : "") + `<div class="dh"><h3>Store</h3></div>` + tableHtml(st, m) + `</div>`;
   const cols = visibleCols(st, m);
   TBL = { st, m, cols, order: tableOrder(st, m) };
   const box = $("tbl");
