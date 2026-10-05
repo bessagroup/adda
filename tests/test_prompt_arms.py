@@ -23,7 +23,7 @@ _GATE_MARKER = re.compile(r"\[\[(?:if \w+|else|/if)\]\]")
 # arm override -> strings that must not survive in ANY role's assembled prompt
 _ARMS = {
     "hypothesis_ledger": (
-        {"hypothesis_ledger": False},
+        {"hypothesis_ledger": False, "verdict_validator": False},
         ("HypothesisPropose", "HypothesisUpdate", "hypotheses.json"),
     ),
     "milestones_enabled": (

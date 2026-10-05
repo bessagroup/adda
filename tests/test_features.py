@@ -307,6 +307,30 @@ def test_a_prerequisite_that_is_on_changes_nothing():
     assert features.conflicts() == []
 
 
+def test_the_reproduction_gate_cannot_outlive_the_notebook_it_reproduces():
+    """The gate re-executes the authored pipeline notebook; with no notebook
+    required there is nothing to reproduce, so reporting it as on would label
+    the arm by a check that cannot run."""
+    settings.configure({"pipeline_deliverable": False})
+    assert features.enabled("reproduction_gate") is False
+    assert features.arm_config()["reproduction_gate"] is False
+    assert any("reproduction_gate" in m for m in features.conflicts())
+
+
+def test_no_shipped_study_sets_a_knob_whose_prerequisite_it_turns_off():
+    """A study that turns pipeline_deliverable off must say so for the gate
+    too, or every run of it logs an ablation-arm conflict."""
+    import pathlib
+
+    import yaml
+
+    studies = pathlib.Path(__file__).resolve().parents[1] / "studies"
+    for cfg in sorted(studies.glob("*/config.yaml")):
+        runtime = (yaml.safe_load(cfg.read_text()) or {}).get("runtime") or {}
+        settings.configure(runtime)
+        assert features.conflicts() == [], (cfg.parent.name, features.conflicts())
+
+
 def test_every_declared_prerequisite_is_a_feature():
     for f in features.FEATURES:
         for r in f.requires:
@@ -400,3 +424,18 @@ def test_handbook_chapters_do_not_mention_a_critic_that_is_not_in_the_graph():
         assert kb.get("pipeline-building-patterns").render()
     finally:
         settings.configure(None)
+
+
+def test_a_run_with_an_unmet_prerequisite_refuses_to_start(tmp_path):
+    """A warning in a log nobody reads would let an incoherent arm run and be
+    counted under the label it cannot honour."""
+    import pytest
+
+    from adda._src.runtime.run_setup import _init_canonical_store
+
+    settings.configure({"pipeline_deliverable": False})
+    with pytest.raises(ValueError) as e:
+        _init_canonical_store(tmp_path / "run", tmp_path)
+    msg = str(e.value)
+    assert "reproduction_gate" in msg and "pipeline_deliverable" in msg
+    assert "reproduction_gate: false" in msg

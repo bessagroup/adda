@@ -49,7 +49,7 @@ def test_an_all_defaults_run_records_every_arm(tmp_path):
 
 
 def test_a_disabled_arm_is_recorded_false(tmp_path):
-    settings.configure({"hypothesis_ledger": False})
+    settings.configure({"hypothesis_ledger": False, "verdict_validator": False})
     run_dir = _run_dir(tmp_path)
     _init(run_dir, tmp_path)
     cfg = json.loads((run_dir / "debug" / "run_config.json").read_text())

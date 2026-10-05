@@ -207,8 +207,15 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   always reports a pass), the `<reproduction_gate_contract>` prompt
   injection is withheld, and the `oracle_gold_state` process milestone
   (`epistemics/milestones.py`) is not seeded — that milestone's whole
-  reason to exist is this gate's store-row precondition. A study can now
-  require a notebook without requiring it to reproduce, or vice versa.
+  reason to exist is this gate's store-row precondition. A study can
+  require a notebook without requiring it to reproduce; the reverse is not
+  possible — `reproduction_gate` `requires` `pipeline_deliverable`, so with
+  no notebook required it resolves to off, and the run REFUSES TO START
+  (`run_setup._init_canonical_store` raises on any `features.conflicts()`,
+  naming both knobs and the fix) rather than log a warning an arm campaign
+  would not read. A study that turns the notebook off sets
+  `reproduction_gate: false` too; the same holds for every `requires` pair
+  (e.g. `verdict_validator` needs `hypothesis_ledger`).
   Recorded per run in `run_config.json`'s `runtime` block like every other
   knob, so a sweep's arms can be told apart after the fact.
 - **Arm recording and resume drift check:** `features.arm_config()` returns the

@@ -17,6 +17,7 @@ runtime:
   # separately too lenient in a critic-less graph (harmless here only
   # because of this redundant, independent check).
   pipeline_deliverable: false
+  reproduction_gate: false
   # ON: without it debug/transcripts/ is never created and the
   # viewer's Chat tab has nothing to show (the prior run
   # 20260903T205926 has no transcripts/ for exactly this reason).

@@ -86,7 +86,9 @@ def test_knob_off_is_byte_identical_no_pipeline_gate(tmp_path):
         n = _node(tmp_path)
         keys = {m["key"] for m in n._milestones.list_all()}
         assert "craft_pipeline" not in keys
-        # the always-on backlog gates are unaffected by the C3 knob
-        assert {"assess_literature_need", "oracle_gold_state"} <= keys
+        assert "assess_literature_need" in keys
+        # oracle_gold_state exists only for the reproduction gate, which
+        # requires the notebook: no notebook, no gate, no milestone.
+        assert "oracle_gold_state" not in keys
     finally:
         settings.configure({})

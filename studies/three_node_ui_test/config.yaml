@@ -5,6 +5,7 @@ backend: claude
 # stock 5-node default.
 runtime:
   pipeline_deliverable: false
+  reproduction_gate: false
   # ON, deliberately: this run exists to be WATCHED live in the viewer, and
   # the transcript panel has nothing to show without it (debug/transcripts/
   # never gets created otherwise).

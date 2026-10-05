@@ -209,6 +209,7 @@ FEATURES: tuple[Feature, ...] = (
         # whether a notebook is REQUIRED at all; this one decides whether an
         # authored notebook must additionally prove it reproduces.
         behaviours=("reproduction_gate_check",),
+        requires=("pipeline_deliverable",),
     ),
     Feature(
         key="peer_interaction",
@@ -252,7 +253,10 @@ def conflicts() -> list[str]:
             off = [r for r in f.requires if not enabled(r)]
             out.append(
                 f"{f.key} is on but requires {', '.join(off)}, which "
-                f"{'is' if len(off) == 1 else 'are'} off: it runs as off")
+                f"{'is' if len(off) == 1 else 'are'} off. Set "
+                f"`{f.key}: false` in the study's runtime: block (or turn "
+                f"{', '.join(off)} on): an arm that says {f.key} is on "
+                f"while it cannot run would be counted as that arm")
     return out
 
 
