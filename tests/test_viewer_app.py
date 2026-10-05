@@ -815,6 +815,85 @@ def test_log_tail_takes_a_name_never_a_path(tmp_path):
     assert client.get(url).json()["exists"] is False
 
 
+def test_log_sources_list_watchdog_stdout_logs_and_tool_calls(tmp_path):
+    study = _make_study(tmp_path)
+    run = _make_run(study, "20260904T120000")
+    (run / "debug" / "run_started_at").write_text("1000.0")
+    state = study / "runs" / "_viewer"
+    state.mkdir(parents=True)
+    (state / "watchdog_a.log").write_text("watchdog says hi\n")
+    (state / "registry.json").write_text(json.dumps([
+        {"kind": "watchdog", "started_at": 990.0,
+         "log": "runs/_viewer/watchdog_a.log"},
+        {"kind": "watchdog", "started_at": 100.0,
+         "log": "runs/_viewer/watchdog_old.log"}]))
+    d2 = run / "debug" / "delegations" / "D002"
+    d2.mkdir(parents=True)
+    (d2 / "campaign_stdout.log").write_text("evaluating\n")
+    client = TestClient(create_app(study))
+    base = "/api/runs/20260904T120000"
+    names = {x["name"]: x for x in client.get(base + "/log_sources").json()["sources"]}
+    assert {"run", "diagnostics", "watchdog", "tools",
+            "out:D002/campaign_stdout.log"} <= set(names)
+    assert names["out:D002/campaign_stdout.log"]["delegation"] == "D002"
+    assert client.get(base + "/log", params={"name": "watchdog"}
+                      ).json()["text"] == "watchdog says hi\n"
+    assert client.get(base + "/log", params={"name": "out:D002/campaign_stdout.log"}
+                      ).json()["text"] == "evaluating\n"
+    assert client.get(base + "/log", params={"name": "out:../../x_stdout.log"}
+                      ).status_code == 404
+
+
+def test_watchdog_source_is_absent_for_a_run_the_viewer_did_not_start(tmp_path):
+    study = _make_study(tmp_path)
+    _make_run(study, "20260904T120000")
+    names = [x["name"] for x in TestClient(create_app(study)).get(
+        "/api/runs/20260904T120000/log_sources").json()["sources"]]
+    assert "watchdog" not in names
+
+
+def test_tool_calls_pair_each_call_with_its_result_across_transcripts(tmp_path):
+    study = _make_study(tmp_path)
+    run = _make_run(study, "20260904T120000")
+    tdir = run / "debug" / "transcripts"
+    (tdir / "strategizer").mkdir(parents=True)
+
+    def rec(path, rows):
+        path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+
+    rec(tdir / "D001.jsonl", [
+        {"type": "assistant", "ts": "2026-09-04T12:00:05+00:00",
+         "tools": [{"name": "Bash"}, {"name": "Read"}]},
+        {"type": "tool_result", "ts": "2026-09-04T12:00:06+00:00",
+         "results": [{"is_error": False}, {"is_error": True}]},
+        {"type": "assistant", "ts": "2026-09-04T12:00:09+00:00",
+         "tools": [{"name": "Write"}]}])
+    rec(tdir / "strategizer" / "turn_001.jsonl", [
+        {"type": "assistant", "ts": "2026-09-04T12:00:01+00:00",
+         "tools": [{"name": "mcp__f3dasm_agent_tools__Delegate"}]},
+        {"type": "tool_result", "ts": "2026-09-04T12:00:02+00:00",
+         "results": [{"is_error": False}]}])
+    client = TestClient(create_app(study))
+    out = client.get("/api/runs/20260904T120000/tool_calls").json()
+    got = [(c["who"], c["tool"], c["ok"]) for c in out["calls"]]
+    assert got == [("strategizer/turn_001", "Delegate", True),
+                   ("D001", "Bash", True), ("D001", "Read", False),
+                   ("D001", "Write", None)]
+    since = out["calls"][2]["t"]
+    later = client.get("/api/runs/20260904T120000/tool_calls",
+                       params={"since": since}).json()["calls"]
+    assert [c["tool"] for c in later] == ["Bash", "Read", "Write"]
+    assert client.get("/api/runs/20260904T120000/tool_calls",
+                      params={"since": "x"}).status_code == 400
+
+
+def test_tool_calls_404_when_the_run_recorded_no_transcripts(tmp_path):
+    study = _make_study(tmp_path)
+    _make_run(study, "20260904T120000")
+    assert TestClient(create_app(study)).get(
+        "/api/runs/20260904T120000/tool_calls").status_code == 404
+
+
 def test_transcript_key_cannot_escape_the_run_directory(tmp_path):
     """The severe one: {key:path} reaches read_transcript raw.
 

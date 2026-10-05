@@ -878,6 +878,28 @@ def create_app(
             return _not_found("unknown log name")
         return JSONResponse(out)
 
+    async def get_log_sources(request):
+        run_dir = _run_dir(study_dir, request.path_params["run_id"])
+        if run_dir is None:
+            return _not_found("no such run")
+        return JSONResponse({"sources": readers.read_log_sources(run_dir)})
+
+    async def get_tool_calls(request):
+        run_dir = _run_dir(study_dir, request.path_params["run_id"])
+        if run_dir is None:
+            return _not_found("no such run")
+        try:
+            since = (float(request.query_params["since"])
+                     if "since" in request.query_params else None)
+        except ValueError:
+            return JSONResponse({"error": "since must be a number"},
+                                status_code=400)
+        out = await asyncio.to_thread(readers.read_tool_calls, run_dir, since)
+        if out is None:
+            return _not_found(
+                "transcripts not recorded for this run (debug flag was off)")
+        return JSONResponse(out)
+
     async def get_oracle(request):
         """Oracle ledger rows, newest first, paged by offset (``after``,
         ``limit`` default 400 / max 5000; ``namespace=`` empty = the canonical
@@ -1299,6 +1321,8 @@ def create_app(
         Route("/api/study/launch/stop", post_launch_stop, methods=["POST"]),
         Route("/api/study/kill", post_kill, methods=["POST"]),
         Route("/api/runs/{run_id}/log", get_log),
+        Route("/api/runs/{run_id}/log_sources", get_log_sources),
+        Route("/api/runs/{run_id}/tool_calls", get_tool_calls),
         Route("/api/runs/{run_id}/stop", post_stop, methods=["POST"]),
         Route("/api/runs/{run_id}/vitals", get_vitals),
         Route("/api/runs/{run_id}/oracle", get_oracle),

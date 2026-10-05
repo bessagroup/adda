@@ -1452,7 +1452,11 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   **Logs view:** a tail of `GET /api/runs/{id}/log` with a Run log / Monitor source switch (`name=run` is
   `run.log`, `name=diagnostics` is `diagnostics.jsonl`, one line each), polled every 2 s while the run is open,
   a Pause toggle that resumes without gaps (the byte cursor is kept), ids linked, stuck to the bottom unless
-  scrolled up. `viewer_shots.py --logs [--live]` shoots it; `--live` appends to a copy's run.log meanwhile.
+  scrolled up. More sources, listed by `GET /api/runs/{id}/log_sources`: the watchdog log (when the viewer
+  started the run), one `out:<delegation>/<file>_stdout.log` per delegation (a select, labelled with the
+  delegation id, which is linked), and "Tool calls" (`GET /api/runs/{id}/tool_calls?since=`: one line per call
+  with time, delegation, tool, ok/error, parsed from the transcripts). A closed run's panel shrinks to its
+  content. `viewer_shots.py --logs [--live]` shoots it; `--live` appends to a copy's run.log meanwhile.
   `viewer_shots.py --deliverable` shoots it, including a Re-execute.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);

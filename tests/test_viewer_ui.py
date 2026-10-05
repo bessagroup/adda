@@ -683,3 +683,32 @@ def test_logs_tail_a_live_file_link_ids_pause_and_switch_source(tmp_path, page):
         page.wait_for_function("document.querySelectorAll('.ll').length === 1 && document.querySelector('.ll .lv.bad')")
         text = page.locator(".ll").inner_text()
         assert "implementer" in text and "no such column" in text and "second line" not in text
+
+
+def test_logs_list_tool_calls_and_delegation_output_and_shrink_when_closed(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    dbg = run_dir / "debug"
+    (dbg / "run.log").write_text("[10:00:00] INFO Run starting\n", encoding="utf-8")
+    (dbg / "transcripts").mkdir(parents=True, exist_ok=True)
+    (dbg / "transcripts" / "D001.jsonl").write_text("\n".join(json.dumps(r) for r in [
+        {"type": "assistant", "ts": "2026-09-17T12:00:00+00:00",
+         "tools": [{"name": "mcp__f3dasm_agent_tools__QueryStore"}]},
+        {"type": "tool_result", "results": [{"is_error": True}]},
+    ]) + "\n", encoding="utf-8")
+    out = dbg / "delegations" / "D001"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "run_campaign_stdout.log").write_text("campaign line one\n", encoding="utf-8")
+    with _LiveServer(create_app(study)) as srv:
+        page.set_viewport_size({"width": 1400, "height": 900})
+        page.goto(f"{srv.url}/ui?run={RUN}&view=logs")
+        page.wait_for_selector("[data-logsrc=tools]")
+        page.locator("[data-logsrc=tools]").click()
+        page.wait_for_selector(".ll")
+        text = page.locator(".ll").first.inner_text()
+        assert "D001" in text and "QueryStore" in text and "error" in text
+        page.select_option("#logout", index=1)
+        page.wait_for_function("document.querySelector('.ll') && document.querySelector('.ll').innerText.includes('campaign line one')")
+        assert page.locator(".dcap a").count() >= 1
+        if page.locator("#logstate").inner_text().strip() == "run closed":
+            assert "fit" in page.locator("#logbody").get_attribute("class")
+            assert page.locator("#logbody").evaluate("e => e.getBoundingClientRect().height") < 300

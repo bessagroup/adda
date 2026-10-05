@@ -1476,6 +1476,74 @@ def read_notebook(
 _LOG_FILES = {"run": "run.log", "diagnostics": "diagnostics.jsonl"}
 _LOG_DEFAULT_BYTES = 64 * 1024
 _LOG_MAX_BYTES = 1024 * 1024
+_WATCHDOG_LEAD_S = 600.0
+_STDOUT_PREFIX = "out:"
+
+
+def _watchdog_log(run_dir: Path) -> Path | None:
+    """The watchdog log of the launch that started this run, if the viewer
+    started it: the registry entry made just before the run's own start."""
+    run_dir = Path(run_dir)
+    study_dir = run_dir.parent.parent
+    try:
+        t0 = float((run_dir / "debug" / "run_started_at").read_text().strip())
+        entries = json.loads((study_dir / "runs" / "_viewer"
+                              / "registry.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    best = None
+    for e in entries if isinstance(entries, list) else []:
+        if not isinstance(e, dict) or e.get("kind") != "watchdog" \
+                or not e.get("log"):
+            continue
+        try:
+            lead = t0 - float(e["started_at"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if -5.0 <= lead <= _WATCHDOG_LEAD_S and (best is None or lead < best[0]):
+            best = (lead, e["log"])
+    if best is None:
+        return None
+    path = (study_dir / best[1]).resolve()
+    return path if path.is_relative_to((study_dir / "runs").resolve()) else None
+
+
+def _stdout_logs(run_dir: Path) -> dict[str, Path]:
+    """``{"out:D002/run_campaign_stdout.log": path}`` for every delegation
+    stdout log on disk, in delegation then file order."""
+    root = Path(run_dir) / "debug" / "delegations"
+    if not root.is_dir():
+        return {}
+    out = {}
+    for path in sorted(root.rglob("*_stdout.log")):
+        if path.is_file():
+            out[_STDOUT_PREFIX + path.relative_to(root).as_posix()] = path
+    return out
+
+
+def read_log_sources(run_dir: Path | str) -> list[dict[str, Any]]:
+    """What the Logs view can tail: ``{name, label, kind, delegation?, exists}``.
+    The two run files always; the watchdog log when the viewer started this
+    run; the tool-call stream; one entry per delegation stdout log."""
+    run_dir = Path(run_dir)
+    dbg = run_dir / "debug"
+    rows = [
+        {"name": "run", "label": "Run log", "kind": "file",
+         "exists": (dbg / "run.log").is_file()},
+        {"name": "diagnostics", "label": "Monitor", "kind": "file",
+         "exists": (dbg / "diagnostics.jsonl").is_file()},
+    ]
+    wd = _watchdog_log(run_dir)
+    if wd is not None:
+        rows.append({"name": "watchdog", "label": "Watchdog", "kind": "file",
+                     "exists": wd.is_file()})
+    rows.append({"name": "tools", "label": "Tool calls", "kind": "tools",
+                 "exists": (dbg / "transcripts").is_dir()})
+    for name, path in _stdout_logs(run_dir).items():
+        rel = name[len(_STDOUT_PREFIX):]
+        rows.append({"name": name, "label": path.name, "kind": "file",
+                     "delegation": rel.split("/", 1)[0], "exists": True})
+    return rows
 
 
 def read_log_tail(
@@ -1492,16 +1560,26 @@ def read_log_tail(
     for an unknown log name; ``exists: false`` for a known one not written
     yet.
     """
-    fname = _LOG_FILES.get(name)
-    if fname is None:
+    run_dir = Path(run_dir)
+    if name in _LOG_FILES:
+        path: Path | None = run_dir / "debug" / _LOG_FILES[name]
+    elif name == "watchdog":
+        path = _watchdog_log(run_dir)
+    elif name.startswith(_STDOUT_PREFIX):
+        path = _stdout_logs(run_dir).get(name)
+        if path is None:
+            return None
+    else:
         return None
+    absent = {"name": name, "exists": False, "text": "", "size": 0,
+              "next_cursor": 0, "reset": False}
+    if path is None:
+        return absent
     limit = max(1, min(int(limit), _LOG_MAX_BYTES))
-    path = Path(run_dir) / "debug" / fname
     try:
         size = path.stat().st_size
     except OSError:
-        return {"name": name, "exists": False, "text": "", "size": 0,
-                "next_cursor": 0, "reset": False}
+        return absent
     reset = after is not None and after > size
     if after is None:
         start = max(0, size - limit)
@@ -1518,6 +1596,82 @@ def read_log_tail(
         "text": raw.decode("utf-8", errors="replace"),
         "next_cursor": start + len(raw),
     }
+
+
+_TOOL_PREFIX = re.compile(r"^mcp__[A-Za-z0-9_]+?__")
+_tool_cache: dict[str, tuple[tuple[int, int], list[dict[str, Any]]]] = {}
+
+
+def _iso_to_epoch(ts: Any) -> float | None:
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(str(ts)).timestamp()
+    except ValueError:
+        return None
+
+
+def _transcript_calls(path: Path, key: str) -> list[dict[str, Any]]:
+    """Tool calls of one transcript: ``{id, t, ts, who, tool, ok}`` (``ok`` is
+    None while the call has no result). Cached on (mtime, size), so only a
+    transcript that grew is parsed again."""
+    try:
+        st = path.stat()
+    except OSError:
+        return []
+    sig = (st.st_mtime_ns, st.st_size)
+    hit = _tool_cache.get(str(path))
+    if hit is not None and hit[0] == sig:
+        return hit[1]
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    calls: list[dict[str, Any]] = []
+    pending: list[dict[str, Any]] = []
+    for line in lines:
+        try:
+            e = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        etype = str(e.get("type") or "").lower()
+        if etype in ("assistant", "aimessage", "aimessagechunk"):
+            for t in e.get("tools") or []:
+                call = {"id": f"{key}#{len(calls)}", "ts": e.get("ts"),
+                        "t": _iso_to_epoch(e.get("ts")), "who": key,
+                        "tool": _TOOL_PREFIX.sub("", str(t.get("name", "tool"))),
+                        "ok": None}
+                calls.append(call)
+                pending.append(call)
+        elif etype == "tool_result":
+            for r in e.get("results") or []:
+                if pending:
+                    pending.pop(0)["ok"] = not r.get("is_error")
+        elif etype in ("toolmessage", "functionmessage") and pending:
+            pending.pop(0)["ok"] = not str(e.get("text") or "") \
+                .lstrip().startswith("ERROR")
+    _tool_cache[str(path)] = (sig, calls)
+    return calls
+
+
+def read_tool_calls(run_dir: Path | str, since: float | None = None,
+                    ) -> dict[str, Any] | None:
+    """Every tool call in the run's transcripts, one row per call in time
+    order: ``{id, t, ts, who, tool, ok}``. ``since`` (epoch seconds) keeps
+    calls at or after it; a client that asks from a little before its newest
+    row and drops the ids it already holds sees each call once, even when a
+    call on another transcript lands out of order. ``None`` when the run
+    recorded no transcripts."""
+    root = Path(run_dir) / "debug" / "transcripts"
+    if not root.is_dir():
+        return None
+    rows: list[dict[str, Any]] = []
+    for path in sorted(root.rglob("*.jsonl")):
+        rows.extend(_transcript_calls(
+            path, path.relative_to(root).with_suffix("").as_posix()))
+    out = [r for r in rows
+           if since is None or (r["t"] is not None and r["t"] >= since)]
+    out.sort(key=lambda r: (r["t"] if r["t"] is not None else 0.0, r["id"]))
+    return {"calls": out, "total": len(rows)}
 
 
 def read_run_status(run_dir: Path | str) -> dict[str, Any] | None:

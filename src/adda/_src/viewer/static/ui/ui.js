@@ -712,7 +712,9 @@ function paintDeliverable(w, top) {
   w.scrollTop = top;
 }
 /* ── Logs: a tail of the run's own files, one source at a time ───────────── */
-const LOG_SOURCES = [["run", "Run log"], ["diagnostics", "Monitor"]];
+const DEFAULT_SOURCES = [{ name: "run", label: "Run log", kind: "file" }, { name: "diagnostics", label: "Monitor", kind: "file" }];
+const logSources = () => (S.log.sources && S.log.run === S.run ? S.log.sources : DEFAULT_SOURCES);
+const logSource = (n) => logSources().find((x) => x.name === n) || { name: n, label: n, kind: "file" };
 const LOG_CAP = 5000, LOG_MS = 2000;
 const logBuf = (src) => S.log.bufs[src] || (S.log.bufs[src] = { lines: [], cursor: null, exists: null, partial: "", trimmed: false, n: 0 });
 function logLine(src, raw) {
@@ -721,13 +723,61 @@ function logLine(src, raw) {
     const d = new Date(r.ts), t = isNaN(d) ? "" : d.toTimeString().slice(0, 8);
     return { t, lvl: r.error_type || "", msg: [r.node, r.tool, String(r.message || "").trim().split("\n")[0]].filter(Boolean).join(" · ") };
   }
+  if (src.startsWith("out:")) return { t: "", lvl: "", msg: raw };
   const m = /^\[(\d\d:\d\d:\d\d)\]\s+([A-Z]+)\s+(.*)$/.exec(raw);
   return m ? { t: m[1], lvl: m[2], msg: m[3] } : { t: "", lvl: "", msg: raw };
 }
-function lvlClass(l) { return /^(ERROR|CRITICAL|ERROR_RETURN)$/.test(l) ? "bad" : /^(WARN|WARNING)$/.test(l) || /_(WARN|FLAG|NUDGE)$/.test(l) ? "warn" : "dim"; }
+function lvlClass(l) { return /^(ERROR|CRITICAL|ERROR_RETURN)$/i.test(l) ? "bad" : /^(WARN|WARNING)$/.test(l) || /_(WARN|FLAG|NUDGE)$/.test(l) ? "warn" : "dim"; }
 let logBusy = false;
+let srcBusy = false;
+async function loadSources() {
+  const run = S.run; if (!run || srcBusy) return;
+  if (S.log.run === run && S.log.sources && Date.now() - S.log.srcAt < 6000) return;
+  srcBusy = true;
+  try {
+    const r = await get("/api/runs/" + encodeURIComponent(run) + "/log_sources");
+    if (run !== S.run) return;
+    const changed = JSON.stringify(r.sources) !== JSON.stringify(S.log.sources);
+    S.log.run = run; S.log.sources = r.sources; S.log.srcAt = Date.now();
+    if (!r.sources.some((x) => x.name === S.log.src)) S.log.src = "run";
+    if (changed) paintLogs($("work"));
+  } catch (e) { /* the file sources still work from their defaults */ } finally { srcBusy = false; }
+}
+async function loadTools() {
+  const run = S.run, b = logBuf("tools");
+  logBusy = true;
+  try {
+    const q = b.since == null ? "" : "?since=" + (b.since - 30);
+    const r = await get("/api/runs/" + encodeURIComponent(run) + "/tool_calls" + q);
+    if (run !== S.run || S.log.src !== "tools") return;
+    S.log.err = null; b.stale = false; b.exists = true;
+    b.ids = b.ids || new Set();
+    const idx = new Map(b.lines.map((l, i) => [l.id, i]));
+    let grew = false;
+    r.calls.forEach((c) => {
+      const d = c.t == null ? "" : new Date(c.t * 1000).toTimeString().slice(0, 8);
+      const row = { id: c.id, tt: c.t || 0, t: d, lvl: c.ok === true ? "ok" : c.ok === false ? "error" : "…", msg: c.who.split("/")[0] + " · " + c.tool };
+      if (idx.has(c.id)) { b.lines[idx.get(c.id)] = row; grew = true; return; }
+      b.lines.push(row); grew = true;
+      if (c.t != null && (b.since == null || c.t > b.since)) b.since = c.t;
+    });
+    if (grew) b.lines.sort((x, y) => x.tt - y.tt);
+    if (b.lines.length > LOG_CAP) { b.lines.splice(0, b.lines.length - LOG_CAP); b.trimmed = true; }
+    b.n = b.lines.length; b.cursor = b.since;
+    paintLogs($("work"), true);
+  } catch (e) {
+    if (/404/.test(String(e.message || e))) { b.exists = false; b.cursor = 0; } else S.log.err = String(e.message || e);
+    paintLogs($("work"), true);
+  } finally { logBusy = false; }
+}
 async function loadLogs() {
+  loadSources();
   const run = S.run, src = S.log.src; if (!run || logBusy) return;
+  if (logSource(src).kind === "tools") {
+    const b = logBuf(src);
+    if (b.exists !== null && (S.log.paused || (S.vitals && S.vitals.closed && b.cursor != null && !b.stale))) return;
+    return loadTools();
+  }
   const b = logBuf(src);
   if (S.log.run !== run) { S.log.run = run; }
   if (b.exists !== null && (S.log.paused || (S.vitals && S.vitals.closed && b.cursor != null && !b.stale))) return;
@@ -757,26 +807,35 @@ function logRows(b) {
   return b.lines.map((l) => `<div class="ll"><span class="lt mono">${esc(l.t)}</span>` +
     `<span class="lv ${lvlClass(l.lvl)}">${esc(l.lvl)}</span><span class="lm">${linkify(esc(l.msg))}</span></div>`).join("");
 }
+function logNote(b, src) {
+  if (S.log.err) return `<p class="none">Could not read the log (${esc(S.log.err)}).</p>`;
+  const o = src.name.startsWith("out:") ? `<p class="dcap">Output of ${idLink(src.delegation)} · <span class="mono">${esc(src.name.slice(4))}</span></p>` : "";
+  if (b.exists === false) return o + `<p class="none">${src.kind === "tools" ? "This run recorded no transcripts, so there are no tool calls to list." : src.name === "watchdog" ? "No watchdog log is recorded for this run." : "This run has not written " + esc(src.label) + " yet."}</p>`;
+  if (b.exists === null) return o;
+  return o + (b.trimmed ? `<p class="dcap">Showing the latest lines only; earlier ones are on disk.</p>` : "");
+}
 function paintLogs(w, partial) {
   if (S.view !== "logs") return;
-  const b = logBuf(S.log.src), live = liveNow();
+  const src = logSource(S.log.src), b = logBuf(S.log.src), live = liveNow();
   if (partial && !$("logbody")) return;
   const body = $("logbody"), stick = !body || body.scrollTop + body.clientHeight >= body.scrollHeight - 24;
-  const note = S.log.err ? `<p class="none">Could not read the log (${esc(S.log.err)}).</p>`
-    : b.exists === false ? `<p class="none">This run has not written ${S.log.src === "run" ? "run.log" : "diagnostics.jsonl"} yet.</p>`
-    : b.exists === null ? "" : (b.trimmed ? `<p class="dcap">Showing the latest lines only; earlier ones are on disk.</p>` : "");
-  const rows = b.lines.length ? logRows(b) : (b.exists ? '<p class="none">The file is empty so far.</p>' : "");
+  const note = logNote(b, src);
+  const rows = b.lines.length ? logRows(b) : (b.exists ? '<p class="none">' + (src.kind === "tools" ? "No tool calls yet." : "The file is empty so far.") + "</p>" : "");
   const state = S.log.paused ? '<span class="st open">paused</span>' : live ? '<span class="st live">live</span>' : '<span class="st open">run closed</span>';
   if (partial && body && $("logstate")) {
-    $("logstate").innerHTML = state; $("logn").textContent = b.lines.length + " lines"; $("lognote").innerHTML = note;
-    body.innerHTML = rows; if (stick) body.scrollTop = body.scrollHeight;
+    $("logstate").innerHTML = state; $("logn").textContent = b.lines.length + " " + (src.kind === "tools" ? "calls" : "lines"); $("lognote").innerHTML = note;
+    body.className = "logbody" + (live ? "" : " fit"); body.innerHTML = rows; if (stick) body.scrollTop = body.scrollHeight;
     return;
   }
+  const srcs = logSources(), outs = srcs.filter((x) => x.name.startsWith("out:"));
   w.innerHTML = `<div class="data logs"><div class="dh"><h3>Logs</h3><span class="seg" role="group" aria-label="Log source">` +
-    LOG_SOURCES.map(([k, t]) => `<button type="button" data-logsrc="${k}" aria-pressed="${S.log.src === k}">${t}<small>${logBuf(k).lines.length || ""}</small></button>`).join("") +
-    `</span><span class="sp"></span><span id="logn" class="dcap">${b.lines.length} lines</span><span id="logstate">${state}</span>` +
+    srcs.filter((x) => !x.name.startsWith("out:")).map((x) => `<button type="button" data-logsrc="${esc(x.name)}" aria-pressed="${S.log.src === x.name}">${esc(x.label)}<small>${logBuf(x.name).lines.length || ""}</small></button>`).join("") +
+    `</span>` +
+    (outs.length ? `<select id="logout" aria-label="Delegation output"><option value="">Delegation output…</option>` +
+      outs.map((x) => `<option value="${esc(x.name)}" ${S.log.src === x.name ? "selected" : ""}>${esc(x.delegation)} · ${esc(x.label)}</option>`).join("") + `</select>` : "") +
+    `<span class="sp"></span><span id="logn" class="dcap">${b.lines.length} ${src.kind === "tools" ? "calls" : "lines"}</span><span id="logstate">${state}</span>` +
     `<label class="toggle"><input type="checkbox" id="logpause" ${S.log.paused ? "checked" : ""}> Pause</label></div>` +
-    `<div id="lognote">${note}</div><div id="logbody" class="logbody" tabindex="0">${rows}</div></div>`;
+    `<div id="lognote">${note}</div><div id="logbody" class="logbody${live ? "" : " fit"}" tabindex="0">${rows}</div></div>`;
   const nb2 = $("logbody"); if (nb2) nb2.scrollTop = nb2.scrollHeight;
 }
 setInterval(() => { if (S.view === "logs" && visible() && !S.log.paused) { const b = logBuf(S.log.src); if (liveNow()) { b.stale = true; loadLogs(); } } }, LOG_MS);
@@ -1215,6 +1274,7 @@ document.addEventListener("click", (e) => {
   if (r) { e.preventDefault(); nav({ run: r.dataset.run, sel: null }); return; }
 });
 document.addEventListener("change", (e) => {
+  if (e.target.id === "logout") { if (e.target.value) { S.log.src = e.target.value; paintLogs($("work")); loadLogs(); } return; }
   if (e.target.id === "logpause") { S.log.paused = e.target.checked; paintLogs($("work")); if (!S.log.paused) { logBuf(S.log.src).stale = true; loadLogs(); } return; }
   if (e.target.id === "nbcode") { S.codeOpen = e.target.checked; paintWork(); return; }
   if (e.target.id === "follow") { S.follow = e.target.checked; paintWork(); }
