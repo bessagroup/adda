@@ -1266,7 +1266,8 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   Header
   vitals add wall against the budget with 1x/1.5x/2x marks, awake worker slots
   N/max with the queue length, and cost as a lower bound ("≥$") when any call
-  recorded none (unknown, never 0). Orchestrator RSS is not shown: no record holds it.
+  recorded none (unknown, never 0). `GET /api/runs/<id>/vitals` also serves `study`, `model` and `budget_s`
+  from the study's current config.yaml (null when undeclared or unparseable). Orchestrator RSS is not shown: no record holds it.
   Narrow screens stack the panes instead of overlaying them. No longer read-only: see
   **Operator channel** below for the write path (answering a `FollowUp`,
   queueing a note, nudging a running delegation).

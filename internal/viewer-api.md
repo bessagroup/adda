@@ -36,7 +36,7 @@ Per run (`/api/runs/{run_id}/...`):
 - `graph`: `{nodes[], edges[], entry, tool_docs{tool: doc}, backend, node_w, node_h, canvas_*}` (a permission graph, not an execution graph)
 - `delegations`: `[{id, from_node, to_node, task, deliverable, hypothesis_ids[], started_at, completed_at, status, tokens_in, tokens_out, cost_usd, is_falsification_attempt, evals}]`
 - `ledger`: `{hypotheses[], milestones[]}`
-- `vitals`: `{started_at, cost_usd, calls, unknown_cost_calls, max_awake_nodes, output_tokens, by_role{role: {...}}, elapsed_s, closed}`. `closed` is the signal to stop polling.
+- `vitals`: `{study, model, budget_s, started_at, cost_usd, calls, unknown_cost_calls, max_awake_nodes, output_tokens, by_role{role: {...}}, elapsed_s, closed}`. `closed` is the signal to stop polling. `model` and `budget_s` come from the study's current `config.yaml` (null if undeclared; the budget is the wall-clock `budget:` in seconds).
 - `oracle?after&limit&namespace`: `{registered, evaluator_name, entrypoint, eval_budget, store_dir, store_found, stores[], total_evals, next_cursor}`; offset cursor, `null` once drained (see the cursor table). `limit` default 400, max 5000.
 - `trajectory`: `{store_found, declared_outputs[], stores[]}`; `funnel?stages=`: `{store_found, stores[]}`; `figure_of_merit`: `{declared, ...}`
 - `monitor`: `[{source, ts, text}]`; `operator`: `{questions[]}`; POST `answer` / `note` (JSON body) write to the operator channel and need write access

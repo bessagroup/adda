@@ -1122,7 +1122,20 @@ def read_vitals(run_dir: Path | str) -> dict[str, Any]:
     except (OSError, ValueError, AttributeError):
         pass
 
+    study_dir = Path(run_dir).parent.parent
+    cfg = _load_study_config(study_dir)
+    try:
+        from ..runtime.run_setup import _parse_budget_str
+        budget_s = _parse_budget_str(cfg.get("budget"))
+    except (ValueError, TypeError):
+        budget_s = None
+
     return {
+        # The study's config.yaml as it stands now (the study dir is the
+        # run's private copy); null when it declares none, never a guess.
+        "study": study_dir.name,
+        "model": cfg.get("model") or None,
+        "budget_s": budget_s,
         # started_at lets the client tick the clock itself. Serving only a
         # snapshot of elapsed_s made the wall time freeze between polls —
         # it looked stopped, because for five seconds at a time it was.

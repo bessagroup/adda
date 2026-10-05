@@ -1297,3 +1297,22 @@ def test_read_oracle_pages_one_namespace_and_still_totals_all(tmp_path):
     assert o["total_evals"] == 7
     (canon,) = read_oracle(run, namespace=None)["stores"]
     assert canon["namespace"] is None and canon["n_evals"] == 3
+
+
+def test_vitals_carry_study_model_and_budget_from_the_config(tmp_path):
+    (tmp_path / "config.yaml").write_text(
+        'model: m-1\nbudget: "12:00:00"\n', encoding="utf-8")
+    run = tmp_path / "runs" / "R1"
+    (run / "debug").mkdir(parents=True)
+    v = read_vitals(run)
+    assert (v["study"], v["model"], v["budget_s"]) == (
+        tmp_path.name, "m-1", 43200.0)
+
+
+def test_vitals_budget_and_model_are_null_when_undeclared_or_unparseable(tmp_path):
+    run = tmp_path / "runs" / "R1"
+    (run / "debug").mkdir(parents=True)
+    assert read_vitals(run)["budget_s"] is None
+    (tmp_path / "config.yaml").write_text("budget: soon\n", encoding="utf-8")
+    v = read_vitals(run)
+    assert v["budget_s"] is None and v["model"] is None
