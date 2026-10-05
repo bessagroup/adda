@@ -807,6 +807,23 @@ def _scores(run_dir, values, objective):
             f"{i},{v},D001,2026-09-17T12:{i:02d}:00+00:00\n" for i, v in enumerate(values)))
 
 
+def test_a_run_predating_the_objective_draws_it_from_the_study_config_with_a_label(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _with_store(run_dir, objective=None)
+    (study / "config.yaml").write_text("objective:\n  column: score\n  direction: max\n")
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector("svg.cht")
+        assert "predates the declaration" in page.locator(".fallback").inner_text()
+    _with_store_objective = {"column": "score", "direction": "max"}
+    import json
+    (run_dir / "debug" / "run_config.json").write_text(json.dumps({"objective": _with_store_objective}))
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector("svg.cht")
+        assert page.locator(".fallback").count() == 0
+
+
 def test_the_chart_defaults_to_log_when_the_best_so_far_trace_spans_two_decades(tmp_path, page):
     study, run_dir = _study(tmp_path)
     _scores(run_dir, [60, 10, 1, 0.1, 0.006, 0.0006], {"column": "score", "direction": "min"})

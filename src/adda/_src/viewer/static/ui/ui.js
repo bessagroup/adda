@@ -292,7 +292,7 @@ function paintTitle() {
     `<div><div class="lbl">Delegations</div><div class="vital">${S.dels.filter((d) => !isGate(d) && !isFB(d)).length}` +
     `<small>${running ? done + " done · " + running + " running" : "all done"}</small></div></div>` +
     `<div><div class="lbl">Best row · ${fom ? esc(fom.column) : "objective"}</div>` +
-    (fom ? `<button class="vital link" data-sel="row:${fom.namespace ? fom.namespace + ":" : ""}${fom.row}" title="The best counted row by the declared objective (${esc(fom.direction)}), over every store that records it. It is not the run's headline claim.">${esc(fmtVal(fom.value))}<small>${esc(fom.namespace || "canonical")} row ${fom.row}</small></button>`
+    (fom ? `<button class="vital link" data-sel="row:${fom.namespace ? fom.namespace + ":" : ""}${fom.row}" title="The best counted row by the declared objective (${esc(fom.direction)}), over every store that records it. It is not the run's headline claim.${fom.from_study_config ? " The objective is read from the study's current config; this run did not record it." : ""}">${esc(fmtVal(fom.value))}<small>${esc(fom.namespace || "canonical")} row ${fom.row}</small></button>`
       : `<div class="vital">${dash(!S.fom || !S.fom.declared ? "No objective declared for this study" : S.oracle && S.oracle.registered === false ? "No oracle registered for this run" : "No counted rows in the store yet")}</div>`) + `</div>` +
     `<div>${actionsHtml(v.closed)}</div>`;
 }
@@ -1091,6 +1091,7 @@ function chartHtml(W) {
   const f = S.fom;
   if (!f || !f.declared) return note("The study declares no objective, so there is no best-so-far to draw. Declare one in an <code>objective:</code> block of config.yaml.");
   const { all, rows } = chartModel(), focus = curStore();
+  const prov = f.from_study_config ? `<p class="dcap fallback">Objective from the study’s current config (this run predates the declaration).</p>` : "";
   const notScored = (f.not_scored || []).map((x) => `${esc(x.namespace || "canonical")} (missing ${x.missing.map(esc).join(", ")})`);
   if (!all.length) return note(`No store records the declared objective <b>${esc(f.column)}</b> yet.` + (notScored.length ? ` Not scored: ${notScored.join("; ")}.` : ""));
   const counted = rows.filter((r) => r.ok), drawable = rows.filter((r) => r.y != null);
@@ -1144,7 +1145,7 @@ function chartHtml(W) {
   const cap = `${counted.length} counted of ${rows.length} rows` + (all.length > 1 ? ` across ${all.length} stores; the ${esc(focusNs || "canonical")} store is highlighted, the others drawn faint` : "") +
     (noX ? ` · ${noX} with no finite value are not drawn` : "") + (edge.length ? ` · ${edge.length} outside the range (ticks at the edge)` : "") +
     (S.xmode === "time" && !useTime ? " · some rows carry no time, so the axis is the evaluation number" : "") + (notScored.length ? ` · not scored: ${notScored.join("; ")}` : "");
-  return `<div class="chartwrap"><svg class="cht" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Best ${esc(f.column)} so far over ${useTime ? "elapsed time" : "evaluations"}">` +
+  return prov + `<div class="chartwrap"><svg class="cht" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Best ${esc(f.column)} so far over ${useTime ? "elapsed time" : "evaluations"}">` +
     `${grid}${refs}<path class="step" d="${d}"/>${ticks}${[...inside.filter((r) => nsOf(r.st) !== focusNs), ...inside.filter((r) => nsOf(r.st) === focusNs && !r.ok), ...inside.filter((r) => nsOf(r.st) === focusNs && r.ok)].map(dot).join("")}${bestLab}</svg><div class="tip" id="tip" hidden></div></div>` +
     `<div class="legend"><span><i class="dot f"></i>counted</span><span><i class="dot i"></i>not counted</span>${marks}<span><i class="stepkey"></i>best so far (${esc(f.direction)})</span></div>` +
     `<div class="dcap">${cap}</div>`;

@@ -141,6 +141,31 @@ def test_figure_of_merit_ranks_nothing_when_undeclared(tmp_path):
     assert read_figure_of_merit(_run(tmp_path, None)) == {"declared": False}
 
 
+def test_a_run_without_a_recorded_objective_falls_back_to_the_study_config_and_says_so(tmp_path):
+    run = _run(tmp_path, None)
+    study = run.parent.parent
+    (study / "config.yaml").write_text("objective:\n  column: score\n  direction: max\n  feasible: feasible\n")
+    fom = read_figure_of_merit(run, study)
+    assert (fom["declared"], fom["value"], fom["row"]) == (True, 7.0, 2)
+    assert fom["from_study_config"] is True
+    assert read_figure_of_merit(run) == {"declared": False}      # no study: nothing is inferred
+
+
+def test_a_recorded_objective_is_never_labelled_as_a_fallback(tmp_path):
+    run = _run(tmp_path, _DECL)
+    study = run.parent.parent
+    (study / "config.yaml").write_text("objective:\n  column: score\n  direction: min\n")
+    fom = read_figure_of_merit(run, study)
+    assert fom["from_study_config"] is False and fom["direction"] == "max"
+
+
+def test_an_invalid_study_objective_is_not_applied(tmp_path):
+    run = _run(tmp_path, None)
+    study = run.parent.parent
+    (study / "config.yaml").write_text("objective:\n  column: score\n")
+    assert read_figure_of_merit(run, study) == {"declared": False}
+
+
 # ---- a study whose oracle is authored mid-run (no workspace/ at start) ------
 
 def test_declared_objective_with_a_not_yet_existing_oracle_starts(tmp_path):

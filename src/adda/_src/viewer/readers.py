@@ -913,7 +913,7 @@ def read_trajectory(run_dir: Path | str) -> dict[str, Any]:
             "stores": stores}
 
 
-def read_figure_of_merit(run_dir: Path | str) -> dict[str, Any]:
+def read_figure_of_merit(run_dir: Path | str, study_dir: Path | str | None = None) -> dict[str, Any]:
     """The run's best row under the study's DECLARED objective (config.yaml
     ``objective:``, recorded in run_config.json), over EVERY store that records
     the declared columns: the canonical store and each namespace.
@@ -928,10 +928,23 @@ def read_figure_of_merit(run_dir: Path | str) -> dict[str, Any]:
     and no row is ranked. A row counts only if its objective is finite and,
     when ``feasible`` is declared, that column is 1, the same rule the run
     ledger applies. This is the stores' best row, not the run's own headline.
+
+    A run that predates the declaration has none in run_config.json. Then the
+    study's current config.yaml declaration is used and the answer carries
+    ``from_study_config: True``, so the reader sees it was not recorded at run
+    time; it is never applied silently.
     """
     from ..evaluation.objective import score_stores
     cfg, _, found = _oracle_stores(Path(run_dir))
     objective = cfg.get("objective") or None
+    from_study = False
+    if not objective and study_dir is not None:
+        from ..evaluation.objective import parse_objective
+        try:
+            objective = parse_objective(_load_study_config(Path(study_dir)).get("objective"))
+        except (ValueError, OSError):
+            objective = None
+        from_study = objective is not None
     if not objective:
         return {"declared": False}
     loaded = []
@@ -940,7 +953,7 @@ def read_figure_of_merit(run_dir: Path | str) -> dict[str, Any]:
         loaded.append((name, head, [dict(zip(head, r, strict=False)) for r in rows]))
     scored, not_scored = score_stores(loaded, objective)
     out: dict[str, Any] = {
-        "declared": True, **objective, "n": 0, "n_counted": 0, "row": None,
+        "declared": True, **objective, "from_study_config": from_study, "n": 0, "n_counted": 0, "row": None,
         "value": None, "namespace": None,
         "scored": [], "not_scored": not_scored}
     pick = max if objective["direction"] == "max" else min

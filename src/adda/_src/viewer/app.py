@@ -979,7 +979,7 @@ def create_app(
         run_dir = _run_dir(study_dir, run_id)
         if run_dir is None:
             return _not_found(f"no such run {run_id!r}")
-        return JSONResponse(readers.read_figure_of_merit(run_dir))
+        return JSONResponse(readers.read_figure_of_merit(run_dir, study_dir))
 
     async def get_monitor(request):
         run_id = request.path_params["run_id"]
