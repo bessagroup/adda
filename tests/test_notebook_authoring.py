@@ -170,6 +170,7 @@ def test_markdown_cells_are_per_cell_and_create_only(tmp_path):
     assert tools["WriteCell"]("doe__why", content="x").startswith("ERROR:")
 
 
+@pytest.mark.xdist_group(name="jupyter_kernel")
 def test_authored_notebook_passes_the_gate(tmp_path):
     """A notebook authored purely through the closures runs through the
     reproduction gate (a real, executable deliverable)."""
