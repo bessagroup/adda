@@ -192,7 +192,7 @@ Contextual to the selection:
 - **Study home:** a table of studies, not a card grid. Columns: name, last run (status mark plus time ago), figure of merit, runs, and a Start button. A row click opens the study.
 - **Study page:** problem statement (rendered), the runs table, and a Start run button.
 - **Start run:** a side sheet, not a modal over everything. It holds the pre-flight checklist (spec 14, 5.3) with a mark per check, the budget and model read from the committed config, and Start. Blocked checks say why and link to Setup.
-- **Stop:** a confirm popover anchored to the button: "Stop gracefully (retrospectives run)" as primary, and "Kill now" behind a second confirm.
+- **Stop:** a confirm popover anchored to the button: "Stop gracefully (retrospectives run)" as primary, and "Kill now" behind a second confirm, offered only while a run this viewer started is alive.
 
 ### 4.7 Phone (< 820 px): monitor first
 

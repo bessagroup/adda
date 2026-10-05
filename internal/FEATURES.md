@@ -1471,7 +1471,7 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   opens the Start sheet: model and budget read from the committed config (`/api/study/preflight` -> `configured`), a
   warning for uncommitted edits, the pre-flight checklist (blocked checks link to Setup), then Start (the launcher
   when configured, else the local runner). `Stop` on a live run opens a popover: `Stop gracefully` (writes the stop
-  request) primary, `Kill now` behind a second confirm. A read-only session shows a read-only message instead of
+  request) primary, `Kill now` behind a second confirm and offered only while a process this viewer started is alive (the registry's `launched[].alive`). A read-only session shows a read-only message instead of
   acting. `viewer_shots.py --setup` shoots Setup and the Stop popover.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);

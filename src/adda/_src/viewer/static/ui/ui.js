@@ -1426,7 +1426,9 @@ async function doStart() {
 /* Stop popover */
 S.pop = { open: false, confirmKill: false, busy: false, msg: null, bad: false, stopped: {} };
 function openPop(anchor) {
-  S.pop.open = !S.pop.open; S.pop.confirmKill = false; S.pop.msg = null; S.pop.anchor = anchor; paintPop();
+  S.pop.open = !S.pop.open; S.pop.confirmKill = false; S.pop.msg = null; S.pop.anchor = anchor; S.pop.canKill = false; paintPop();
+  if (!S.pop.open) return;
+  get("/api/study/preflight").then(d => { S.pop.canKill = (d.launched || []).some(e => e.alive); paintPop(); }).catch(() => {});
 }
 function paintPop() {
   const el = $("pop"), p = S.pop;
@@ -1438,7 +1440,8 @@ function paintPop() {
       ? `<p class="dcap">Kill now ends the run’s processes at once. No retrospectives are written, and the run is left unclosed.</p>` +
         `<div class="pb"><button type="button" class="btn" id="killnow" ${p.busy ? "disabled" : ""}>Kill now</button><button type="button" class="btn ghost" data-pop-back>Cancel</button></div>`
       : `<p class="dcap">The run finishes its current step, writes its retrospectives and closes.</p>` +
-        `<div class="pb"><button type="button" class="btn primary" id="stopgrace" ${p.busy ? "disabled" : ""}>Stop gracefully</button><button type="button" class="btn ghost" data-pop-kill>Kill now…</button></div>`) +
+        `<div class="pb"><button type="button" class="btn primary" id="stopgrace" ${p.busy ? "disabled" : ""}>Stop gracefully</button>${p.canKill ? '<button type="button" class="btn ghost" data-pop-kill>Kill now…</button>' : ""}</div>` +
+        (p.canKill ? "" : '<p class="dcap">Kill is offered only for a run this viewer started.</p>')) +
     (p.msg ? `<p class="st ${p.bad ? "bad" : "ok"}">${esc(p.msg)}</p>` : "");
 }
 async function doStop(kill) {

@@ -267,8 +267,9 @@ def setup_shots(base: str, out: Path, problems: list[str]) -> None:
                     pg.click("[data-stop]")
                     pg.wait_for_selector("#pop:not([hidden]) #stopgrace")
                     pg.screenshot(path=str(out / f"stop-pop-{tag}.png"))
-                    pg.click("[data-pop-kill]")
-                    pg.screenshot(path=str(out / f"stop-kill-{tag}.png"))
+                    if pg.locator("[data-pop-kill]").count():
+                        pg.click("[data-pop-kill]")
+                        pg.screenshot(path=str(out / f"stop-kill-{tag}.png"))
                 else:
                     problems.append(f"{tag}: no Stop control on the live fixture")
                 ctx.close()

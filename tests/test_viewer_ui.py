@@ -154,7 +154,7 @@ def test_start_sheet_lists_the_preflight_and_blocks_what_fails(tmp_path, page, m
         assert "view=setup" in page.url and page.locator("#sheet").is_hidden()
 
 
-def test_stop_asks_first_and_kill_is_behind_a_second_confirm(tmp_path, page):
+def test_stop_asks_first_and_kill_is_behind_a_second_confirm(tmp_path, page, monkeypatch):
     study, run_dir = _study(tmp_path)
     (run_dir / "debug" / "run_status.json").unlink(missing_ok=True)
     posts = []
@@ -165,14 +165,34 @@ def test_stop_asks_first_and_kill_is_behind_a_second_confirm(tmp_path, page):
         page.click("[data-stop]")
         page.wait_for_selector("#pop:not([hidden]) #stopgrace")
         assert posts == []
-        page.click("[data-pop-kill]")
-        assert page.locator("#killnow").is_visible() and page.locator("#stopgrace").count() == 0
-        page.click("[data-pop-back]")
-        page.click("#stopgrace")
-        page.wait_for_selector("#pop .st.ok")
-        assert any(u.endswith(f"/api/runs/{RUN}/stop") for u in posts)
-        assert (run_dir / "debug" / "stop_request.json").exists()
-        page.wait_for_selector("text=Stop requested")
+        page.wait_for_selector("#pop:not([hidden]) >> text=only for a run this viewer started")
+        assert page.locator("[data-pop-kill]").count() == 0
+        import sys
+
+        from adda._src.viewer import run_control
+        script = tmp_path / "fake_watchdog.py"
+        script.write_text("import time\ntime.sleep(120)\n")
+        monkeypatch.setattr(run_control, "_launch_argv", lambda _s: [sys.executable, str(script)])
+        monkeypatch.setattr(run_control, "preflight", lambda _s: [])
+        entry = run_control.start_run(study)
+        try:
+            page.keyboard.press("Escape")
+            page.click("[data-stop]")
+            page.wait_for_selector("[data-pop-kill]")
+            page.click("[data-pop-kill]")
+            assert page.locator("#killnow").is_visible() and page.locator("#stopgrace").count() == 0
+            page.click("[data-pop-back]")
+            page.click("#stopgrace")
+            page.wait_for_selector("#pop .st.ok")
+            assert any(u.endswith(f"/api/runs/{RUN}/stop") for u in posts)
+            assert (run_dir / "debug" / "stop_request.json").exists()
+            page.wait_for_selector("text=Stop requested")
+        finally:
+            import psutil
+            try:
+                psutil.Process(entry["pid"]).kill()
+            except psutil.Error:
+                pass
 
 
 def _ledger(run_dir, hyps):
