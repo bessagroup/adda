@@ -184,7 +184,7 @@ function resetRun() {
   lastRun = S.run;
   S.vitals = null; S.dels = []; S.ledger = { hypotheses: [], milestones: [] };
   S.nb = null; S.nbsig = ""; S.nbrun = null; S.nbpick = null; S.log = { run: null, src: S.log.src, paused: S.log.paused, err: null, bufs: {} };
-  S.fom = null; S.data = null; S.dsig = ""; S.ns = undefined; S.xmode = "eval"; S.logy = false; S.sort = null; S.tscroll = 0;
+  S.fom = null; S.data = null; S.dsig = ""; S.ns = undefined; S.xmode = "eval"; S.logy = null; S.sort = null; S.tscroll = 0;
   S.reviews = []; S.evidence = {}; S.sig = ""; S.loaded = false; S.error = null; S.questions = []; S.qsig = "";
   clearTimeout(S.timer);
   tick();
@@ -1077,6 +1077,16 @@ function chartModel() {
   rows.forEach((r, k) => { r.ev = k + 1; r.h = r.t != null && t0 != null ? (r.t - t0) / 3600 : null; });
   return { all, rows };
 }
+/* y scale: log is offered when every counted value is positive and spans 2+ decades; it is the default when the best-so-far trace itself spans 2+ decades. A click (S.logy true/false) always wins. */
+function yScale(counted, direction) {
+  const ys = counted.map((r) => r.y), pos = ys.length > 0 && ys.every((v) => v > 0);
+  const canLog = pos && Math.log10(Math.max(...ys) / Math.min(...ys)) >= 2;
+  const better = direction === "max" ? Math.max : Math.min;
+  let best = null, lo = null, hi = null;
+  ys.forEach((v) => { best = best == null ? v : better(best, v); lo = lo == null ? best : Math.min(lo, best); hi = hi == null ? best : Math.max(hi, best); });
+  const autoLog = canLog && Math.log10(hi / lo) >= 2;
+  return { canLog, log: canLog && (S.logy == null ? autoLog : S.logy) };
+}
 function chartHtml(W) {
   const f = S.fom;
   if (!f || !f.declared) return note("The study declares no objective, so there is no best-so-far to draw. Declare one in an <code>objective:</code> block of config.yaml.");
@@ -1087,8 +1097,7 @@ function chartHtml(W) {
   if (!drawable.length) return note("No row has a finite value for the objective yet.");
   const useTime = S.xmode === "time" && rows.every((r) => r.h != null), xv = (r) => (useTime ? r.h : r.ev);
   const basis = (counted.length ? counted : drawable).map((r) => r.y);
-  const pos = counted.length > 0 && counted.every((r) => r.y > 0), decades = pos ? Math.log10(Math.max(...basis) / Math.min(...basis)) : 0;
-  const canLog = decades > 2, log = canLog && S.logy;
+  const { log } = yScale(counted, f.direction);
   const tf = log ? Math.log10 : (v) => v;
   let lo = tf(Math.min(...basis)), hi = tf(Math.max(...basis));
   if (lo === hi) { lo -= 1; hi += 1; }
@@ -1142,12 +1151,11 @@ function chartHtml(W) {
 }
 function chartControls() {
   const f = S.fom; if (!f || !f.declared) return "";
-  const { rows } = chartModel(), counted = rows.filter((r) => r.ok).map((r) => r.y);
+  const { rows } = chartModel(), { canLog, log } = yScale(rows.filter((r) => r.ok), f.direction);
   const canTime = rows.length > 0 && rows.every((r) => r.h != null);
-  const canLog = counted.length > 0 && counted.every((v) => v > 0) && Math.log10(Math.max(...counted) / Math.min(...counted)) > 2;
   return `<div class="seg" role="group" aria-label="Chart x axis"><button data-xmode="eval" aria-pressed="${S.xmode !== "time" || !canTime}">evaluation</button>` +
     `<button data-xmode="time" aria-pressed="${S.xmode === "time" && canTime}"${canTime ? "" : " disabled title=\"Some rows record no time\""}>elapsed time</button></div>` +
-    (canLog ? `<div class="seg" role="group" aria-label="Chart y scale"><button data-logy="0" aria-pressed="${!S.logy}">linear</button><button data-logy="1" aria-pressed="${!!S.logy}">log</button></div>` : "");
+    (canLog ? `<div class="seg" role="group" aria-label="Chart y scale"><button data-logy="0" aria-pressed="${!log}">linear</button><button data-logy="1" aria-pressed="${log}">log</button></div>` : "");
 }
 function funnelHtml(st) {
   const fn = S.data.fun && S.data.fun.stores.find((x) => x.namespace === st.namespace);

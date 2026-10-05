@@ -791,6 +791,40 @@ def test_a_log_toggle_appears_only_when_the_values_span_two_decades(tmp_path, pa
     with _LiveServer(create_app(study)) as srv:
         page.goto(f"{srv.url}/ui?run={RUN}&view=data")
         page.wait_for_selector("[data-logy]")
+        page.click("[data-logy='0']")
+        assert page.locator("[data-logy='0'][aria-pressed='true']").count() == 1
+        page.click("[data-logy='1']")
+        assert page.locator("[data-logy='1'][aria-pressed='true']").count() == 1
+
+
+def _scores(run_dir, values, objective):
+    import json
+    _with_store(run_dir, objective=objective)
+    (run_dir / "debug" / "run_config.json").write_text(json.dumps({"objective": objective}))
+    data = run_dir / "experiment_data" / "experiment_data"
+    (data / "output.csv").write_text(
+        ",score,_delegation_id,_ts\n" + "".join(
+            f"{i},{v},D001,2026-09-17T12:{i:02d}:00+00:00\n" for i, v in enumerate(values)))
+
+
+def test_the_chart_defaults_to_log_when_the_best_so_far_trace_spans_two_decades(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _scores(run_dir, [60, 10, 1, 0.1, 0.006, 0.0006], {"column": "score", "direction": "min"})
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector("[data-logy]")
+        assert page.locator("[data-logy='1'][aria-pressed='true']").count() == 1
+        page.click("[data-logy='0']")      # the reader's choice wins
+        assert page.locator("[data-logy='0'][aria-pressed='true']").count() == 1
+
+
+def test_the_chart_defaults_to_linear_when_values_span_decades_but_the_trace_does_not(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _scores(run_dir, [1, 500, 1000, 800, 0.9, 600], {"column": "score", "direction": "min"})
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector("[data-logy]")
+        assert page.locator("[data-logy='0'][aria-pressed='true']").count() == 1
         page.click("[data-logy='1']")
         assert page.locator("[data-logy='1'][aria-pressed='true']").count() == 1
 
