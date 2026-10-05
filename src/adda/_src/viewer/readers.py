@@ -396,6 +396,49 @@ def read_delegations(run_dir: Path | str) -> list[dict[str, Any]]:
     return DelegationLog(log_path).query_all()
 
 
+def _diagnostic_kind(row: dict[str, Any]) -> str:
+    """The rule/tool a diagnostics row is filed under: ``error_type`` (the
+    monitor and gate rules, e.g. ``ERROR_RETURN``), else ``tool`` (rows such
+    as ``RETROSPECTIVES_MISSING`` name the rule there), else ``""``."""
+    return str(row.get("error_type") or row.get("tool") or "")
+
+
+def read_diagnostics(run_dir: Path | str, *, after: int = 0, limit: int = 200,
+                     kind: str | None = None) -> dict[str, Any]:
+    """Diagnostics rows paged by line cursor, plus the run's kind vocabulary.
+
+    ``rows`` are the valid rows from line ``after`` on, at most ``limit`` of
+    them matching ``kind`` (all when ``None``). ``next_cursor`` is the line
+    index to resume from and is always an int (a live run keeps appending, so
+    it never drains); ``total`` is the line count now. ``counts`` maps every
+    kind in the whole file to its row count, independent of the filter, so a
+    client can list the vocabulary without paging.
+    """
+    path = Path(run_dir) / "debug" / "diagnostics.jsonl"
+    lines = (path.read_text(encoding="utf-8", errors="replace").splitlines()
+             if path.exists() else [])
+    counts: dict[str, int] = {}
+    rows: list[dict[str, Any]] = []
+    cursor = after
+    for i, line in enumerate(lines):
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            row = None
+        if not isinstance(row, dict):
+            if i >= after and len(rows) < limit:
+                cursor = i + 1
+            continue
+        k = _diagnostic_kind(row)
+        counts[k] = counts.get(k, 0) + 1
+        if i >= after and len(rows) < limit:
+            cursor = i + 1
+            if kind is None or k == kind:
+                rows.append(row)
+    return {"rows": rows, "next_cursor": cursor, "total": len(lines),
+            "counts": counts}
+
+
 def read_diagnostics_tail(run_dir: Path | str) -> list[dict[str, Any]]:
     """Every diagnostics.jsonl row seen so far (open vocabulary — no fixed
     schema beyond ``ts``/``node``/``tool``/``error_type``/``fault``/

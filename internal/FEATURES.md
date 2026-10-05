@@ -1354,6 +1354,10 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   (`nodes/parsing`), `numbers` is the `findings_*` counts, `source_id` (`critic-N`) matches the
   retrospective of the same call, and `delegation_id` is set only when the run has exactly one critic
   delegation per review (the pairing is ordinal; nothing on disk names it).
+  **Diagnostics (spec 14 2.4):** `GET /api/runs/<id>/diagnostics?after&limit[&kind=]` pages
+  `diagnostics.jsonl` by line cursor (`next_cursor` is always an int, a live run keeps appending;
+  compare with `total`). `kind` filters on the row's `error_type`, else `tool`; `counts` is the whole
+  file's kind vocabulary regardless of the filter. Unparseable lines are skipped.
   The viewer binds loopback only: any other `--host` needs `--allow-network` and prints a warning.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);
