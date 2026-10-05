@@ -196,6 +196,9 @@ A design counts only if its `column` value is finite and, when `feasible` is
 given, that column is 1; a finite value on an infeasible design does not count.
 `column` and `feasible` must be outputs the evaluator declares (`output_names`
 or the lookup's `output_columns`); an unknown name refuses the run at start.
+When the evaluator is written during the run, the start check is skipped; each
+oracle later registered without a declared column is reported to the delegating
+agent and recorded as an `OBJECTIVE_COLUMN_MISSING` diagnostics event.
 Without the block the ledger records `objective: undeclared`, judges rows by
 the finite rule alone, and reports the running min and max instead of a best.
 

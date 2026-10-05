@@ -65,6 +65,18 @@ def parse_objective(
     return out
 
 
+def missing_columns(
+    objective: Mapping[str, Any] | None, produced: Iterable[str],
+) -> list[tuple[str, str]]:
+    """The declared ``(key, column)`` pairs an oracle producing ``produced``
+    would not supply; empty when no objective is declared."""
+    if not objective:
+        return []
+    have = set(produced)
+    return [(k, objective[k]) for k in ("column", "feasible")
+            if objective.get(k) and objective[k] not in have]
+
+
 def label(objective: Mapping[str, Any] | None) -> str:
     return "undeclared" if not objective else (
         f"{objective['column']}:{objective['direction']}"

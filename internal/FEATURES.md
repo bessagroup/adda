@@ -857,7 +857,12 @@ against the SDK's cost on calls it did price.
   `viewer/readers.py::read_figure_of_merit` (`GET /api/runs/{id}/figure_of_merit`,
   the store's best counted row; `declared: false` when absent) and the run
   ledger both use it. Absent block = undeclared: finite rule, running min AND
-  max, nothing ranked. Tests: `tests/test_objective_declaration.py`.
+  max, nothing ranked. A study whose oracle is authored mid-run (no output names
+  at start) skips the start check; each later oracle registration
+  (`delegation.py::_check_objective_columns`, from the manifest's `output_names`)
+  that lacks a declared column writes an `OBJECTIVE_COLUMN_MISSING` diagnostics
+  event (namespace, column, key) and notifies the delegator; it never refuses a
+  registration. Tests: `tests/test_objective_declaration.py`.
 
 ### Run-ledger process KPIs (2026-10-04)
 `studies/run_ledger.py` adds `error_returns` (ERROR_RETURN count, target 0),

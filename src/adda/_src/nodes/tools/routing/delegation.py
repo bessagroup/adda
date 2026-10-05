@@ -1184,6 +1184,8 @@ class WorkerSession:
                     output_names=_m.get("output_names"),
                     namespace=_ns,
                 )
+            self._check_objective_columns(
+                _run_dir, _m.get("output_names"), _ns, delegation_id)
             # Provenance is recorded either way: which delegation touched the
             # canonical source is part of the run record, and skipping the
             # REPOINT must not also skip the RECORD.
@@ -1195,6 +1197,38 @@ class WorkerSession:
                 )
         except Exception:  # noqa: BLE001
             pass
+
+    def _check_objective_columns(
+        self, run_dir: Path, output_names, namespace, delegation_id: str,
+    ) -> None:
+        """Say so when a registered oracle does not produce a declared
+        objective column. Not a refusal (a namespace may be a side probe):
+        the delegator is told which column is missing and the run records an
+        OBJECTIVE_COLUMN_MISSING event. Only checkable when the manifest
+        names the outputs."""
+        import json as _json
+
+        from ....evaluation.objective import missing_columns
+        if not output_names:
+            return
+        cfg = _json.loads(
+            (run_dir / "debug" / "run_config.json").read_text(encoding="utf-8"))
+        produced = [*output_names, *(cfg.get("provenance") or {})]
+        node = self.node
+        for key, col in missing_columns(cfg.get("objective"), produced):
+            ns = namespace or "(canonical)"
+            msg = (
+                f"The oracle registered by {delegation_id} for namespace "
+                f"{ns} does not produce the declared objective {key} "
+                f"{col!r} (it produces {list(output_names)}). Rows from it "
+                "will not count toward the objective; rename its outputs "
+                "to include it, or ignore this if the namespace is a side "
+                "probe.")
+            node._record_intervention(
+                "OBJECTIVE_COLUMN_MISSING", self.target, msg,
+                namespace=ns, column=col, key=key)
+            with node._notifications_lock:
+                node._notifications.append(f"[OBJECTIVE_COLUMN_MISSING — {msg}]")
 
     _TB_HEAD, _TB_TAIL = 1500, 3500
 

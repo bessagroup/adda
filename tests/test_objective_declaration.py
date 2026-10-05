@@ -138,3 +138,52 @@ def test_figure_of_merit_is_the_declared_best_counted_row(tmp_path):
 
 def test_figure_of_merit_ranks_nothing_when_undeclared(tmp_path):
     assert read_figure_of_merit(_run(tmp_path, None)) == {"declared": False}
+
+
+# ---- a study whose oracle is authored mid-run (no workspace/ at start) ------
+
+def test_declared_objective_with_a_not_yet_existing_oracle_starts(tmp_path):
+    (tmp_path / "r" / "debug").mkdir(parents=True)
+    ev = {"entrypoint": "workspace/data_generator.py:SupercompressibleDataGenerator"}
+    cfg = _init_canonical_store(
+        tmp_path / "r", tmp_path, evaluator_config=ev, objective_config=_DECL)
+    assert cfg["objective"] == _DECL
+    assert cfg["evaluator_output_names"] is None
+
+
+def _register(tmp_path, output_names):
+    from tests.test_registration_handoff import (
+        _build, _DataGen, _delegate_and_approve, _drop_manifest)
+    node, closures, run_dir, cfg_path = _build(tmp_path, "datagen", _DataGen())
+    cfg = json.loads(cfg_path.read_text())
+    cfg["objective"] = _DECL
+    cfg_path.write_text(json.dumps(cfg))
+    _drop_manifest(run_dir, "D001")
+    man = run_dir / "debug/delegations/D001/generators/registration.json"
+    m = json.loads(man.read_text())
+    m["output_names"] = output_names
+    m["namespace"] = "probe"
+    man.write_text(json.dumps(m))
+    out = _delegate_and_approve(
+        closures, target="datagen", intent="build", expected_report="")
+    diag = run_dir / "debug" / "diagnostics.jsonl"
+    events = [json.loads(line) for line in diag.read_text().splitlines()
+              ] if diag.exists() else []
+    notes = list(node._notifications)
+    return cfg_path, events, notes, out
+
+
+def test_registering_an_oracle_without_the_feasible_column_is_reported(tmp_path):
+    cfg_path, events, notes, out = _register(tmp_path, ["sigma_peak"])
+    missing = [e for e in events if e["error_type"] == "OBJECTIVE_COLUMN_MISSING"]
+    assert [(e["namespace"], e["column"], e["key"]) for e in missing] == [
+        ("probe", "feasible", "feasible")]
+    assert any("OBJECTIVE_COLUMN_MISSING" in n and "'feasible'" in n
+               for n in notes + [out])
+    assert "probe" in json.loads(cfg_path.read_text())["oracles"]  # not refused
+
+
+def test_registering_an_oracle_with_every_objective_column_is_silent(tmp_path):
+    _, events, notes, _ = _register(tmp_path, ["sigma_peak", "feasible"])
+    assert not [e for e in events if e["error_type"] == "OBJECTIVE_COLUMN_MISSING"]
+    assert not [n for n in notes if "OBJECTIVE_COLUMN_MISSING" in n]
