@@ -656,6 +656,21 @@ def test_a_closed_runs_timeline_is_fitted_to_the_pane_and_each_gate_says_when(tm
         assert page.locator(".tick").count() > 3
 
 
+def test_a_multi_hour_timeline_keeps_every_ruler_label_on_one_line(tmp_path, page):
+    study, run_dir = _study(tmp_path, n=1)
+    rows = [_delegation("D001", "implementer")]
+    rows[0]["started_at"] = "2026-09-17T12:00:00+00:00"
+    rows[0]["completed_at"] = "2026-09-17T15:10:00+00:00"
+    _write_jsonl(run_dir / "debug" / "delegation_log.jsonl", rows)
+    with _LiveServer(create_app(study)) as srv:
+        page.set_viewport_size({"width": 1600, "height": 1000})
+        page.goto(f"{srv.url}/ui?run={RUN}&view=timeline")
+        page.wait_for_selector(".tick")
+        labels = page.locator(".tick").all_inner_texts()
+        assert any("h" in t and "m" in t for t in labels), labels
+        assert all(page.locator(".tick").nth(i).bounding_box()["height"] < 20 for i in range(len(labels)))
+
+
 def test_data_view_draws_no_chart_and_no_lines_when_nothing_is_declared(tmp_path, page):
     study, run_dir = _study(tmp_path)
     _with_store(run_dir, objective=None)

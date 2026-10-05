@@ -151,10 +151,10 @@ kbd{font:500 var(--t-label)/1 var(--f-ui);border:1px solid var(--rule-strong);bo
 .skel div{height:var(--s5);border-radius:var(--r-ctl);background:var(--sunken)}
 
 /* ── Timeline ────────────────────────────────────────────────────────────── */
-.tl{display:grid;width:max-content;grid-template-columns:56px 1fr;padding:var(--s4) var(--s4) var(--s6) 0;position:relative}
+.tl{display:grid;width:max-content;grid-template-columns:76px 1fr;padding:var(--s4) var(--s4) var(--s6) 0;position:relative}
 .ruler{position:relative}
 .rs{position:relative;margin-top:calc(var(--lanehead) + var(--s2))}
-.ruler .tick{position:absolute;right:var(--s2);font:400 var(--t-meta)/1 var(--f-ui);color:var(--ink-3);transform:translateY(-50%)}
+.ruler .tick{position:absolute;white-space:nowrap;right:var(--s2);font:400 var(--t-meta)/1 var(--f-ui);color:var(--ink-3);transform:translateY(-50%)}
 .lanes{position:relative;border-left:1px solid var(--rule)}
 .hr{position:absolute;left:0;right:0;border-top:1px dashed var(--rule)}
 .lanehead{position:sticky;top:0;z-index:3;display:grid;background:var(--ground);border-bottom:1px solid var(--rule);height:var(--lanehead);margin-bottom:var(--s2)}
