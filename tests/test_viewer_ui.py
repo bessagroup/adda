@@ -5,6 +5,7 @@ JavaScript errors fail every browser test through the shared ``page`` fixture.
 """
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -80,9 +81,104 @@ def test_no_horizontal_scroll_on_a_phone(tmp_path, page):
 def test_unbuilt_views_say_what_will_appear(tmp_path, page):
     study, _ = _study(tmp_path)
     with _LiveServer(create_app(study)) as srv:
-        page.goto(f"{srv.url}/ui?run={RUN}&view=hypotheses")
+        page.goto(f"{srv.url}/ui?run={RUN}&view=deliverable")
         page.wait_for_selector(".empty")
         assert "isn't available" in page.locator(".empty").inner_text()
+
+
+def _ledger(run_dir, hyps):
+    notes = run_dir / "debug" / "strategizer_notes"
+    notes.mkdir(parents=True, exist_ok=True)
+    (notes / "hypotheses.json").write_text(json.dumps(hyps), encoding="utf-8")
+
+
+def _hyps():
+    return {
+        "H1": {"id": "H1", "statement": "A long statement " * 8, "prior": 0.4,
+               "prediction": "p1", "falsification_criterion": "fc1",
+               "status_log": [{"status": "OPEN", "posterior": 0.4, "ts": "2026-09-17T12:00:00+00:00"}]},
+        "H2": {"id": "H2", "statement": "second", "prior": 0.5,
+               "prediction": "p2", "falsification_criterion": "fc2",
+               "status_log": [
+                   {"status": "OPEN", "posterior": 0.5, "ts": "2026-09-17T12:00:00+00:00"},
+                   {"status": "SUPPORTED", "posterior": 0.9, "ts": "2026-09-17T12:20:00+00:00",
+                    "evidence": {"delegation": "D002"}, "validator_note": "numbers match"},
+                   {"status": "OPEN", "posterior": 0.6, "ts": "2026-09-17T12:40:00+00:00",
+                    "comment": "withdrawn: no falsification attempt"}]},
+        "H3": {"id": "H3", "statement": "third", "prior": 0.3, "status_log": [
+            {"status": "OPEN", "posterior": 0.3}, {"status": "FALSIFIED", "posterior": 0.05}]},
+    }
+
+
+def test_hypotheses_are_rows_with_status_belief_and_linked_delegations(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _ledger(run_dir, _hyps())
+    with _LiveServer(create_app(study)) as srv:
+        page.set_viewport_size({"width": 1400, "height": 900})
+        page.goto(f"{srv.url}/ui?run={RUN}&view=hypotheses")
+        page.wait_for_selector(".hrow")
+        assert page.locator(".hrow").count() == 3
+        h1 = page.locator(".hrow", has_text="H1")
+        assert "A long statement" in h1.inner_text() and h1.inner_text().count("A long statement") == 8
+        assert "open" in h1.locator(".hv").inner_text()
+        assert "40% → 40%" in h1.locator(".belief").inner_text()
+        assert "D001" in h1.locator(".hd").inner_text()
+        assert "falsified" in page.locator(".hrow", has_text="H3").locator(".hv").inner_text()
+
+
+def test_hypothesis_filter_chips_split_open_closed_and_retracted(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _ledger(run_dir, _hyps())
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=hypotheses")
+        page.wait_for_selector(".hrow")
+        for chip, ids in {"open": {"H1", "H2"}, "closed": {"H3"}, "retracted": {"H2"}}.items():
+            page.locator(f"[data-hfilter={chip}]").click()
+            got = {t.split()[0] for t in page.locator(".hrow").all_inner_texts()}
+            assert got == ids, chip
+        page.locator("[data-hfilter=all]").click()
+        assert page.locator(".hrow").count() == 3
+
+
+def test_selecting_a_hypothesis_shows_its_history_with_the_retraction_as_a_back_step(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _ledger(run_dir, _hyps())
+    with _LiveServer(create_app(study)) as srv:
+        page.set_viewport_size({"width": 1400, "height": 900})
+        page.goto(f"{srv.url}/ui?run={RUN}&view=hypotheses")
+        page.locator(".hrow", has_text="H2").click()
+        page.wait_for_selector(".ih")
+        assert "sel=H2" in page.url
+        text = page.locator("#insp").inner_text()
+        assert "fc2" in text and "p2" in text and "numbers match" in text
+        assert page.locator(".hist li").count() == 3
+        assert page.locator(".hist li.stepback").count() == 1
+        assert page.locator(".hist li.stepback").is_visible()
+        assert "withdrawn" in page.locator(".hist li.stepback").inner_text()
+
+
+def test_hypotheses_with_no_ledger_or_no_match_say_what_would_appear(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=hypotheses")
+        page.wait_for_selector(".empty")
+        assert "No hypothesis has been stated" in page.locator(".empty").inner_text()
+    _ledger(run_dir, {"H1": _hyps()["H1"]})
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=hypotheses")
+        page.locator("[data-hfilter=retracted]").click()
+        assert "No hypothesis has been retracted" in page.locator(".dnote").inner_text()
+
+
+def test_hypotheses_do_not_scroll_sideways_on_a_phone(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _ledger(run_dir, _hyps())
+    with _LiveServer(create_app(study)) as srv:
+        page.set_viewport_size({"width": 400, "height": 900})
+        page.goto(f"{srv.url}/ui?run={RUN}&view=hypotheses")
+        page.wait_for_selector(".hrow")
+        assert page.evaluate(
+            "document.documentElement.scrollWidth - document.documentElement.clientWidth") <= 0
 
 
 def _operator_hits(page):

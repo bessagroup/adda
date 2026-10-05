@@ -677,6 +677,29 @@ def test_read_hypotheses_exposes_prior_and_the_whole_status_log(tmp_path):
     assert h["status_log"][2]["validator_note"] == "retracted"
 
 
+def test_a_closed_hypothesis_returned_to_open_is_a_retraction_not_a_revision(tmp_path):
+    """SUPPORTED -> INCONCLUSIVE is a revised verdict; SUPPORTED -> OPEN
+    withdraws the claim. Only the latter is a step back, and the entry carries
+    the delegation its evidence cites."""
+    run = tmp_path / "runs" / "r1"
+    (_notes(run) / "hypotheses.json").write_text(json.dumps({
+        "H1": {"id": "H1", "statement": "s", "prior": 0.5, "status_log": [
+            {"status": "OPEN", "posterior": 0.5},
+            {"status": "SUPPORTED", "posterior": 0.8, "evidence": {"delegation": "D2"}},
+            {"status": "INCONCLUSIVE", "posterior": 0.5},
+            {"status": "OPEN", "posterior": 0.5},
+        ]},
+        "H2": {"id": "H2", "statement": "s", "prior": 0.5, "status_log": [
+            {"status": "OPEN", "posterior": 0.5}]},
+    }), encoding="utf-8")
+
+    h1, h2 = read_hypotheses(run)
+    assert [e["retraction"] for e in h1["status_log"]] == [False, False, False, True]
+    assert h1["retractions"] == 1
+    assert h1["status_log"][1]["delegation"] == "D2"
+    assert h2["retractions"] == 0
+
+
 def test_read_vitals_counts_calls_with_no_recorded_cost_as_unknown(tmp_path):
     """A call that died before its ResultMessage has cost None: unknown, which
     the header must be able to tell apart from free."""

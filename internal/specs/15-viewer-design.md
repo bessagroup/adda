@@ -137,7 +137,9 @@ When an agent is waiting on a human, a question banner (§4.4) spans the full wi
 - **Hypotheses.**
   - **Rows:** id; statement (full, wrapping); status mark plus word; a posterior bar with prior → posterior; linked delegations as id links.
   - **Selecting a row:** the inspector shows the falsification criterion, the prediction, and the full status history with validator notes. A retraction is drawn as a back-step in the history, not hidden.
-  - **Filter chips:** open · closed · retracted.
+  - **Filter chips:** all · open · closed · retracted, each with a count. *Open* means no verdict now; *closed* means a verdict now (supported, falsified or inconclusive); *retracted* means the status log ever returned a closed verdict to open, whatever the status is now. A retracted row carries a "retracted" tag.
+  - **Linked delegations:** those that carry the hypothesis plus those its evidence cites.
+  - **Empty states:** no hypothesis yet says what will appear; a filter with no match says what the filter means.
 - **Data.**
   - **Progress chart (revised 2026-10-06, after Elvis: "98% white space, I would hardly call it useful").**
     - **Default x is the evaluation number:** counted plus uncounted rows across every scored store, in time order. A toggle switches to elapsed time. Best-so-far against evaluations is the standard convergence view. It also separates evaluations that a single delegation ran in one burst, which elapsed time stacks into one column.

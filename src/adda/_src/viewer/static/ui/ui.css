@@ -359,3 +359,40 @@ a.idlink:hover{text-decoration:underline}
 .fr{border-top:1px solid var(--rule)}
 .fr .mono{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .fr .num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* ── Hypotheses (spec 15 4.3) ───────────────────────────────────────────── */
+.hyps{container-type:inline-size}
+.hlist{border:1px solid var(--rule);border-radius:var(--r-panel);background:var(--surface);overflow:hidden}
+.hrow{display:grid;grid-template-columns:44px minmax(0,1fr) 104px 132px 148px;gap:var(--s3);padding:var(--s3) var(--s4);border-top:1px solid var(--rule);cursor:pointer;align-items:start;font-size:var(--t-data)}
+.hrow:first-child{border-top:0}
+.hrow:hover{background:var(--surface-2)}
+.hrow.sel{background:var(--select-wash);box-shadow:inset 2px 0 0 var(--select)}
+.hrow .hid{font-size:var(--t-meta);color:var(--ink-2);padding-top:1px}
+.hrow .hst{line-height:1.45;min-width:0;overflow-wrap:anywhere}
+.hrow .hd{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s2);font-size:var(--t-meta);justify-content:flex-end}
+.hrow .hd a{color:var(--ink-2)}
+.hrow .none,.hist .none{color:var(--ink-3);font-size:var(--t-meta)}
+.belief{display:flex;flex-direction:column;gap:var(--s1);font-size:var(--t-meta);color:var(--ink-2);font-variant-numeric:tabular-nums}
+.belief .bar{position:relative;height:6px;border-radius:3px;background:var(--sunken)}
+.belief .bar i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--ink-2)}
+.belief .bar b{position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;background:var(--ink)}
+.chip.retr{background:transparent;border:1px solid var(--warn);color:var(--warn);margin-left:var(--s1)}
+@container (max-width:800px){
+  .hrow{grid-template-columns:40px minmax(0,1fr) auto;row-gap:var(--s2)}
+  .hrow .hst{grid-column:2 / 4}
+  .hrow .hv{grid-column:2}
+  .hrow .belief{grid-column:3;min-width:112px}
+  .hrow .hd{grid-column:2 / 4;justify-content:flex-start}
+}
+.hist{list-style:none;margin:0;padding:0 0 0 var(--s3);border-left:2px solid var(--rule)}
+.hist li{position:relative;padding:0 0 var(--s4) var(--s3)}
+.hist li::before{content:"";position:absolute;left:calc(-1 * var(--s3) - 5px);top:3px;width:8px;height:8px;border-radius:50%;background:var(--surface);border:2px solid var(--ink-3)}
+.hist li.stepback{margin-left:calc(-1 * var(--s3));padding-left:calc(var(--s3) + var(--s3));}
+.hist li.stepback::before{border-color:var(--warn);background:var(--warn)}
+.hist .hh{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
+.hist .arrow{color:var(--warn);font-weight:600}
+.hist .pp,.hist .when{font-size:var(--t-meta);color:var(--ink-3)}
+.hist p{margin:var(--s1) 0 0;font-size:var(--t-data)}
+.hist .by{font-size:var(--t-meta);color:var(--ink-3);margin-top:var(--s1)}
+.hist .vnote{margin-top:var(--s2);padding:var(--s2) var(--s3);background:var(--sunken);border-radius:var(--r-ctl);font-size:var(--t-meta);color:var(--ink-2)}
+.hist .vnote b{color:var(--ink);margin-right:var(--s1)}

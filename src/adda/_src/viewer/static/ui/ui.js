@@ -9,7 +9,6 @@ const VIEWS = [
   ["deliverable", "Deliverable"], ["logs", "Logs"], ["setup", "Setup"],
 ];
 const UNBUILT = {
-  hypotheses: ["Hypotheses", "This view isn't available in this version of the viewer yet."],
   deliverable: ["Deliverable", "This view isn't available in this version of the viewer yet."],
   logs: ["Logs", "This view isn't available in this version of the viewer yet."],
   setup: ["Setup", "This view isn't available in this version of the viewer yet."],
@@ -380,6 +379,7 @@ function paintWork() {
   const w = $("work"), top = w.scrollTop;
   if (!S.loaded) { w.innerHTML = '<div class="skel"><div></div><div></div><div></div></div>'; return; }
   if (S.view === "data") { paintData(w); return; }
+  if (S.view === "hypotheses") { w.innerHTML = hypothesesHtml(); return; }
   if (S.view !== "timeline") {
     const [t, d] = UNBUILT[S.view];
     w.innerHTML = `<div class="empty"><h3>${t}</h3><p>${d}</p></div>`; return;
@@ -516,14 +516,64 @@ function delegationHtml(d) {
     (rv ? sec("Critic review " + esc(rv.verdict || ""), `<div class="md">${md(rv.findings || "")}</div>`) : "") +
     (isGate(d) || isFB(d) ? "" : sec("Changes", files));
 }
+const hypClosed = (h) => h.status !== "OPEN";
+const hypRetracted = (h) => (h.retractions || 0) > 0;
+function hypDelegations(h) {
+  const ids = new Set(S.dels.filter((d) => (d.hypothesis_ids || []).includes(h.id)).map((d) => d.id));
+  (h.status_log || []).forEach((e) => { if (e.delegation) ids.add(e.delegation); });
+  return [...ids];
+}
+const pct = (v) => (v == null ? "—" : Math.round(v * 100) + "%");
+function beliefBar(h) {
+  const prior = h.prior, post = h.posterior;
+  const tip = `Prior ${prior == null ? "not recorded" : prior} → ${h.status === "OPEN" ? "current belief" : "posterior"} ${post == null ? "not recorded" : post}. The tick marks the prior.`;
+  return `<div class="belief" title="${esc(tip)}"><div class="bar"><i style="width:${post == null ? 0 : post * 100}%"></i>` +
+    (prior == null ? "" : `<b style="left:${prior * 100}%"></b>`) + `</div><span>${pct(prior)} → ${pct(post)}</span></div>`;
+}
+function hypothesesHtml() {
+  const all = S.ledger.hypotheses;
+  if (!all.length) {
+    return '<div class="empty"><h3>Hypotheses</h3><p>No hypothesis has been stated yet. The strategizer states each one with a prior and a falsification criterion before testing it, and it appears here with its verdict and the delegations that tested it.</p></div>';
+  }
+  const f = S.hfilter || "all";
+  const sets = { all: all, open: all.filter((h) => !hypClosed(h)), closed: all.filter(hypClosed), retracted: all.filter(hypRetracted) };
+  const chips = `<div class="seg" role="group" aria-label="Filter hypotheses">` + ["all", "open", "closed", "retracted"].map((k) =>
+    `<button data-hfilter="${k}" aria-pressed="${f === k}">${k}<small>${sets[k].length}</small></button>`).join("") + `</div>`;
+  const none = { open: "Every hypothesis has a verdict; none is open.", closed: "No hypothesis has a verdict yet.",
+    retracted: "No hypothesis has been retracted. A retraction is a verdict the strategizer later withdrew, returning the hypothesis to open." }[f];
+  const rows = sets[f].map((h) => {
+    const dels = hypDelegations(h).map((id) => `<a class="mono" href="${esc(url({ sel: id }))}" data-sel="${esc(id)}">${esc(id)}</a>`).join("");
+    return `<div class="hrow${S.sel === h.id ? " sel" : ""}" role="button" tabindex="0" data-sel="${esc(h.id)}">` +
+      `<span class="mono hid">${esc(h.id)}</span>` +
+      `<div class="hst">${esc(h.statement || "")}${hypRetracted(h) ? ` <span class="chip retr" title="This hypothesis was returned to open after a verdict.">retracted${h.retractions > 1 ? " ×" + h.retractions : ""}</span>` : ""}</div>` +
+      `<div class="hv">${stMark(hypState(h))}</div>${beliefBar(h)}` +
+      `<div class="hd">${dels || '<span class="none">none yet</span>'}</div></div>`;
+  }).join("");
+  return `<div class="data hyps"><div class="dh"><h3>Hypotheses</h3><span class="dcap">${all.length} stated · ${sets.open.length} open · ${sets.closed.length} with a verdict</span><span class="sp"></span>${chips}</div>` +
+    (rows ? `<div class="hlist">${rows}</div>` : `<p class="dnote">${none}</p>`) + `</div>`;
+}
+function historyHtml(h) {
+  const log = h.status_log || [], t0 = runT0();
+  if (!log.length) return '<p class="none">No status has been recorded.</p>';
+  return `<ol class="hist">` + log.map((e) => {
+    const t = parseT(e.ts), when = t != null && isFinite(t0) ? fmtElapsed(t - t0) : "";
+    const d = e.delegation ? `<a class="mono" href="${esc(url({ sel: e.delegation }))}" data-sel="${esc(e.delegation)}">${esc(e.delegation)}</a>` : "";
+    return `<li class="${e.retraction ? "stepback" : ""}"><div class="hh">${e.retraction ? '<span class="arrow" aria-hidden="true">↩</span>' : ""}${stMark(hypState(e))}` +
+      `${e.retraction ? '<span class="chip retr">retracted</span>' : ""}<span class="pp">${e.posterior == null ? "" : "belief " + pct(e.posterior)}</span><span class="sp"></span><span class="when">${esc(when)}</span></div>` +
+      (e.comment ? `<p>${esc(e.comment)}</p>` : "") +
+      (d || e.triggered_by ? `<div class="by">${d ? "evidence " + d : ""}${d && e.triggered_by ? " · " : ""}${e.triggered_by ? "after " + esc(e.triggered_by) : ""}</div>` : "") +
+      (e.validator_note ? `<div class="vnote"><b>Validator</b> ${esc(e.validator_note)}</div>` : "") + `</li>`;
+  }).join("") + `</ol>`;
+}
 function hypothesisHtml(h) {
-  const dels = S.dels.filter((d) => (d.hypothesis_ids || []).includes(h.id));
-  const list = dels.map((d) => `<a href="${esc(url({ sel: d.id }))}" data-sel="${esc(d.id)}"><span class="mono">${esc(d.id)}</span><span class="t">${esc(d.to_node)}</span>${stMark(delState(d))}</a>`).join("");
+  const list = hypDelegations(h).map((id) => {
+    const d = S.dels.find((x) => x.id === id);
+    return `<a href="${esc(url({ sel: id }))}" data-sel="${esc(id)}"><span class="mono">${esc(id)}</span><span class="t">${esc(d ? d.to_node : "not in this run’s delegations")}</span>${d ? stMark(delState(d)) : ""}</a>`;
+  }).join("");
   const field = (t, v) => sec(t, v ? `<p>${esc(v)}</p>` : '<p class="none">—</p>');
-  return head(h.id, stMark(hypState(h)), null, h.proposed_by ? "proposed by " + esc(h.proposed_by) : "") +
-    field("Statement", h.statement) + field("Prediction", h.prediction) +
-    field("Falsification criterion", h.falsification_criterion) +
-    (h.comment ? field("Latest comment", h.comment) : "") +
+  return head(h.id, stMark(hypState(h)), null, (h.proposed_by ? "proposed by " + esc(h.proposed_by) : "") + (h.prior != null ? (h.proposed_by ? " · " : "") + "prior " + pct(h.prior) : "")) +
+    field("Statement", h.statement) + field("Falsification criterion", h.falsification_criterion) + field("Prediction", h.prediction) +
+    sec("Status history", historyHtml(h)) +
     sec("Delegations", list ? `<div class="links">${list}</div>` : '<p class="none">No delegation has been tied to this hypothesis yet.</p>');
 }
 
@@ -826,6 +876,8 @@ document.addEventListener("scroll", (e) => {
 document.addEventListener("click", (e) => {
   const ns = e.target.closest("[data-store]");
   if (ns) { S.ns = ns.dataset.store || null; S.tscroll = 0; S.sort = null; paintWork(); return; }
+  const hf = e.target.closest("[data-hfilter]");
+  if (hf) { S.hfilter = hf.dataset.hfilter; paintWork(); return; }
   const xm = e.target.closest("[data-xmode]");
   if (xm) { S.xmode = xm.dataset.xmode; paintWork(); return; }
   const lg = e.target.closest("[data-logy]");

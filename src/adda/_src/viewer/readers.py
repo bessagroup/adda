@@ -635,6 +635,7 @@ def read_hypotheses(run_dir: Path | str) -> list[dict[str, Any]]:
             continue
         log = [e for e in h.get("status_log") or [] if isinstance(e, dict)]
         latest = log[-1] if log else {}
+        steps = _status_steps(log)
         out.append({
             "id": h.get("id", hid),
             "statement": h.get("statement", ""),
@@ -651,13 +652,35 @@ def read_hypotheses(run_dir: Path | str) -> list[dict[str, Any]]:
             "updated_at": latest.get("ts"),
             "history": len(log),
             "prior": h.get("prior"),
-            "status_log": [
-                {k: e.get(k) for k in ("ts", "status", "posterior", "comment",
-                                       "triggered_by", "validator_note")}
-                for e in log
-            ],
+            "status_log": steps,
+            "retractions": sum(1 for x in steps if x["retraction"]),
         })
     return out
+
+
+_CLOSED = {"SUPPORTED", "FALSIFIED", "INCONCLUSIVE"}
+
+
+def _status_steps(log: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The status log as the viewer draws it.
+
+    An entry that returns a closed hypothesis to OPEN is a *retraction*: the
+    claim was withdrawn, a step back rather than forward. That is ledger
+    semantics (it is what the ledger's own reopen rule is about), so it is
+    resolved here and not re-derived in the client. ``delegation`` is the
+    delegation the entry's evidence cites, if any.
+    """
+    steps, prev = [], "OPEN"
+    for e in log:
+        status = e.get("status", "OPEN")
+        steps.append({
+            **{k: e.get(k) for k in ("ts", "status", "posterior", "comment",
+                                     "triggered_by", "validator_note")},
+            "delegation": (e.get("evidence") or {}).get("delegation"),
+            "retraction": status == "OPEN" and prev in _CLOSED,
+        })
+        prev = status
+    return steps
 
 
 def read_milestones(run_dir: Path | str) -> list[dict[str, Any]]:

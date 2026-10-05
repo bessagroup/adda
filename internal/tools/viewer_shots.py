@@ -103,6 +103,40 @@ def data_shots(base: str, out: Path, problems: list[str]) -> None:
         browser.close()
 
 
+def hypothesis_shots(base: str, out: Path, problems: list[str]) -> None:
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        for wname, (w, h) in WIDTHS.items():
+            for theme in THEMES:
+                ctx = browser.new_context(viewport={"width": w, "height": h},
+                                          color_scheme=theme)
+                pg = ctx.new_page()
+                pg.on("pageerror", lambda e: problems.append(f"JS error: {e}"))
+                pg.goto(f"{base}/ui?view=hypotheses")
+                pg.wait_for_selector(".hrow, .empty", timeout=8000)
+                pg.wait_for_timeout(300)
+                pg.screenshot(path=str(out / f"hypotheses-{wname}-{theme}.png"))
+                sw = pg.evaluate("document.documentElement.scrollWidth - "
+                                 "document.documentElement.clientWidth")
+                if w <= 400 and sw > 0:
+                    problems.append(f"hypotheses-{wname}-{theme}: horizontal scroll by {sw}px")
+                if pg.locator(".hrow").count():
+                    pg.locator("[data-hfilter=retracted]").click()
+                    pg.wait_for_timeout(200)
+                    pg.screenshot(path=str(out / f"hypotheses-retracted-{wname}-{theme}.png"))
+                    pg.locator("[data-hfilter=all]").click()
+                    pick = pg.locator(".hrow:has(.retr)")
+                    row = pick.first if pick.count() else pg.locator(".hrow").first
+                    row.click()
+                    pg.wait_for_selector(".ih")
+                    pg.wait_for_timeout(300)
+                    pg.screenshot(path=str(out / f"hypotheses-selected-{wname}-{theme}.png"))
+                ctx.close()
+        browser.close()
+
+
 def banner_shots(base: str, out: Path, problems: list[str]) -> None:
     from playwright.sync_api import sync_playwright
 
@@ -138,6 +172,7 @@ def main() -> int:
     ap.add_argument("--data", action="store_true", help="shoot the Data view")
     ap.add_argument("--objective", metavar="JSON",
                     help="objective declaration (JSON file) to record on a copy of the run")
+    ap.add_argument("--hypotheses", action="store_true", help="shoot the Hypotheses view")
     ap.add_argument("--banner", action="store_true",
                     help="shoot the question banner on a fixture with a pending question")
     a = ap.parse_args()
@@ -162,8 +197,8 @@ def main() -> int:
     from playwright.sync_api import sync_playwright
 
     problems: list[str] = []
-    if a.banner or a.data:
-        (banner_shots if a.banner else data_shots)(base, out, problems)
+    if a.banner or a.data or a.hypotheses:
+        (banner_shots if a.banner else hypothesis_shots if a.hypotheses else data_shots)(base, out, problems)
         server.should_exit = True
         for p in problems:
             print("PROBLEM:", p)

@@ -1422,6 +1422,13 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   (localStorage). `/trajectory` stores now also carry `inputs` and `text` (non-numeric output columns) so a
   row inspector needs one request. The wall-clock fill turns warn past 1.5x and bad past 2x the budget.
   `viewer_shots.py --data` shoots it on a copy of a study that declares an objective.
+  **Build step 4, Hypotheses view (spec 15 4.3):** one row per hypothesis (full statement, status mark plus word,
+  prior to posterior bar with a tick at the prior, linked delegations: the ones that carry it plus the ones its
+  evidence cites). Filter chips all / open / closed / retracted with counts; a retracted hypothesis is one whose
+  status log ever returned a closed verdict to OPEN (`read_hypotheses` marks each such entry `retraction` and
+  counts them). Selecting a row opens the falsification criterion, the prediction and the full status history in
+  the inspector, each entry with its comment, evidence delegation and validator note; a retraction is drawn as a
+  back-step (indented, with a return arrow). `viewer_shots.py --hypotheses` shoots it.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);
   `agent_runtime.py`'s `AgenticRun.serve_viewer`; `pyproject.toml`'s `viewer`
