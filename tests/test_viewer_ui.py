@@ -930,6 +930,22 @@ def test_a_notebook_without_math_is_painted_once_and_never_loads_katex(tmp_path,
         assert page.evaluate("typeof window.katex") == "undefined"
 
 
+def test_the_deliverable_download_links_each_deliver_a_real_file(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _notebook(study, _nb_cells()[:1])
+    (run_dir / "debug" / "run.log").write_text("hello", encoding="utf-8")
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=deliverable")
+        page.wait_for_selector(".dh a.btn")
+        names = {}
+        for label in ("Notebook", "Debug"):
+            with page.expect_download() as dl:
+                page.locator(".dh a.btn", has_text=label).click()
+            names[label] = dl.value.suggested_filename
+        assert names["Notebook"].endswith(".ipynb") and names["Debug"].endswith("_debug.zip")
+        assert page.locator(".dh a.btn", has_text="Store").get_attribute("href").endswith("/download?what=store")
+
+
 def test_re_execute_without_the_write_token_says_the_page_is_read_only(tmp_path, page):
     study, _ = _study(tmp_path)
     _notebook(study, _nb_cells())
