@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 
 from starlette.applications import Starlette
 from starlette.responses import (
+    FileResponse,
     HTMLResponse,
     JSONResponse,
     RedirectResponse,
@@ -1231,8 +1232,12 @@ def create_app(
             return _not_found("no runs in this study yet")
         return RedirectResponse(f"/runs/{runs[0]['run_id']}", status_code=303)
 
+    async def ui_page(request):
+        return FileResponse(_STATIC_DIR / "ui" / "index.html")
+
     routes = [
         Route("/", index),
+        Route("/ui", ui_page),
         Route("/session", session),
         Route("/api/session", session_state),
         Route("/api/runs", list_runs),

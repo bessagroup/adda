@@ -1381,6 +1381,14 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   `--`, path chosen server-side), each with its changed files and +/- counts, via `safe_git`. Empty
   with `repo: null` when the study is under no repository; 502 if git fails.
   The viewer binds loopback only: any other `--host` needs `--allow-network` and prints a warning.
+  **Redesigned UI, build step 1 (spec 15):** `GET /ui` serves `static/ui/{index.html,ui.css,ui.js}`
+  alongside the old page (`/` is unchanged). Shell, title block (run, elapsed vs budget, cost with
+  unknown calls, delegation count, best row) and the Timeline with its inspector, all on the real
+  endpoints. View and selection live in the URL (`?run=&view=&sel=`); the inspector is resizable
+  (360-640 px, arrow keys on the grip), closable, Esc closes it; polling runs only while the tab is
+  visible and the run open. Views not yet built show their empty state. `tests/test_viewer_ui_tokens.py`
+  enforces contrast (AA), no colour literal outside the token blocks, and the type/spacing scale;
+  `internal/tools/viewer_shots.py` renders the views x widths x themes screenshot set.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);
   `agent_runtime.py`'s `AgenticRun.serve_viewer`; `pyproject.toml`'s `viewer`

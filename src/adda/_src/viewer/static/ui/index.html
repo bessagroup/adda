@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>adda</title>
+<link rel="stylesheet" href="/static/ui/ui.css">
+</head>
+<body>
+<div class="app" id="app">
+  <nav class="nav" aria-label="Runs">
+    <div class="brand"><b>adda</b><span id="studyname"></span></div>
+    <div class="scroll">
+      <h6>Runs</h6>
+      <div id="runlist"></div>
+    </div>
+    <div class="foot">
+      <button class="btn ghost" id="theme" title="Toggle light / dark">◐</button>
+      <button class="btn ghost" id="rail" title="Collapse the run list" aria-label="Collapse the run list">‹</button>
+      <button class="btn" disabled title="Arrives with the Setup view (build step 7)"><span class="keep-hide">New study</span></button>
+    </div>
+  </nav>
+  <div class="main">
+    <header class="title" id="title"></header>
+    <div class="notice" id="notice" hidden></div>
+    <div class="views" role="tablist" id="views"></div>
+    <div class="body" id="body">
+      <main class="work" id="work" tabindex="-1"></main>
+      <aside class="insp" id="insp" aria-label="Inspector"></aside>
+    </div>
+  </div>
+</div>
+<script src="/static/ui/ui.js"></script>
+</body>
+</html>
