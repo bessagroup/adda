@@ -83,3 +83,65 @@ def test_unbuilt_views_say_what_will_appear(tmp_path, page):
         page.goto(f"{srv.url}/ui?run={RUN}&view=data")
         page.wait_for_selector(".empty")
         assert "isn't available" in page.locator(".empty").inner_text()
+
+
+def _operator_hits(page):
+    hits = []
+    page.on("request", lambda r: hits.append(r.url) if "/operator" in r.url else None)
+    return hits
+
+
+def test_a_pending_question_is_a_banner_and_an_answer_is_sent_after_the_undo_window(tmp_path, page):
+    from adda._src.infra import operator_channel
+    study, run_dir = _study(tmp_path)
+    operator_channel.ask_question(run_dir, "strategizer", "Retest H1 on a third seed?")
+    with _LiveServer(create_app(study, token="t")) as srv:
+        page.clock.install()
+        page.goto(f"{srv.url}/session?token=t&next=/ui?run={RUN}")
+        page.wait_for_selector("#banner:not([hidden]) .q")
+        assert "strategizer" in page.locator("#banner .qh").inner_text()
+        page.fill("#banner textarea", "No, move on.")
+        page.click("#banner button")
+        page.wait_for_selector("#toast")
+        page.click("#undo")                                   # undo: nothing is sent
+        page.clock.run_for(12_000)
+        assert page.locator("#banner textarea").input_value() == "No, move on."
+        assert operator_channel.pending_questions(run_dir)
+        page.click("#banner button")
+        page.clock.run_for(11_000)
+        for _ in range(100):
+            if not operator_channel.pending_questions(run_dir):
+                break
+            page.wait_for_timeout(100)
+        assert not operator_channel.pending_questions(run_dir)
+        assert page.locator("#banner").is_hidden()
+
+
+def test_the_heartbeat_is_only_polled_by_a_visible_tab_on_an_open_run(tmp_path, page):
+    study, _ = _study(tmp_path)
+    with _LiveServer(create_app(study)) as srv:
+        page.clock.install()
+        hits = _operator_hits(page)
+        page.goto(f"{srv.url}/ui?run={RUN}")
+        page.wait_for_selector(".card")
+        page.wait_for_function("document.querySelector('#title').textContent.includes('Running')")
+        page.clock.run_for(6_000)
+        page.wait_for_timeout(300)
+        assert hits, "a visible tab on an open run must poll /operator"
+        hits.clear()
+        page.evaluate("Object.defineProperty(document,'visibilityState',{value:'hidden',configurable:true});"
+                      "document.dispatchEvent(new Event('visibilitychange'))")
+        page.clock.run_for(20_000)
+        page.wait_for_timeout(300)
+        assert not hits, "a hidden tab must never poll /operator"
+
+
+def test_a_closed_run_never_polls_the_heartbeat(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    (run_dir / "debug" / "run_status.json").write_text('{"status": "GATED"}')
+    with _LiveServer(create_app(study)) as srv:
+        hits = _operator_hits(page)
+        page.goto(f"{srv.url}/ui?run={RUN}")
+        page.wait_for_selector(".card")
+        page.wait_for_timeout(800)
+        assert not hits

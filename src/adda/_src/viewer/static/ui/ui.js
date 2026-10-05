@@ -22,7 +22,7 @@ const S = {
   runs: [], run: null, view: "timeline", sel: null,
   vitals: null, dels: [], ledger: { hypotheses: [], milestones: [] }, fom: null,
   reviews: [], evidence: {}, follow: false, timer: null, sig: "", loaded: false,
-  error: null,
+  error: null, questions: [], drafts: {}, errs: {}, holding: {}, toast: null, qsig: "",
 };
 
 /* ── helpers ─────────────────────────────────────────────────────────────── */
@@ -70,6 +70,8 @@ function runPill(status) {
   const [c, t] = m || ["live", "Running"];
   return `<span class="pill ${c}"><i></i>${t}</span>`;
 }
+const SHORT = { literature_reviewer: "literature", datagenerator: "datagen" };
+const shortRole = (r) => SHORT[r] || r;
 const isGate = (d) => String(d.id).startsWith("GATE");
 const isFB = (d) => String(d.id).startsWith("FB");
 function known() {
@@ -180,7 +182,7 @@ async function get(path) {
 function resetRun() {
   lastRun = S.run;
   S.vitals = null; S.dels = []; S.ledger = { hypotheses: [], milestones: [] };
-  S.fom = null; S.reviews = []; S.evidence = {}; S.sig = ""; S.loaded = false; S.error = null;
+  S.fom = null; S.reviews = []; S.evidence = {}; S.sig = ""; S.loaded = false; S.error = null; S.questions = []; S.qsig = "";
   clearTimeout(S.timer);
   tick();
 }
@@ -196,10 +198,18 @@ async function tick() {
       get(base + "/ledger"), get(base + "/figure_of_merit"), get(base + "/critic_reviews"), get(base + "/oracle"),
     ]);
     if (run !== S.run) return;
+    let qs = null;
+    if (!vitals.closed && visible()) {
+      try { qs = (await get(base + "/operator")).questions || []; } catch (e) { qs = null; }
+      if (run !== S.run) return;
+    }
     S.error = null; S.loaded = true;
     S.runs = runs; S.vitals = vitals; S.dels = dels; S.ledger = ledger; S.fom = fom;
     S.reviews = rev.reviews || []; S.oracle = oracle;
     const sig = JSON.stringify([runs, vitals.closed, vitals.cost_usd, vitals.calls, dels, ledger, fom, S.reviews, oracle]);
+    if (vitals.closed) S.questions = [];
+    else if (qs) S.questions = qs;
+    paintBanner();
     if (sig !== S.sig) { S.sig = sig; render(); }
   } catch (e) {
     S.error = String(e.message || e);
@@ -220,7 +230,7 @@ async function ensureEvidence(id) {
 
 /* ── rendering ───────────────────────────────────────────────────────────── */
 function render() {
-  paintNav(); paintTitle(); paintNotice(); paintViews(); paintInspector(); paintWork();
+  paintNav(); paintTitle(); paintNotice(); paintViews(); paintInspector(); paintWork(); paintBanner();
 }
 function paintNav() {
   $("studyname").textContent = S.vitals && S.vitals.study ? S.vitals.study : "";
@@ -268,6 +278,68 @@ function actionsHtml(closed) {
   return closed
     ? `<button class="btn primary" disabled title="${t}">Re-run study</button>`
     : `<button class="btn primary" disabled title="${t}">Note to run</button><button class="btn" disabled title="${t}">Stop</button>`;
+}
+function agoText(t) {
+  const m = Math.max(0, Math.floor((Date.now() / 1000 - t) / 60));
+  return m < 1 ? "just now" : m + " min ago";
+}
+function paintBanner() {
+  const b = $("banner");
+  const qs = (S.vitals && S.vitals.closed) ? [] : S.questions.filter((q) => !S.holding[q.id]);
+  const sig = qs.map((q) => q.id + "|" + q.node + "|" + q.question).join("\n");
+  b.hidden = !qs.length;
+  const dot = qs.length ? '<span class="qdot" title="A question is waiting for you"></span>' : "";
+  document.querySelectorAll(".nav a.on .qdot").forEach((e) => e.remove());
+  const on = document.querySelector(".nav a.on");
+  if (on && dot) on.insertAdjacentHTML("beforeend", dot);
+  if (sig === S.qsig) return;
+  S.qsig = sig;
+  b.innerHTML = qs.map((q) =>
+    `<div class="q" data-q="${esc(q.id)}"><div class="qh">Asked by <b>${esc(q.node)}</b> · <span class="ago" data-t="${esc(q.asked_at || 0)}">${agoText(q.asked_at || 0)}</span></div>` +
+    `<div class="qt">${esc(q.question)}</div>` +
+    `<form class="qa" data-q="${esc(q.id)}"><textarea rows="2" aria-label="Your answer to ${esc(q.id)}" placeholder="Your answer">${esc(S.drafts[q.id] || "")}</textarea>` +
+    `<button class="btn primary" type="submit">Send</button></form><div class="qe" role="alert">${esc(S.errs[q.id] || "")}</div></div>`).join("");
+}
+function showToast(q) {
+  S.toast = q.id;
+  let t = $("toast");
+  if (!t) { t = document.createElement("div"); t.id = "toast"; t.className = "toast"; t.setAttribute("role", "status"); document.body.appendChild(t); }
+  t.innerHTML = '<span>Answered · undo for <span id="tleft">10</span> s</span><button type="button" id="undo">Undo</button>';
+}
+function hideToast() { const t = $("toast"); if (t) t.remove(); S.toast = null; }
+const sendTimers = {};
+async function postAnswer(q, text) {
+  clearInterval(sendTimers[q.id]); delete sendTimers[q.id];
+  if (S.toast === q.id) hideToast();
+  const fail = (m) => { delete S.holding[q.id]; S.drafts[q.id] = text; S.errs[q.id] = m; S.qsig = ""; paintBanner(); };
+  try {
+    const r = await fetch("/api/runs/" + encodeURIComponent(S.run) + "/answer", {
+      method: "POST", headers: { "Content-Type": "application/json" }, keepalive: true,
+      body: JSON.stringify({ id: q.id, answer: text }),
+    });
+    if (r.status === 403 || r.status === 415) return fail("This page is read-only: open the /session?token=… URL printed when the viewer started to be allowed to write.");
+    if (r.status === 409) { S.questions = S.questions.filter((x) => x.id !== q.id); delete S.holding[q.id]; S.errs[q.id] = ""; S.qsig = ""; paintBanner(); return; }
+    if (!r.ok) return fail("The answer was not accepted (" + r.status + "). Your text is kept.");
+    S.questions = S.questions.filter((x) => x.id !== q.id); delete S.holding[q.id]; delete S.drafts[q.id]; delete S.errs[q.id];
+  } catch (e) { return fail("Could not reach the run. Your text is kept."); }
+  S.qsig = ""; paintBanner();
+}
+function sendAnswer(q, text) {
+  S.holding[q.id] = text; S.errs[q.id] = ""; delete S.drafts[q.id]; S.qsig = ""; paintBanner();
+  showToast(q);
+  let left = 10;
+  sendTimers[q.id] = setInterval(() => {
+    left -= 1; const e = $("tleft"); if (e) e.textContent = left;
+    if (left <= 0) postAnswer(q, text);
+  }, 1000);
+}
+function undoAnswer() {
+  const id = S.toast; if (!id) return;
+  clearInterval(sendTimers[id]); delete sendTimers[id];
+  S.drafts[id] = S.holding[id]; delete S.holding[id]; hideToast(); S.qsig = ""; paintBanner();
+}
+function flushPending() {
+  Object.keys(sendTimers).forEach((id) => { const q = S.questions.find((x) => x.id === id); if (q) postAnswer(q, S.holding[id]); });
 }
 function paintNotice() {
   const n = $("notice");
@@ -346,7 +418,7 @@ function timelineHtml() {
     const st = delState(d), left = i.slot * COL_PX + 4, h = Math.round(i.h);
     const queue = i.posted < i.a - 60
       ? `<div class="queued" style="left:${left}px;width:${COL_PX - 8}px;top:${px(i.posted)}px;height:${Math.max(4, px(i.a) - px(i.posted))}px" title="${esc(d.id)} waited ${fmtDur(i.a - i.posted)} for a free slot"></div>` : "";
-    const mark = st[1] === "done" ? "" : stMark(st);
+    const mark = st[1] === "done" ? "" : `<span class="st ${st[0]}" role="img" title="${esc(st[1])}" aria-label="${esc(st[1])}"></span>`;
     const fa = d.is_falsification_attempt ? '<span class="chip f" title="A falsification attempt">falsify</span>' : "";
     const hs = (d.hypothesis_ids || []).map((x) => `<span class="chip h">${esc(x)}</span>`).join("");
     const ev = d.evals ? `<span class="chip" title="Oracle evaluations">${esc(d.evals)} evals</span>` : "";
@@ -355,7 +427,7 @@ function timelineHtml() {
       (h >= 84 && (fa || hs || ev) ? `<div class="chips">${fa}${hs}${ev}</div>` : "");
     return queue + `<div class="card enter${S.sel === d.id ? " sel" : ""}${i.queued ? " isqueued" : ""}" role="button" tabindex="0" data-sel="${esc(d.id)}" ` +
       `style="--role:var(--r-${esc(d.to_node)});top:${px(i.a)}px;height:${h}px;left:${left}px;width:${COL_PX - 8}px">` +
-      `<div class="top"><span class="id">${esc(d.id)}</span><span class="role">${esc(d.to_node)}</span>${mark}<span class="dur">${dur}</span></div>${body}</div>`;
+      `<div class="top"><span class="id">${esc(d.id)}</span><span class="role" title="${esc(d.to_node)}">${esc(shortRole(d.to_node))}</span>${mark}<span class="dur">${dur}</span></div>${body}</div>`;
   });
   const nowLine = liveNow() ? `<div class="now" style="top:${px(now)}px"><span>now ${fmtElapsed(now - t0)}</span></div>` : "";
   return `<div class="tl"><div class="ruler"><div class="rs" style="height:${totalPx}px">${ticks.join("")}</div></div>` +
@@ -513,7 +585,21 @@ document.addEventListener("pointerup", () => {
 window.addEventListener("popstate", () => { readUrl(); resetRunIfChanged(); render(); if (S.sel) ensureEvidence(S.sel); });
 let lastRun = null;
 function resetRunIfChanged() { if (S.run !== lastRun) { lastRun = S.run; resetRun(); } }
-document.addEventListener("visibilitychange", () => { if (visible()) tick(); else clearTimeout(S.timer); });
+document.addEventListener("visibilitychange", () => { if (visible()) tick(); else { clearTimeout(S.timer); flushPending(); } });
+window.addEventListener("pagehide", flushPending);
+$("banner").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const f = e.target.closest("form"); if (!f) return;
+  const q = S.questions.find((x) => x.id === f.dataset.q), text = f.querySelector("textarea").value.trim();
+  if (q && text) sendAnswer(q, text);
+});
+$("banner").addEventListener("input", (e) => {
+  const f = e.target.closest("form"); if (f) S.drafts[f.dataset.q] = e.target.value;
+});
+$("banner").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { const f = e.target.closest("form"); if (f) f.requestSubmit(); }
+});
+document.addEventListener("click", (e) => { if (e.target.id === "undo") undoAnswer(); });
 
 $("theme").addEventListener("click", () => {
   const root = document.documentElement;
@@ -525,6 +611,7 @@ $("rail").addEventListener("click", () => {
   $("rail").textContent = on ? "›" : "‹";
 });
 setInterval(() => {
+  document.querySelectorAll("#banner .ago").forEach((a) => { a.textContent = agoText(+a.dataset.t); });
   const e = $("elapsed"); if (!e || !liveNow()) return;
   e.firstChild.nodeValue = fmtH(elapsedNow());
 }, 1000);

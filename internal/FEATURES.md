@@ -1389,6 +1389,12 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   visible and the run open. Views not yet built show their empty state. `tests/test_viewer_ui_tokens.py`
   enforces contrast (AA), no colour literal outside the token blocks, and the type/spacing scale;
   `internal/tools/viewer_shots.py` renders the views x widths x themes screenshot set.
+  **Build step 2, question banner (spec 15 4.4):** a pending operator question shows as a banner under
+  the title block on every view of that run, with an answer field and a dot on the run in the nav. The
+  heartbeat rule is enforced in the front end: `/api/runs/{id}/operator` is polled only by a visible
+  tab on an open run, never by a hidden tab or a closed run. Send shows "Answered, undo for 10 s" and
+  posts when the window ends (or at once if the tab is hidden or closed); Undo restores the text.
+  `viewer_shots.py --banner` builds a pending-question fixture and shoots it.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);
   `agent_runtime.py`'s `AgenticRun.serve_viewer`; `pyproject.toml`'s `viewer`
