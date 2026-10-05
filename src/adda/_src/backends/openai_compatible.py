@@ -180,8 +180,7 @@ def _make_glob_tool(cwd: Path | None) -> Any:
 # still-running job finished.
 # --------------------------------------------------------------------------
 
-_BASH_TIMEOUT_DEFAULT_MS = 300000    # 5 min (SDK default is 120000; ours is
-_BASH_TIMEOUT_MAX_MS = 600000        # longer for hours-scale compute). Cap = SDK max.
+_BASH_TIMEOUT_MAX_MS = 600000        # cap = SDK max
 _BASH_INLINE_CAP = 30000             # chars kept inline before spilling to a file
 
 
@@ -306,7 +305,7 @@ def _make_bash_tool(cwd: Path | None, nudge: Any = None,
 
     sess = session if session is not None else _BashSession(cwd)
 
-    def bash(command: str, timeout: int = _BASH_TIMEOUT_DEFAULT_MS,
+    def bash(command: str, timeout: int | None = None,
              run_in_background: bool = False, description: str | None = None,
              dangerouslyDisableSandbox: bool = False) -> str:
         """Run a shell command. Foreground by default; a command that exceeds
@@ -316,10 +315,12 @@ def _make_bash_tool(cwd: Path | None, nudge: Any = None,
         stdout and stderr are merged. `description` is advisory;
         `dangerouslyDisableSandbox` is accepted for SDK compatibility and has
         no effect here (Bash is not sandbox-enforced on this backend)."""
+        from ..runtime.settings import get_float
+        default_ms = int(get_float("bash_timeout_s", 120.0) * 1000)
         try:
-            timeout_ms = int(timeout)
+            timeout_ms = default_ms if timeout is None else int(timeout)
         except (TypeError, ValueError):
-            timeout_ms = _BASH_TIMEOUT_DEFAULT_MS
+            timeout_ms = default_ms
         timeout_s = max(1.0, min(timeout_ms, _BASH_TIMEOUT_MAX_MS) / 1000.0)
         if isinstance(run_in_background, str):
             run_in_background = run_in_background.strip().lower() in (

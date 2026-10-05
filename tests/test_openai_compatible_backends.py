@@ -755,23 +755,39 @@ def test_bash_tool_runs_the_loops_interpreter_first_on_path(monkeypatch):
     assert out.strip().split(os.pathsep)[0] == os.path.dirname(sys.executable)
 
 
-def test_bash_tool_backgrounds_a_command_that_outlives_its_timeout():
-    """The shell call is bounded: past ``timeout`` it returns a bash_id."""
+def test_bash_tool_backgrounds_a_command_that_outlives_the_configured_bound():
+    """One explicit knob (runtime.bash_timeout_s) bounds the shell call."""
     import time
 
     from adda._src.backends.openai_compatible import (
         _BashSession,
         _make_bash_tool,
     )
+    from adda._src.runtime import settings
 
+    settings.configure({"bash_timeout_s": 1})
     sess = _BashSession(None)
     tool = _make_bash_tool(None, session=sess)
     t0 = time.monotonic()
-    out = tool.func(command="sleep 30", timeout=1000)
     try:
+        out = tool.func(command="sleep 30")
         assert time.monotonic() - t0 < 10
         assert "bash_id" in out
     finally:
+        settings.configure({})
         for bg in list(sess._bg.values()):
             bg["proc"].kill()
             bg["proc"].wait()
+
+
+def test_both_backends_share_one_bash_bound_default_and_knob():
+    from adda._src.backends.claude import _build_session_env
+    from adda._src.runtime import settings
+
+    settings.configure({})
+    assert _build_session_env()["BASH_DEFAULT_TIMEOUT_MS"] == "120000"
+    settings.configure({"bash_timeout_s": 45})
+    try:
+        assert _build_session_env()["BASH_DEFAULT_TIMEOUT_MS"] == "45000"
+    finally:
+        settings.configure({})

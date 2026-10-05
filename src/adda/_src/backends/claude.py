@@ -394,6 +394,9 @@ def _build_session_env() -> dict:
     _bin = os.path.dirname(sys.executable)
     if _bin:
         env["PATH"] = _bin + os.pathsep + os.environ.get("PATH", "")
+    from ..runtime.settings import get_float as _get_float
+    env["BASH_DEFAULT_TIMEOUT_MS"] = str(
+        int(_get_float("bash_timeout_s", 120.0) * 1000))
     did = get_delegation_id()
     if did:
         env["F3DASM_DELEGATION_ID"] = did

@@ -225,6 +225,11 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   `studies/run_ledger.csv`. A resume under different arms raises unless
   `runtime.allow_arm_drift` is set, in which case the first arms stay in
   `arms_initial`.
+- **`runtime.bash_timeout_s` (shell-call bound, same on every backend):** seconds a
+  Bash call may run before it is moved to the background (default 120, the Claude
+  SDK's). The OpenAI-compatible/Ollama shell reads it at call time; the Claude
+  backend passes it to the SDK as `BASH_DEFAULT_TIMEOUT_MS` (`claude.py::_build_session_env`)
+  only when set. The agent's own per-call `timeout` still applies, capped at 600 s.
 - **`--set key=value` on both CLIs:** `python -m adda` and `python -m adda.watchdog`
   take a repeatable `--set` (`runtime/cli_overrides.py`), the command-line
   spelling of `AgenticRun(runtime=...)`: explicit precedence, validated against

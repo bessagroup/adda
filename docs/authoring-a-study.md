@@ -99,6 +99,7 @@ rather than silently reverting to the default.
 | `llm_retry_base` | base seconds for retry backoff | `2.0` |
 | `llm_stream_idle_timeout` | seconds of stream silence before a call is abandoned (`0` disables) | `600.0` |
 | `llm_tool_idle_timeout` | seconds a single tool call may stall (`0` disables) | `0.0` |
+| `bash_timeout_s` | seconds a shell command may run before it is moved to the background instead of blocking the agent (the agent can still pass its own `timeout`, capped at 600 s). Same default on every backend | `120.0` |
 | `llm_max_buffer_mb` | cap on a single response buffered in memory | `30.0` |
 | `thinking_display` | `summarized` or `omitted`: whether Claude's thinking comes back as a readable summary (visible in transcripts and the viewer) or empty. Newer models default to `omitted`. Billing is identical either way. Applies only to models that support adaptive thinking (Opus/Sonnet 4.6+ and the 5.x families); others are untouched | `summarized` |
 | `llm_metadata_fetch` | look up model metadata (context window, pricing) at startup | `true` |
