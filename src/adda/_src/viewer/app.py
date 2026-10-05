@@ -891,6 +891,16 @@ def create_app(
             return _not_found("PROBLEM_STATEMENT_snapshot.md not found for this run")
         return JSONResponse({"text": text})
 
+    async def get_retrospectives(request):
+        """Every retrospective split into CONSISTENCY / DECISION / FRICTION /
+        BLOCKED / TIME, plus ``missing``: the runtime's RETROSPECTIVES_MISSING
+        rows, so a node that never answered is visible rather than absent."""
+        run_id = request.path_params["run_id"]
+        run_dir = _run_dir(study_dir, run_id)
+        if run_dir is None:
+            return _not_found(f"no such run {run_id!r}")
+        return JSONResponse(readers.read_retrospectives(run_dir))
+
     async def get_node_transcripts(request):
         run_id = request.path_params["run_id"]
         name = request.path_params["name"]
@@ -1146,6 +1156,7 @@ def create_app(
         Route("/api/runs/{run_id}/notebook/reexecute", post_reexecute,
               methods=["POST"]),
         Route("/api/runs/{run_id}/problem_statement", get_problem_statement),
+        Route("/api/runs/{run_id}/retrospectives", get_retrospectives),
         Route("/api/runs/{run_id}/node/{name}/transcripts", get_node_transcripts),
         Route(
             "/api/runs/{run_id}/transcript/{key:path}/events",

@@ -1270,6 +1270,64 @@ def read_monitor_injections(run_dir: Path | str) -> list[dict[str, Any]]:
     return out
 
 
+_RETRO_SECTIONS = ("CONSISTENCY", "DECISION", "FRICTION", "BLOCKED", "TIME")
+_RETRO_HEAD = re.compile(
+    r"^[ \t]*(?:#+[ \t]+|[-*][ \t]+)?\**(" + "|".join(_RETRO_SECTIONS)
+    + r")\**[ \t]*[:\uff1a]?\**[ \t]*", re.MULTILINE)
+
+
+def _split_retrospective(text: str) -> tuple[str, dict[str, str]]:
+    """Text before the first section header, and each section's body.
+
+    Each style the agents write (``- **FRICTION**: ...``, ``**FRICTION**: ...``,
+    ``#### FRICTION: ...``) is a header; the body runs to the next header.
+    """
+    heads = list(_RETRO_HEAD.finditer(text or ""))
+    if not heads:
+        return (text or "").strip(), {}
+    sections: dict[str, str] = {}
+    for m, nxt in zip(heads, [*heads[1:], None], strict=True):
+        body = text[m.end(): nxt.start() if nxt else len(text)].strip()
+        key = m.group(1)
+        sections[key] = f"{sections[key]}\n\n{body}" if key in sections else body
+    return text[: heads[0].start()].strip(), sections
+
+
+def read_retrospectives(run_dir: Path | str) -> dict[str, Any]:
+    """Every node's retrospective, split into its sections, plus the runtime's
+    own record of retrospectives it never received.
+
+    ``missing`` is the run's ``RETROSPECTIVES_MISSING`` diagnostics rows, so a
+    node that never answered is visible instead of silently absent. A row's
+    ``delegation_id`` is set when its ``source_id`` is a delegation of this run.
+    """
+    run_dir = Path(run_dir)
+    path = run_dir / "debug" / "retrospectives.jsonl"
+    delegation_ids = {d.get("id") for d in read_delegations(run_dir)}
+    rows: list[dict[str, Any]] = []
+    if path.exists():
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(rec, dict):
+                continue
+            preamble, sections = _split_retrospective(rec.get("text") or "")
+            sid = rec.get("source_id")
+            rows.append({
+                "ts": rec.get("ts"), "source_id": sid, "role": rec.get("role"),
+                "flagged": bool(rec.get("flagged")),
+                "delegation_id": sid if sid in delegation_ids else None,
+                "preamble": preamble, "sections": sections,
+                "text": rec.get("text") or ""})
+    missing = [
+        d for d in read_diagnostics_tail(run_dir)
+        if d.get("tool") == "RETROSPECTIVES_MISSING"
+        or d.get("error_type") == "RETROSPECTIVES_MISSING"]
+    return {"retrospectives": rows, "missing": missing}
+
+
 def read_transcript(run_dir: Path | str, key: str) -> list[dict[str, Any]] | None:
     """Parsed events for one transcript file.
 

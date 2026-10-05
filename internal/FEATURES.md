@@ -1343,6 +1343,12 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   once drained) replaces the old `truncated` flag. Cursors are per store: `namespace=<name>` pages
   one store only (`namespace=` with no value is the canonical store), and `total_evals` still counts
   every store. A non-integer `after`/`limit` is a 400.
+  **Retrospectives (spec 14 2.10):** `GET /api/runs/<id>/retrospectives` returns
+  `{retrospectives, missing}`. Each retrospective is split into `sections`
+  (CONSISTENCY / DECISION / FRICTION / BLOCKED / TIME; `- **X**:`, `**X**:` and `#### X:` headers
+  all parse), with unstructured text kept in `preamble` and the raw `text` always present, plus
+  `delegation_id` when `source_id` is a delegation of the run. `missing` is the run's
+  `RETROSPECTIVES_MISSING` diagnostics rows, so a node that never answered is visible.
   The viewer binds loopback only: any other `--host` needs `--allow-network` and prints a warning.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);
