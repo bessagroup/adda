@@ -559,6 +559,21 @@ def test_data_view_draws_the_declared_objective_in_display_units(tmp_path, page)
         assert page.locator(".ih h2").inner_text().startswith("row ")
 
 
+def test_on_a_phone_the_first_output_column_is_in_view_without_scrolling(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _with_store(run_dir)
+    with _LiveServer(create_app(study)) as srv:
+        page.set_viewport_size({"width": 400, "height": 900})
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector("#tbl .thead")
+        head = page.locator("#tbl .thead > *")
+        labels = head.all_inner_texts()
+        assert not any(t.strip().lower().startswith("when") for t in labels)
+        first_out = head.nth(2).bounding_box()
+        box = page.locator("#tbl").bounding_box()
+        assert first_out["x"] <= box["x"] + box["width"] - 100, (first_out, box)
+
+
 def test_data_view_draws_no_chart_and_no_lines_when_nothing_is_declared(tmp_path, page):
     study, run_dir = _study(tmp_path)
     _with_store(run_dir, objective=None)

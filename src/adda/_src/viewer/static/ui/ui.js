@@ -992,7 +992,8 @@ function model(st) {
   return (cache[k] = { cols, byKey, t0 });
 }
 function defaultCols(st, m) {
-  const f = declaredFor(st), keys = ["#", "delegation", "when"];
+  const f = declaredFor(st), keys = ["#", "delegation"];
+  if (!window.matchMedia("(max-width: 520px)").matches) keys.push("when");
   if (f) { keys.push("out:" + f.column); if (f.feasible) keys.push("out:" + f.feasible); }
   else keys.push(...m.cols.filter((c) => c.group === "Outputs").slice(0, 2).map((c) => c.key));
   const fn = S.data.fun && S.data.fun.stores.find((x) => x.namespace === st.namespace);
