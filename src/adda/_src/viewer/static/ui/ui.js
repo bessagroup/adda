@@ -489,7 +489,7 @@ function timelineHtml() {
     const mark = st[1] === "done" ? "" : `<span class="st ${st[0]}" role="img" title="${esc(st[1])}" aria-label="${esc(st[1])}"></span>`;
     const fa = d.is_falsification_attempt ? '<span class="chip f" title="A falsification attempt">falsify</span>' : "";
     const hs = (d.hypothesis_ids || []).map((x) => `<span class="chip h">${esc(x)}</span>`).join("");
-    const ev = d.evals ? `<span class="chip" title="Oracle evaluations">${esc(d.evals)} evals</span>` : "";
+    const ev = d.evals ? `<span class="chip" title="Oracle evaluations">${esc(d.evals)} eval${d.evals === 1 ? "" : "s"}</span>` : "";
     const dur = i.queued ? "queued" : fmtDur(i.b - i.a);
     const body = (h >= 56 ? `<div class="intent">${esc(firstLine(d.task))}</div>` : "") +
       (h >= 84 && (fa || hs || ev) ? `<div class="chips">${fa}${hs}${ev}</div>` : "");

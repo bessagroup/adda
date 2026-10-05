@@ -671,6 +671,19 @@ def test_a_multi_hour_timeline_keeps_every_ruler_label_on_one_line(tmp_path, pag
         assert all(page.locator(".tick").nth(i).bounding_box()["height"] < 20 for i in range(len(labels)))
 
 
+def test_an_evaluation_count_of_one_is_singular(tmp_path, page):
+    study, run_dir = _study(tmp_path, n=1)
+    row = _delegation("D001", "datagenerator")
+    row["evals"] = 1
+    row["started_at"] = "2026-09-17T12:00:00+00:00"
+    row["completed_at"] = "2026-09-17T13:05:00+00:00"
+    _write_jsonl(run_dir / "debug" / "delegation_log.jsonl", [row])
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=timeline")
+        page.wait_for_selector(".chip[title='Oracle evaluations']")
+        assert page.locator(".chip[title='Oracle evaluations']").first.inner_text() == "1 eval"
+
+
 def test_data_view_draws_no_chart_and_no_lines_when_nothing_is_declared(tmp_path, page):
     study, run_dir = _study(tmp_path)
     _with_store(run_dir, objective=None)
