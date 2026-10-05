@@ -129,11 +129,8 @@ class ReproductionGateMixin:
         if not features.enabled("reproduction_gate"):
             return None
 
-        import json as _json
         import re
-        import shutil
         import subprocess
-        import tempfile
 
         study_dir = (
             Path(self._study_dir) if getattr(self, "_study_dir", None) is not None
@@ -170,53 +167,9 @@ class ReproductionGateMixin:
         store_dir = run_dir / "experiment_data"
         run_config = run_dir / "debug" / "run_config.json"
 
-        def _ledger_snapshot(store_root: Path) -> tuple[int, str]:
-            """(row_count, content_hash) across EVERY store under store_root:
-            the canonical/default store PLUS every design-namespace sibling
-            (store_root/<namespace>/), via the same experiment_stores()
-            aggregation QueryStore()/ScienceMonitor already use. A single-
-            store read here would miss a non-lazy write into a namespace
-            store during "reproduction" — the sandbox copy this is called
-            against is already namespace-complete (namespace stores nest
-            under store_root), only the read needs to look past the default.
-
-            content_hash is order-independent (sorted rounded values, tagged
-            by store so identical values in two different stores can't
-            false-collide) so a faithful lazy re-store doesn't false-trip it.
-            """
-            import hashlib
-
-            from ..evaluation.ledger_summary import experiment_stores
-
-            total_rows = 0
-            all_rows: list[tuple] = []
-            for store in experiment_stores(store_root):
-                try:
-                    from f3dasm import ExperimentData
-                    data = ExperimentData.from_file(project_dir=store)
-                    _, out = data.to_pandas()
-                except Exception:  # noqa: BLE001
-                    continue
-                total_rows += len(out)
-                cols = [c for c in out.columns if not str(c).startswith("_")]
-                if not cols:
-                    continue
-                vals = out[cols].round(10)
-                all_rows.extend(
-                    (store.name,) + tuple(r) for r in vals.to_numpy().tolist()
-                )
-            # key=repr, not a bare sort: a row is (store.name, *column values),
-            # and a design space can legitimately mix numeric columns with
-            # non-numeric ones (e.g. a string mechanism/family label). Two
-            # same-namespace rows that diverge at a non-numeric column crash
-            # Python's tuple comparison (float < str is undefined) the moment
-            # they're compared — repr() is always string-comparable regardless
-            # of what each column holds, and dropping non-numeric columns
-            # instead would silently weaken the reproduction hash itself.
-            h = hashlib.sha256(
-                repr(sorted(all_rows, key=repr)).encode()
-            ).hexdigest()
-            return total_rows, h
+        from ..evaluation.notebook_exec import (
+            ledger_snapshot as _ledger_snapshot,
+        )
 
         # ── HERMETIC SANDBOX ──────────────────────────────────────────────────
         # CRITICAL: run the deliverable against a COPY of the canonical store, never
@@ -232,27 +185,10 @@ class ReproductionGateMixin:
                 "evaluated yet. Run the delegation pipeline first so the "
                 "ledger is populated, then the notebook can be reproduced "
                 "lazily against those rows.")
-        sandbox = Path(tempfile.mkdtemp(prefix="f3dasm_repro_"))
-        try:
-            sb_store = sandbox / "experiment_data"
-            if store_dir.exists():
-                shutil.copytree(store_dir, sb_store)
-            else:
-                sb_store.mkdir(parents=True, exist_ok=True)
-            # A sandbox run_config so get_evaluator() also writes to the COPY
-            # (it resolves the store from run_config["store_dir"], not the env).
-            sb_run_config = sandbox / "run_config.json"
-            if run_config.exists():
-                _cfg = _json.loads(run_config.read_text())
-            else:
-                _cfg = {}
-            _cfg["store_dir"] = str(sb_store)
-            _cfg["lock_path"] = str(sb_store / "experiment_data" / ".lock")
-            sb_run_config.write_text(_json.dumps(_cfg))
-
-            from ..evaluation.notebook_exec import sandbox_env
-            env = sandbox_env(
-                sb_store, sb_run_config, study_root=self._study_dir)
+        from ..evaluation.notebook_exec import replay_sandbox
+        with replay_sandbox(
+                store_dir, run_config, self._study_dir,
+        ) as (sandbox, sb_store, env):
             _timeout = (
                 max(0.1 * self._budget_seconds, 180.0)
                 if self._budget_seconds else 300.0
@@ -271,8 +207,6 @@ class ReproductionGateMixin:
                     "finished evals and heavy refits (cache-or-load surrogates). "
                     "Make it lazy.")
             after_n, after_hash = _ledger_snapshot(sb_store)
-        finally:
-            shutil.rmtree(sandbox, ignore_errors=True)
 
         # (a) clean exit — surface a generous stderr tail for sighted debugging.
         if proc.returncode != 0:

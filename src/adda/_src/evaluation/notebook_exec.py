@@ -13,9 +13,12 @@ ShowNotebook closures (pure nbformat, name-addressed) — there is no live kerne
 from __future__ import annotations
 
 import contextlib
+import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 __all__ = [
@@ -27,6 +30,8 @@ __all__ = [
     "repair_code_cells",
     "sandbox_env",
     "stamp_run_provenance",
+    "ledger_snapshot",
+    "replay_sandbox",
 ]
 
 # Stable name for the run-provenance metadata cell (see stamp_run_provenance).
@@ -230,6 +235,86 @@ def _execute_notebook(path: Path, cwd: Path, env: dict, timeout: float):
         stdout="".join(out_parts),
         stderr="".join(err_parts),
     )
+
+
+def ledger_snapshot(store_root: Path) -> tuple[int, str]:
+    """(row_count, content_hash) across EVERY store under store_root:
+    the canonical/default store PLUS every design-namespace sibling
+    (store_root/<namespace>/), via the same experiment_stores()
+    aggregation QueryStore()/ScienceMonitor already use. A single-
+    store read here would miss a non-lazy write into a namespace
+    store during "reproduction" — the sandbox copy this is called
+    against is already namespace-complete (namespace stores nest
+    under store_root), only the read needs to look past the default.
+
+    content_hash is order-independent (sorted rounded values, tagged
+    by store so identical values in two different stores can't
+    false-collide) so a faithful lazy re-store doesn't false-trip it.
+    """
+    import hashlib
+
+    from .ledger_summary import experiment_stores
+
+    total_rows = 0
+    all_rows: list[tuple] = []
+    for store in experiment_stores(store_root):
+        try:
+            from f3dasm import ExperimentData
+            data = ExperimentData.from_file(project_dir=store)
+            _, out = data.to_pandas()
+        except Exception:  # noqa: BLE001
+            continue
+        total_rows += len(out)
+        cols = [c for c in out.columns if not str(c).startswith("_")]
+        if not cols:
+            continue
+        vals = out[cols].round(10)
+        all_rows.extend(
+            (store.name,) + tuple(r) for r in vals.to_numpy().tolist()
+        )
+    # key=repr, not a bare sort: a row is (store.name, *column values),
+    # and a design space can legitimately mix numeric columns with
+    # non-numeric ones (e.g. a string mechanism/family label). Two
+    # same-namespace rows that diverge at a non-numeric column crash
+    # Python's tuple comparison (float < str is undefined) the moment
+    # they're compared — repr() is always string-comparable regardless
+    # of what each column holds, and dropping non-numeric columns
+    # instead would silently weaken the reproduction hash itself.
+    h = hashlib.sha256(
+        repr(sorted(all_rows, key=repr)).encode()
+    ).hexdigest()
+    return total_rows, h
+
+
+@contextlib.contextmanager
+def replay_sandbox(store_dir: Path, run_config: Path, study_root):
+    """A throwaway copy of the run's ledger to replay a deliverable against.
+
+    CRITICAL: a deliverable is only ever run against a COPY of the canonical
+    store, never the live one. A faithful lazy pipeline adds nothing; a
+    NON-lazy one (re-evaluating) writes its evals into the copy, which is how
+    it is detected, while the real ledger stays pristine. Yields
+    ``(sandbox_dir, sandbox_store, env)``; the directory is removed on exit.
+    """
+    store_dir, run_config = Path(store_dir), Path(run_config)
+    sandbox = Path(tempfile.mkdtemp(prefix="f3dasm_repro_"))
+    try:
+        sb_store = sandbox / "experiment_data"
+        if store_dir.exists():
+            shutil.copytree(store_dir, sb_store)
+        else:
+            sb_store.mkdir(parents=True, exist_ok=True)
+        # A sandbox run_config so get_evaluator() also writes to the COPY (it
+        # resolves the store from run_config["store_dir"], not the env).
+        sb_run_config = sandbox / "run_config.json"
+        cfg = json.loads(run_config.read_text()) if run_config.exists() else {}
+        cfg["store_dir"] = str(sb_store)
+        cfg["lock_path"] = str(sb_store / "experiment_data" / ".lock")
+        sb_run_config.write_text(json.dumps(cfg))
+        yield sandbox, sb_store, sandbox_env(
+            sb_store, sb_run_config, study_root=study_root)
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
 
 
 def run_deliverable(path: Path, *, cwd: Path, env: dict, timeout: float):
