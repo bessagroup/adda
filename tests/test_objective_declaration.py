@@ -200,3 +200,34 @@ def test_a_manifest_without_output_names_is_reported_only_under_an_objective(tmp
     _, events, notes, out = _register(tmp_path / "b", None, objective=None)
     assert not [e for e in events if e["error_type"] == "OBJECTIVE_COLUMN_MISSING"]
     assert not any("OBJECTIVE_COLUMN_MISSING" in n for n in [*notes, out])
+
+
+_LINES = [{"value": 0.1122, "label": "1x pass bar"}, {"value": 1.122, "label": "10x target"}]
+_UNIT = {"divide_by": 0.1122, "label": "x Bessa"}
+
+
+def test_parse_keeps_lines_and_unit_label_and_the_viewer_serves_them(tmp_path):
+    raw = {**_DECL, "lines": _LINES, "unit_label": _UNIT}
+    assert parse_objective(raw) == raw
+    assert "lines" not in parse_objective(_DECL)
+    run = tmp_path / "runs" / "20260917T120000"
+    (run / "debug").mkdir(parents=True)
+    (run / "debug" / "run_config.json").write_text(json.dumps({"objective": raw}))
+    served = read_figure_of_merit(run)
+    assert served["lines"] == _LINES and served["unit_label"] == _UNIT
+
+
+@pytest.mark.parametrize("extra, msg", [
+    ({"lines": {"value": 1, "label": "a"}}, "list"),
+    ({"lines": [{"value": 1}]}, "exactly"),
+    ({"lines": [{"value": "1", "label": "a"}]}, "finite number"),
+    ({"lines": [{"value": True, "label": "a"}]}, "finite number"),
+    ({"lines": [{"value": float("inf"), "label": "a"}]}, "finite number"),
+    ({"lines": [{"value": 1, "label": "  "}]}, "non-empty"),
+    ({"unit_label": {"divide_by": 0, "label": "x"}}, "positive"),
+    ({"unit_label": {"divide_by": 2}}, "exactly"),
+    ({"unit_label": {"divide_by": 2, "label": ""}}, "non-empty"),
+])
+def test_parse_refuses_malformed_lines_and_unit_label(extra, msg):
+    with pytest.raises(ValueError, match=msg):
+        parse_objective({**_DECL, **extra})

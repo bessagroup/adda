@@ -855,7 +855,9 @@ against the SDK's cost on calls it did price.
 
 ### Declared study objective (2026-10-04)
 - **What:** optional `objective:` block in config.yaml (`column`, `direction`
-  max|min, optional `feasible` 0/1 column). Parsed and validated by
+  max|min, optional `feasible` 0/1 column, optional `lines` = labelled chart reference lines
+  `[{value, label}]` in the column's own units, optional `unit_label` = display-only axis scaling
+  `{divide_by, label}`; both validated in `parse_objective` and served by `/figure_of_merit`). Parsed and validated by
   `evaluation/objective.py::parse_objective` in `run_setup._init_canonical_store`
   (unknown key, missing direction, or a column the declared oracle does not
   produce refuses the run), recorded as `objective` in run_config.json.

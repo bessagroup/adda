@@ -191,6 +191,10 @@ objective:
   column: sigma_peak
   direction: max          # max | min
   feasible: feasible      # optional: a 0/1 output column
+  lines:                  # optional: labelled reference lines on the Data chart
+    - {value: 0.1122, label: "1x pass bar"}
+    - {value: 1.122,  label: "10x target"}
+  unit_label: {divide_by: 0.1122, label: "x Bessa"}   # optional: display scaling
 ```
 
 A design counts only if its `column` value is finite and, when `feasible` is
@@ -200,6 +204,11 @@ or the lookup's `output_columns`); an unknown name refuses the run at start.
 When the evaluator is written during the run, the start check is skipped; each
 oracle later registered without a declared column is reported to the delegating
 agent and recorded as an `OBJECTIVE_COLUMN_MISSING` diagnostics event.
+`lines` are drawn on the viewer's best-so-far chart as dashed, labelled rules;
+`value` is in the objective column's own units, `label` is any non-empty text,
+and no line is drawn unless you declare it. `unit_label` only changes how the
+viewer displays the axis, lines and values (raw value divided by `divide_by`,
+shown with `label`); the store and the ledger stay in raw units.
 Without the block the ledger records `objective: undeclared`, judges rows by
 the finite rule alone, and reports the running min and max instead of a best.
 

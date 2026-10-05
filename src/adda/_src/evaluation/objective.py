@@ -7,6 +7,9 @@
       column: sigma_peak
       direction: max          # max | min
       feasible: feasible      # optional 0/1 column; absent = finite rule only
+      lines:                  # optional reference lines on the viewer's chart
+        - {value: 0.1122, label: "1x pass bar"}
+      unit_label: {divide_by: 0.1122, label: "x Bessa"}   # optional axis scaling
 
 Nothing here is inferred: a study that declares no objective is reported as
 undeclared and its rows are judged by the finite rule alone.
@@ -17,7 +20,7 @@ import math
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-_KEYS = {"column", "direction", "feasible"}
+_KEYS = {"column", "direction", "feasible", "lines", "unit_label"}
 _DIRECTIONS = ("max", "min")
 # f3dasm marks failed designs with a large-magnitude sentinel; mirrors
 # nodes/tools/routing/store._INFEASIBLE_SENTINEL_MAG.
@@ -62,7 +65,47 @@ def parse_objective(
     out: dict[str, Any] = {"column": column, "direction": direction}
     if feasible is not None:
         out["feasible"] = feasible
+    if raw.get("lines") is not None:
+        out["lines"] = _parse_lines(raw["lines"])
+    if raw.get("unit_label") is not None:
+        out["unit_label"] = _parse_unit_label(raw["unit_label"])
     return out
+
+
+def _finite(v: Any) -> bool:
+    return (isinstance(v, (int, float)) and not isinstance(v, bool)
+            and math.isfinite(v))
+
+
+def _parse_lines(raw: Any) -> list[dict[str, Any]]:
+    """Reference lines for the chart, in the objective column's own units."""
+    if not isinstance(raw, list):
+        raise ValueError("objective.lines must be a list of {value, label}")
+    out = []
+    for i, ln in enumerate(raw):
+        if not isinstance(ln, Mapping) or set(ln) != {"value", "label"}:
+            raise ValueError(
+                f"objective.lines[{i}] must be a mapping with exactly "
+                f"'value' and 'label'")
+        if not _finite(ln["value"]):
+            raise ValueError(f"objective.lines[{i}].value must be a finite number")
+        if not isinstance(ln["label"], str) or not ln["label"].strip():
+            raise ValueError(f"objective.lines[{i}].label must be a non-empty string")
+        out.append({"value": ln["value"], "label": ln["label"]})
+    return out
+
+
+def _parse_unit_label(raw: Any) -> dict[str, Any]:
+    """Display-only axis scaling: shown value = raw value / divide_by."""
+    if not isinstance(raw, Mapping) or set(raw) != {"divide_by", "label"}:
+        raise ValueError(
+            "objective.unit_label must be a mapping with exactly "
+            "'divide_by' and 'label'")
+    if not _finite(raw["divide_by"]) or raw["divide_by"] <= 0:
+        raise ValueError("objective.unit_label.divide_by must be a positive number")
+    if not isinstance(raw["label"], str) or not raw["label"].strip():
+        raise ValueError("objective.unit_label.label must be a non-empty string")
+    return {"divide_by": raw["divide_by"], "label": raw["label"]}
 
 
 def missing_columns(
