@@ -127,9 +127,71 @@ def test_phone_controls_are_finger_sized_and_the_start_action_stays_in_view(tmp_
                 ".map(e=>(e.id||e.className)+' '+e.textContent.trim().slice(0,12))")
             assert small == [], f"{view}: controls under 40 px tall: {small}"
         page.click("#openstart")
-        page.wait_for_selector("#sheet:not([hidden]) .checks")   # the pre-flight has landed; the sheet is repainted once more after it
+        page.wait_for_selector("#sheet:not([hidden]) #dostart")
         box = page.locator("#dostart").bounding_box()
         assert box["y"] + box["height"] <= 700
+
+
+_KEEP = "(ids) => { window.__keep = Object.fromEntries(ids.map((i) => [i, document.getElementById(i)])); }"
+_KEPT = "(ids) => ids.every((i) => window.__keep[i] && window.__keep[i].isConnected && document.getElementById(i) === window.__keep[i])"
+
+
+def test_start_sheet_keeps_its_nodes_when_the_preflight_lands(tmp_path, page, monkeypatch):
+    study, run_dir = _study(tmp_path)
+    _git_study(study, monkeypatch)
+    (run_dir / "debug" / "run_status.json").write_text('{"status": "GATED"}')
+    with _LiveServer(create_app(study, token="t")) as srv:
+        page.goto(f"{srv.url}/session?token=t&next=/ui?run={RUN}")
+        page.wait_for_selector("#openstart")
+        page.evaluate("document.getElementById('openstart').click()")
+        page.evaluate(_KEEP, ["dostart"])          # the first paint, before the pre-flight
+        page.wait_for_selector("#sheet .checks")   # the pre-flight landed and repainted the sheet
+        assert page.evaluate(_KEPT, ["dostart"])
+
+
+def test_note_sheet_keeps_its_nodes_focus_and_value_through_the_async_send(tmp_path, page):
+    study, _run_dir = _study(tmp_path)
+    with _LiveServer(create_app(study, token="t")) as srv:
+        page.goto(f"{srv.url}/session?token=t&next=/ui?run={RUN}")
+        page.click("#opennote")
+        page.fill("#notetext", "a note")
+        page.evaluate(_KEEP, ["notetext", "notesel", "noteform"])
+        page.evaluate("document.getElementById('notetext').focus(); document.getElementById('noteform').requestSubmit()")
+        page.wait_for_selector("#notesheet >> text=Sent")
+        assert page.evaluate(_KEPT, ["notetext", "notesel", "noteform"])
+        assert page.evaluate("document.activeElement.id") == "notetext"
+        assert page.input_value("#notetext") == ""   # sent, so the field is cleared
+
+
+def test_new_study_sheet_keeps_its_nodes_focus_and_value_when_the_studies_list_lands(tmp_path, page, monkeypatch):
+    study, _run_dir = _study(tmp_path)
+    _git_study(study, monkeypatch)
+    with _LiveServer(create_app(study, token="t")) as srv:
+        page.goto(f"{srv.url}/session?token=t&next=/ui?run={RUN}")
+        page.evaluate("document.getElementById('opennew').click()")
+        page.evaluate("document.getElementById('nsname').focus()")
+        page.keyboard.type("typed")
+        page.evaluate(_KEEP, ["nsname", "nstpl"])
+        page.wait_for_selector("#nstpl option:nth-child(2)", state="attached")   # the list landed and repainted
+        assert page.evaluate(_KEPT, ["nsname", "nstpl"])
+        assert page.evaluate("document.activeElement.id") == "nsname"
+        assert page.input_value("#nsname") == "typed"
+
+
+def test_docs_sheet_keeps_its_nodes_focus_and_value_through_the_async_lookup(tmp_path, page):
+    study, _run_dir = _study(tmp_path)
+    with _LiveServer(create_app(study, token="t")) as srv:
+        page.goto(f"{srv.url}/session?token=t&next=/ui?run={RUN}")
+        page.click("#opendocs")
+        page.fill("#docsq", "AgenticRun")
+        page.check("#docssrc")
+        page.evaluate(_KEEP, ["docsq", "docssrc"])
+        page.focus("#docsq")
+        page.keyboard.press("Enter")
+        page.wait_for_selector("#docs pre")
+        assert page.evaluate(_KEPT, ["docsq", "docssrc"])
+        assert page.evaluate("document.activeElement.id") == "docsq"
+        assert page.input_value("#docsq") == "AgenticRun" and page.is_checked("#docssrc")
 
 
 def test_ask_docs_box_shows_the_lookup_and_closes_on_escape(tmp_path, page):

@@ -1463,6 +1463,30 @@ async function openCommit(sha) {
   }
 }
 
+/* A sheet repaints when an async answer lands. It must keep the nodes the user is touching (buttons, inputs, the focused
+   element), so the new markup is reconciled into the old tree instead of replacing it. Nodes match by position, tag and id. */
+function morph(parent, html) {
+  const t = document.createElement("template"); t.innerHTML = html;
+  syncKids(parent, t.content);
+}
+const nodeKey = (n) => n.nodeType === 1 ? n.nodeName + "#" + n.id + "." + n.className : "#" + n.nodeType;
+function syncKids(a, b) {
+  const old = Array.from(a.childNodes); let j = 0;
+  Array.from(b.childNodes).forEach((n) => {
+    let k = j; while (k < old.length && nodeKey(old[k]) !== nodeKey(n)) k++;
+    if (k === old.length) { a.insertBefore(n, old[j] || null); return; }
+    for (; j < k; j++) old[j].remove();
+    const o = old[j++];
+    if (o.nodeType !== 1) { if (o.nodeValue !== n.nodeValue) o.nodeValue = n.nodeValue; return; }
+    Array.from(o.attributes).forEach((at) => { if (!n.hasAttribute(at.name)) o.removeAttribute(at.name); });
+    Array.from(n.attributes).forEach((at) => { if (o.getAttribute(at.name) !== at.value) o.setAttribute(at.name, at.value); });
+    syncKids(o, n);
+  });
+  for (; j < old.length; j++) old[j].remove();
+}
+/* A control's typed value is state, not markup: put it back after a reconcile (a dirty field ignores its attribute). */
+function bindVals(vals) { Object.entries(vals).forEach(([id, v]) => { const e = $(id); if (e && e.value !== v) e.value = v; }); }
+
 /* Start-run sheet */
 S.sheet = { open: false, pre: null, err: null, busy: false, done: null, out: null };
 async function openSheet() {
@@ -1483,7 +1507,7 @@ function paintSheet() {
     return `<li><span class="st ${m[0]}">${m[1]}</span><div><b>${esc(c.name.replace(/_/g, " "))}</b><div class="dcap">${esc(c.detail)}${link}</div></div></li>`;
   }).join("") : "";
   const lc = p && p.launcher;
-  el.innerHTML = `<div class="dhd"><b>Start run</b><span class="sp"></span><button type="button" class="btn ghost" data-sheet-close aria-label="Close">Close</button></div><div class="sbody">` +
+  morph(el, `<div class="dhd"><b>Start run</b><span class="sp"></span><button type="button" class="btn ghost" data-sheet-close aria-label="Close">Close</button></div><div class="sbody">` +
     (!p && !s.err ? '<p class="none">Running the pre-flight…</p>' : "") + (s.err ? `<p class="st bad">${esc(s.err)}</p>` : "") +
     (p ? `<div class="kv"><span>Model</span><b>${cf && cf.model ? esc(cf.model) : dash("The committed config.yaml names no model")}</b>` +
       `<span>Budget</span><b>${cf && cf.budget_s ? fmtH(cf.budget_s) : dash("The committed config.yaml has no parseable budget")}</b></div>` +
@@ -1495,7 +1519,7 @@ function paintSheet() {
     (s.done ? `<p class="st ok">${esc(s.done)}</p>` : "") + launchOut(s.out) +
     (pendingLaunch(p) ? `<p class="dcap">Launch ${esc(pendingLaunch(p).launch_id)} has not been stopped from here.</p><button type="button" class="btn" id="stoplaunch" ${s.busy ? "disabled" : ""}>Stop launch ${esc(pendingLaunch(p).launch_id)}</button>` : "") +
     `<div class="sfoot"><button type="button" class="btn primary" id="dostart" ${!p || !p.can_start || s.busy || s.done || (lc && lc.error) ? "disabled" : ""}>${s.busy ? "Starting…" : "Start run"}</button>` +
-    (p && !p.can_start ? '<span class="dcap">Blocked checks must pass first.</span>' : "") + `</div></div>`;
+    (p && !p.can_start ? '<span class="dcap">Blocked checks must pass first.</span>' : "") + `</div></div>`);
 }
 const pendingLaunch = (p) => p && p.launcher && p.launcher.can_stop
   ? (p.launched || []).slice().reverse().find((e) => e.kind === "launcher" && e.launch_id && !e.stopped_at) : null;
@@ -1536,11 +1560,12 @@ function paintNote() {
   const live = S.dels.filter((d) => delState(d)[0] === "live");
   const opts = ['<option value="">The entry node, at its next tool call</option>'].concat(live.map((d) =>
     `<option value="${esc(d.id)}" ${d.id === s.to ? "selected" : ""}>${esc(d.id)} · ${esc(d.to_node)} (running)</option>`)).join("");
-  el.innerHTML = `<div class="dhd"><b>Note to run</b><span class="sp"></span><button type="button" class="btn ghost" data-note-close aria-label="Close">Close</button></div><div class="sbody">` +
+  morph(el, `<div class="dhd"><b>Note to run</b><span class="sp"></span><button type="button" class="btn ghost" data-note-close aria-label="Close">Close</button></div><div class="sbody">` +
     `<form id="noteform"><label class="dcap" for="notesel">Send to</label><select id="notesel" style="width:100%;min-height:40px">${opts}</select>` +
     `<label class="dcap" for="notetext">Note</label><textarea id="notetext" rows="6" style="width:100%">${esc(s.text)}</textarea>` +
     (s.err ? `<p class="st bad">${esc(s.err)}</p>` : "") + (s.sent ? `<p class="st ok">${esc(s.sent)}</p>` : "") +
-    `<div class="sfoot"><button type="submit" class="btn primary" ${s.busy ? "disabled" : ""}>${s.busy ? "Sending…" : "Send note"}</button></div></form></div>`;
+    `<div class="sfoot"><button type="submit" class="btn primary" ${s.busy ? "disabled" : ""}>${s.busy ? "Sending…" : "Send note"}</button></div></form></div>`);
+  bindVals({ notetext: s.text, notesel: s.to });
 }
 function openNote() { S.note = Object.assign(S.note, { open: true, err: null, sent: null }); paintNote(); const t = $("notetext"); if (t) t.focus(); }
 async function sendNote() {
@@ -1559,9 +1584,10 @@ S.newst = { open: false, list: null, err: null, busy: false, done: null, name: "
 function paintNew() {
   const el = $("newstudy"), s = S.newst;
   el.hidden = !s.open; if (!s.open) { el.innerHTML = ""; return; }
+  readNew();
   const opts = ['<option value="">Blank</option>'].concat((s.list || []).map((n) =>
     `<option value="${esc(n)}" ${n === s.tpl ? "selected" : ""}>Copy of ${esc(n)}${n === (S.vitals && S.vitals.study) ? " (this study)" : ""}</option>`)).join("");
-  el.innerHTML = `<div class="dhd"><b>New study</b><span class="sp"></span><button type="button" class="btn ghost" data-ns-close aria-label="Close">Close</button></div><div class="sbody">` +
+  morph(el, `<div class="dhd"><b>New study</b><span class="sp"></span><button type="button" class="btn ghost" data-ns-close aria-label="Close">Close</button></div><div class="sbody">` +
     `<form id="nsform"><label class="dcap" for="nsname">Name (letters, digits, - and _)</label><input type="text" id="nsname" class="mono" style="width:100%;min-height:40px" value="${esc(s.name)}">` +
     `<label class="dcap" for="nstpl">Start from</label><select id="nstpl" style="width:100%;min-height:40px">${opts}</select>` +
     (s.tpl ? '<p class="dcap">The problem statement and config.yaml are copied as committed to disk; edit them in the new study’s Setup.</p>' :
@@ -1570,7 +1596,8 @@ function paintNew() {
     `<label class="dcap" for="nsmsg">Commit message (required)</label><input type="text" id="nsmsg" style="width:100%;min-height:40px" placeholder="studies: add ${esc(s.name || "name")}" value="${esc(s.msg)}">` +
     (s.err ? `<p class="st bad">${esc(s.err)}</p>` : "") +
     (s.done ? `<p class="st ok">Created and committed ${esc(s.done.name)} (${esc(s.done.sha.slice(0, 7))}). To view it, run:</p><pre class="mono" style="white-space:pre-wrap">${esc(s.done.open)}</pre>` : "") +
-    `<div class="sfoot"><button type="submit" class="btn primary" ${s.busy || s.done ? "disabled" : ""}>${s.busy ? "Creating…" : "Create and commit"}</button></div></form></div>`;
+    `<div class="sfoot"><button type="submit" class="btn primary" ${s.busy || s.done ? "disabled" : ""}>${s.busy ? "Creating…" : "Create and commit"}</button></div></form></div>`);
+  bindVals({ nsname: s.name, nsmsg: s.msg, nsps: s.ps, nscfg: s.cfg });
 }
 async function openNew() {
   S.newst = Object.assign(S.newst, { open: true, err: null, done: null, busy: false });
@@ -1580,7 +1607,7 @@ async function openNew() {
 }
 function readNew() {
   const s = S.newst, v = (id) => { const x = $(id); return x ? x.value : null; };
-  s.name = v("nsname"); if (v("nsmsg") !== null) s.msg = v("nsmsg"); const t = v("nstpl"); if (t !== null) s.tpl = t;
+  if (v("nsname") !== null) s.name = v("nsname"); if (v("nsmsg") !== null) s.msg = v("nsmsg"); const t = v("nstpl"); if (t !== null) s.tpl = t;
   if (v("nsps") !== null) s.ps = v("nsps");
   if (v("nscfg") !== null) s.cfg = v("nscfg");
 }
@@ -1599,17 +1626,18 @@ S.docs = { open: false, q: "", out: null, err: null, busy: false };
 function paintDocs() {
   const el = $("docs"), s = S.docs;
   el.hidden = !s.open; if (!s.open) { el.innerHTML = ""; return; }
-  el.innerHTML = `<div class="dhd"><b>Ask the docs</b><span class="sp"></span><button type="button" class="btn ghost" data-docs-close aria-label="Close">Close</button></div><div class="sbody">` +
+  morph(el, `<div class="dhd"><b>Ask the docs</b><span class="sp"></span><button type="button" class="btn ghost" data-docs-close aria-label="Close">Close</button></div><div class="sbody">` +
     `<form id="docsform"><input type="text" id="docsq" class="mono" style="width:100%;min-height:40px" placeholder="a question, or an exact name such as AgenticRun" aria-label="Question" value="${esc(s.q)}"> ` +
     `<div class="sfoot"><button type="submit" class="btn primary" ${s.busy ? "disabled" : ""}>${s.busy ? "Looking…" : "Ask"}</button><label class="toggle"><input type="checkbox" id="docssrc"> Source</label></div></form>` +
-    (s.err ? `<p class="st bad">${esc(s.err)}</p>` : "") + (s.out != null ? `<pre class="mono" style="white-space:pre-wrap">${esc(s.out)}</pre>` : "") + `</div>`;
+    (s.err ? `<p class="st bad">${esc(s.err)}</p>` : "") + (s.out != null ? `<pre class="mono" style="white-space:pre-wrap">${esc(s.out)}</pre>` : "") + `</div>`);
+  bindVals({ docsq: s.q });
 }
 function openDocs() { S.docs.open = true; paintDocs(); const q = $("docsq"); if (q) q.focus(); }
 async function askDocs() {
   const s = S.docs, q = $("docsq").value.trim(); if (!q) return;
-  s.q = q; s.busy = true; s.err = null; const src = $("docssrc").checked; paintDocs(); $("docssrc").checked = src;
+  s.q = q; s.busy = true; s.err = null; const src = $("docssrc").checked; paintDocs();
   try { s.out = (await get("/api/docs?q=" + encodeURIComponent(q) + (src ? "&source=1" : ""))).text; } catch (e) { s.err = "The docs lookup failed (" + e.message + ")."; }
-  s.busy = false; paintDocs(); $("docssrc").checked = src;
+  s.busy = false; paintDocs();
 }
 
 /* Stop popover */
@@ -1624,14 +1652,14 @@ function paintPop() {
   el.hidden = !p.open; if (!p.open) return;
   const a = document.querySelector("[data-stop]");
   if (a) { const b = a.getBoundingClientRect(); el.style.top = Math.round(b.bottom + 6) + "px"; el.style.left = Math.max(8, Math.round(Math.min(b.left, document.documentElement.clientWidth - 328))) + "px"; }
-  el.innerHTML = `<p class="pt"><b>Stop this run?</b></p>` +
+  morph(el, `<p class="pt"><b>Stop this run?</b></p>` +
     (p.confirmKill
       ? `<p class="dcap">Kill now ends the run’s processes at once. No retrospectives are written, and the run is left unclosed.</p>` +
         `<div class="pb"><button type="button" class="btn" id="killnow" ${p.busy ? "disabled" : ""}>Kill now</button><button type="button" class="btn ghost" data-pop-back>Cancel</button></div>`
       : `<p class="dcap">The run finishes its current step, writes its retrospectives and closes.</p>` +
         `<div class="pb"><button type="button" class="btn primary" id="stopgrace" ${p.busy ? "disabled" : ""}>Stop gracefully</button>${p.canKill ? '<button type="button" class="btn ghost" data-pop-kill>Kill now…</button>' : ""}</div>` +
         (p.canKill ? "" : '<p class="dcap">Kill is offered only for a run this viewer started.</p>')) +
-    (p.msg ? `<p class="st ${p.bad ? "bad" : "ok"}">${esc(p.msg)}</p>` : "");
+    (p.msg ? `<p class="st ${p.bad ? "bad" : "ok"}">${esc(p.msg)}</p>` : ""));
 }
 async function doStop(kill) {
   const p = S.pop, run = S.run; p.busy = true; p.msg = null; paintPop();
@@ -1703,7 +1731,7 @@ document.addEventListener("change", (e) => {
 });
 let gPending = false;
 document.addEventListener("keydown", (e) => {
-  if (e.target.closest("input,textarea,select")) return;
+  if (e.target.closest("input,textarea,select") && !(e.key === "Escape" && e.target.closest(".sheet"))) return;
   if (e.key === "Escape" && S.note.open) { S.note.open = false; paintNote(); return; }
   if (e.key === "Escape" && S.newst.open) { S.newst.open = false; paintNew(); return; }
   if (e.key === "Escape" && S.docs.open) { S.docs.open = false; paintDocs(); return; }
