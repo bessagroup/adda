@@ -139,6 +139,7 @@ class RecordingMixin:
             "ts": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
             "node": self._name,
             "delegation_id": get_delegation_id(),
+            "error_type": "LLM_RETRY",
             "event": "LLM_RETRY",
             "attempt": attempt,
             "max_attempts": max_attempts,

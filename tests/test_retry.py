@@ -141,6 +141,31 @@ def test_a_retry_becomes_a_diagnostics_row_and_not_an_error_count(tmp_path):
     assert _N._error_counts == {}
 
 
+def test_every_diagnostics_row_the_recorder_writes_has_an_error_type(tmp_path):
+    import json
+    import threading
+
+    from adda._src.infra.watchdog_cleanup import _log_memory_kill
+    from adda._src.nodes.recording import RecordingMixin
+
+    class _N(RecordingMixin):
+        _name = "worker"
+        _current_notes_dir = tmp_path / "debug" / "strategizer_notes"
+        _error_counts: dict = {}
+        _registry_lock = threading.Lock()
+
+    (tmp_path / "debug").mkdir()
+    n = _N()
+    n._record_llm_retry(1, 3, TimeoutError("t"), 1.0)
+    n._record_tool_error("worker", "Bash", "ERROR_RETURN", "boom")
+    n._record_intervention("RAW_ORACLE_NUDGE", "worker", "msg")
+    n._record_science_drift({"message": "m"})
+    _log_memory_kill(tmp_path, ["D001"], 1024)
+    rows = [json.loads(x) for x in (tmp_path / "debug" / "diagnostics.jsonl").read_text().splitlines()]
+    assert len(rows) == 5
+    assert all(r.get("error_type") for r in rows), rows
+
+
 class _Signal(BaseException):
     """A control signal addressed to the run (pytest-timeout's Failed, Ctrl-C)."""
 
