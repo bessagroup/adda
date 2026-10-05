@@ -151,17 +151,20 @@ def test_declared_objective_with_a_not_yet_existing_oracle_starts(tmp_path):
     assert cfg["evaluator_output_names"] is None
 
 
-def _register(tmp_path, output_names):
+def _register(tmp_path, output_names, objective=_DECL):
     from tests.test_registration_handoff import (
         _build, _DataGen, _delegate_and_approve, _drop_manifest)
     node, closures, run_dir, cfg_path = _build(tmp_path, "datagen", _DataGen())
     cfg = json.loads(cfg_path.read_text())
-    cfg["objective"] = _DECL
+    cfg["objective"] = objective
     cfg_path.write_text(json.dumps(cfg))
     _drop_manifest(run_dir, "D001")
     man = run_dir / "debug/delegations/D001/generators/registration.json"
     m = json.loads(man.read_text())
-    m["output_names"] = output_names
+    if output_names is None:
+        m.pop("output_names")
+    else:
+        m["output_names"] = output_names
     m["namespace"] = "probe"
     man.write_text(json.dumps(m))
     out = _delegate_and_approve(
@@ -187,3 +190,13 @@ def test_registering_an_oracle_with_every_objective_column_is_silent(tmp_path):
     _, events, notes, _ = _register(tmp_path, ["sigma_peak", "feasible"])
     assert not [e for e in events if e["error_type"] == "OBJECTIVE_COLUMN_MISSING"]
     assert not [n for n in notes if "OBJECTIVE_COLUMN_MISSING" in n]
+
+
+def test_a_manifest_without_output_names_is_reported_only_under_an_objective(tmp_path):
+    _, events, notes, out = _register(tmp_path / "a", None)
+    missing = [e for e in events if e["error_type"] == "OBJECTIVE_COLUMN_MISSING"]
+    assert [(e["namespace"], e["key"]) for e in missing] == [("probe", "output_names")]
+    assert any("output_names is required" in n for n in [*notes, out])
+    _, events, notes, out = _register(tmp_path / "b", None, objective=None)
+    assert not [e for e in events if e["error_type"] == "OBJECTIVE_COLUMN_MISSING"]
+    assert not any("OBJECTIVE_COLUMN_MISSING" in n for n in [*notes, out])

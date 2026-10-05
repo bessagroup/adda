@@ -861,7 +861,8 @@ against the SDK's cost on calls it did price.
   at start) skips the start check; each later oracle registration
   (`delegation.py::_check_objective_columns`, from the manifest's `output_names`)
   that lacks a declared column writes an `OBJECTIVE_COLUMN_MISSING` diagnostics
-  event (namespace, column, key) and notifies the delegator; it never refuses a
+  event (namespace, column, key) and notifies the delegator; a manifest without
+  `output_names` is reported the same way (key `output_names`). It never refuses a
   registration. Tests: `tests/test_objective_declaration.py`.
 
 ### Run-ledger process KPIs (2026-10-04)

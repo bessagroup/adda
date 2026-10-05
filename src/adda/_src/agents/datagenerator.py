@@ -118,7 +118,7 @@ Your workspace is the debug/delegations/{delegation_id}/ folder assigned for thi
   #                                          # (an ABSOLUTE path is also honoured
   #                                          #  and is rebased on the study dir)
   #     "attr": "{name}",                    # the callable or class name
-  #     "output_names": ["y", ...]            # output cols (required for callables)
+  #     "output_names": ["y", ...]            # output cols (required)
   #   }
   # Without this manifest the implementer cannot reach your generator through
   # get_evaluator(), so writing it is mandatory.

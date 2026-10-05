@@ -1204,19 +1204,34 @@ class WorkerSession:
         """Say so when a registered oracle does not produce a declared
         objective column. Not a refusal (a namespace may be a side probe):
         the delegator is told which column is missing and the run records an
-        OBJECTIVE_COLUMN_MISSING event. Only checkable when the manifest
-        names the outputs."""
+        OBJECTIVE_COLUMN_MISSING event. A manifest that omits output_names
+        under a declared objective is reported the same way."""
         import json as _json
 
         from ....evaluation.objective import missing_columns
-        if not output_names:
-            return
         cfg = _json.loads(
             (run_dir / "debug" / "run_config.json").read_text(encoding="utf-8"))
-        produced = [*output_names, *(cfg.get("provenance") or {})]
         node = self.node
+        ns = namespace or "(canonical)"
+        if not output_names:
+            if cfg.get("objective"):
+                msg = (
+                    f"The oracle registered by {delegation_id} for namespace "
+                    f"{ns} has no output_names in its registration.json, so "
+                    "it cannot be checked against the declared objective "
+                    f"column {cfg['objective']['column']!r}. output_names is "
+                    "required because this study declares an objective; "
+                    "re-register with the outputs.")
+                node._record_intervention(
+                    "OBJECTIVE_COLUMN_MISSING", self.target, msg,
+                    namespace=ns, column=cfg["objective"]["column"],
+                    key="output_names")
+                with node._notifications_lock:
+                    node._notifications.append(
+                        f"[OBJECTIVE_COLUMN_MISSING — {msg}]")
+            return
+        produced = [*output_names, *(cfg.get("provenance") or {})]
         for key, col in missing_columns(cfg.get("objective"), produced):
-            ns = namespace or "(canonical)"
             msg = (
                 f"The oracle registered by {delegation_id} for namespace "
                 f"{ns} does not produce the declared objective {key} "
