@@ -1318,6 +1318,17 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   with the reason, never read as "none". A second launch is refused while a run is live or the
   viewer submitted one in the last 600 s. Every run (before, timeout, after with return code and
   output) is a `viewer_actions.jsonl` row (`launch` / `launch_stop`) with the exact command line.
+  **Re-execute the deliverable (spec 14 5.8):** `viewer/notebook_replay.py`.
+  `POST /api/runs/<id>/notebook/reexecute` replays the run's notebook (`readers.notebook_path`:
+  the live file only if its stamp names the run, else that run's archive) through
+  `evaluation/notebook_exec.py` against a throwaway COPY of the run's `experiment_data/`
+  (`replay_sandbox`, the same sandbox the reproduction gate uses), in a child process so the
+  kernel's environment never leaks into the server. The live ledger and the notebook file are
+  never written. Returns `passed` (the gate's contract: clean exit, zero new rows, existing rows
+  unchanged), `rows_before/after`, `reproduced`, `stdout_tail`/`stderr_tail`, `timed_out`.
+  Timeout is the gate's rule (a tenth of the wall budget, at least 180 s). One replay per study
+  at a time (409), write token required, 409 when the run has no notebook or no ledger. Audited
+  as `reexecute` rows (exact command before, outcome after).
   The viewer binds loopback only: any other `--host` needs `--allow-network` and prints a warning.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);

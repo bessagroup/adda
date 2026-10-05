@@ -31,7 +31,7 @@ from starlette.templating import Jinja2Templates
 
 from ..infra import operator_channel, stop_request
 from ..nodes.notices import split_notices
-from . import readers, run_control
+from . import notebook_replay, readers, run_control
 
 __all__ = ["create_app", "run_viewer"]
 
@@ -873,6 +873,21 @@ def create_app(
                           "to be stopped"}, status_code=404)
         return JSONResponse({"ok": out["returncode"] == 0, **out})
 
+    async def post_reexecute(request):
+        refused = _check_write(request, token)
+        if refused is not None:
+            return refused
+        run_id = request.path_params["run_id"]
+        if _run_dir(study_dir, run_id) is None:
+            return _not_found(f"no such run {run_id!r}")
+        try:
+            out = await asyncio.to_thread(
+                notebook_replay.replay_notebook, study_dir, run_id,
+                audit=lambda action, **f: _audit(study_dir, action, **f))
+        except notebook_replay.ReplayError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        return JSONResponse(out)
+
     async def post_kill(request):
         refused = _check_write(request, token)
         if refused is not None:
@@ -1172,6 +1187,8 @@ def create_app(
         Route("/api/runs/{run_id}/artifacts", get_artifacts),
         Route("/api/runs/{run_id}/artifact", get_artifact),
         Route("/api/runs/{run_id}/notebook", get_notebook),
+        Route("/api/runs/{run_id}/notebook/reexecute", post_reexecute,
+              methods=["POST"]),
         Route("/api/runs/{run_id}/problem_statement", get_problem_statement),
         Route("/api/runs/{run_id}/node/{name}/transcripts", get_node_transcripts),
         Route(

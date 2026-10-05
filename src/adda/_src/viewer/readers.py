@@ -23,6 +23,7 @@ from typing import Any
 from ..infra.delegation_log import DelegationLog
 
 __all__ = [
+    "notebook_path",
     "read_runs",
     "read_delegations",
     "read_diagnostics_tail",
@@ -1068,10 +1069,8 @@ def _normalize_output(out: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def read_notebook(
-    study_dir: Path | str, run_id: str,
-) -> dict[str, Any] | None:
-    """The deliverable notebook belonging to *run_id*, or ``None``.
+def notebook_path(study_dir: Path | str, run_id: str) -> Path | None:
+    """The file of the deliverable notebook belonging to *run_id*, or ``None``.
 
     ``pipeline.ipynb`` is STUDY-scoped, not run-scoped: it lives at
     ``<study_dir>/pipeline.ipynb`` and a fresh run archives any prior one to
@@ -1111,6 +1110,15 @@ def read_notebook(
         )
         if archived:
             path = archived[0]
+    return path
+
+
+def read_notebook(
+    study_dir: Path | str, run_id: str,
+) -> dict[str, Any] | None:
+    """The deliverable notebook belonging to *run_id* as cells, or ``None``
+    (see :func:`notebook_path` for which file that is)."""
+    path = notebook_path(study_dir, run_id)
     if path is None:
         return None
 
@@ -1137,7 +1145,7 @@ def read_notebook(
                 "outputs": [o for o in outs if o is not None],
             })
     return {"cells": cells, "path": str(path),
-            "live": path == live, "error": None}
+            "live": path == Path(study_dir) / "pipeline.ipynb", "error": None}
 
 
 # Logs a client may ask for, by name. A name, never a path: the file is
