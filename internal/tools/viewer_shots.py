@@ -46,6 +46,61 @@ def question_fixture(study: Path) -> Path:
     return root
 
 
+def data_fixture(study: Path) -> Path:
+    """A copy of `study` whose newest run declares an objective, so the Data
+    view has something to draw. The study's own config is untouched."""
+    root = Path(tempfile.mkdtemp(prefix="adda_data_")) / study.name
+    shutil.copytree(study, root)
+    run_dir = sorted((root / "runs").iterdir())[-1]
+    cfg_path = run_dir / "debug" / "run_config.json"
+    cfg = json.loads(cfg_path.read_text())
+    cfg["objective"] = {
+        "column": "sigma_peak", "direction": "max", "feasible": "feasible",
+        "lines": [{"value": 0.1122, "label": "1x pass bar"},
+                  {"value": 1.122, "label": "10x target"}],
+        "unit_label": {"divide_by": 0.1122, "label": "x Bessa"},
+    }
+    cfg_path.write_text(json.dumps(cfg))
+    return root
+
+
+def data_shots(base: str, out: Path, problems: list[str]) -> None:
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        for wname, (w, h) in WIDTHS.items():
+            for theme in THEMES:
+                ctx = browser.new_context(viewport={"width": w, "height": h},
+                                          color_scheme=theme)
+                pg = ctx.new_page()
+                pg.on("pageerror", lambda e: problems.append(f"JS error: {e}"))
+                pg.goto(f"{base}/ui?view=data")
+                pg.wait_for_selector(".cht, .dnote", timeout=8000)
+                pg.wait_for_selector(".trow", timeout=8000)
+                pg.wait_for_timeout(400)
+                pg.screenshot(path=str(out / f"data-{wname}-{theme}.png"))
+                if w > 400:
+                    pg.locator(".cht .dot.f").nth(3).hover(force=True)
+                    pg.wait_for_selector("#tip:not([hidden])")
+                    pg.screenshot(path=str(out / f"data-hover-{wname}-{theme}.png"))
+                    pg.locator(".cht .dot.f").nth(3).click(force=True)
+                    pg.wait_for_selector(".ih")
+                    pg.wait_for_timeout(300)
+                    pg.screenshot(path=str(out / f"data-selected-{wname}-{theme}.png"))
+                    pg.goto(f"{base}/ui?view=data")
+                    pg.wait_for_selector(".seg")
+                    pg.locator(".seg button").nth(1).click()
+                    pg.wait_for_timeout(300)
+                    pg.screenshot(path=str(out / f"data-ns2-{wname}-{theme}.png"))
+                sw = pg.evaluate("document.documentElement.scrollWidth - "
+                                 "document.documentElement.clientWidth")
+                if w <= 400 and sw > 0:
+                    problems.append(f"data-{wname}-{theme}: horizontal scroll by {sw}px")
+                ctx.close()
+        browser.close()
+
+
 def banner_shots(base: str, out: Path, problems: list[str]) -> None:
     from playwright.sync_api import sync_playwright
 
@@ -78,13 +133,16 @@ def main() -> int:
     ap.add_argument("--run")
     ap.add_argument("--sel", help="selection for the timeline shot")
     ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--data", action="store_true",
+                    help="shoot the Data view on a copy whose run declares an objective")
     ap.add_argument("--banner", action="store_true",
                     help="shoot the question banner on a fixture with a pending question")
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    study = question_fixture(Path(a.study)) if a.banner else Path(a.study)
+    study = (question_fixture(Path(a.study)) if a.banner
+             else data_fixture(Path(a.study)) if a.data else Path(a.study))
     cfg = uvicorn.Config(create_app(study), host="127.0.0.1",
                          port=a.port, log_level="error")
     server = uvicorn.Server(cfg)
@@ -100,8 +158,8 @@ def main() -> int:
     from playwright.sync_api import sync_playwright
 
     problems: list[str] = []
-    if a.banner:
-        banner_shots(base, out, problems)
+    if a.banner or a.data:
+        (banner_shots if a.banner else data_shots)(base, out, problems)
         server.should_exit = True
         for p in problems:
             print("PROBLEM:", p)

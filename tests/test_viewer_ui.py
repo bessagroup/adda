@@ -80,7 +80,7 @@ def test_no_horizontal_scroll_on_a_phone(tmp_path, page):
 def test_unbuilt_views_say_what_will_appear(tmp_path, page):
     study, _ = _study(tmp_path)
     with _LiveServer(create_app(study)) as srv:
-        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.goto(f"{srv.url}/ui?run={RUN}&view=hypotheses")
         page.wait_for_selector(".empty")
         assert "isn't available" in page.locator(".empty").inner_text()
 
@@ -145,3 +145,85 @@ def test_a_closed_run_never_polls_the_heartbeat(tmp_path, page):
         page.wait_for_selector(".card")
         page.wait_for_timeout(800)
         assert not hits
+
+
+OBJECTIVE = {
+    "column": "sigma", "direction": "max", "feasible": "feasible",
+    "lines": [{"value": 2.0, "label": "2x pass bar"}],
+    "unit_label": {"divide_by": 2.0, "label": "x ref"},
+}
+
+
+def _with_store(run_dir, n=6, objective=OBJECTIVE):
+    """A canonical store of `n` rows: sigma = row index, odd rows infeasible."""
+    import json
+    cfg = {"objective": objective} if objective else {}
+    (run_dir / "debug" / "run_config.json").write_text(json.dumps(cfg))
+    data = run_dir / "experiment_data" / "experiment_data"
+    data.mkdir(parents=True)
+    (data / "domain.json").write_text(json.dumps({"input_space": {"x": {}}}))
+    (data / "input.csv").write_text(",x\n" + "".join(f"{i},{i * 0.5}\n" for i in range(n)))
+    (data / "output.csv").write_text(
+        ",sigma,feasible,note,_delegation_id,_ts\n" + "".join(
+            f"{i},{i + 1},{int(i % 2 == 0)},n{i},D00{i % 3 + 1},2026-09-17T12:{i:02d}:00+00:00\n"
+            for i in range(n)))
+    (data / "jobs.csv").write_text(",0\n" + "".join(f"{i},FINISHED\n" for i in range(n)))
+
+
+def test_data_view_draws_the_declared_objective_in_display_units(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _with_store(run_dir)
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector("svg.cht")
+        assert page.locator(".cht .dot.f").count() == 3
+        # the axis follows the counted rows; the infeasible row above it is reported, not drawn
+        assert page.locator(".cht .dot.i").count() == 2
+        assert "1 outside the axis" in page.locator(".dcap", has_text="outside the axis").inner_text()
+        assert "2x pass bar" in page.locator(".cht .refl").text_content()
+        assert page.locator(".cht .ylab").text_content() == "x ref"   # one scaling, in one place
+        assert "Best so far" in page.locator(".dh h3").first.inner_text()
+        page.locator(".cht .dot.f").first.click(force=True)
+        page.wait_for_selector(".ih")
+        assert "sel=row%3A" in page.url
+        assert page.locator(".ih h2").inner_text().startswith("row ")
+
+
+def test_data_view_draws_no_chart_and_no_lines_when_nothing_is_declared(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _with_store(run_dir, objective=None)
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector(".dnote")
+        assert page.locator("svg.cht").count() == 0
+        assert "declares no objective" in page.locator(".dnote").first.inner_text()
+
+
+def test_the_store_table_is_virtual_sorts_and_remembers_its_columns(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _with_store(run_dir, n=600)
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector(".trow")
+        assert 0 < page.locator(".trow").count() < 80
+        assert page.locator(".trow").first.get_attribute("data-row") == "599"
+        page.click('.th[data-sort="#"]')
+        assert page.locator(".trow").first.get_attribute("data-row") == "0"
+        page.click(".picker summary")
+        page.check('[data-col="in:x"]')
+        page.wait_for_selector('.th[data-sort="in:x"]')
+        page.reload()
+        page.wait_for_selector('.th[data-sort="in:x"]')
+
+
+def test_the_wall_clock_fill_warns_past_one_and_a_half_and_fails_past_two(tmp_path, page):
+    import time
+    for hours, tone in ((0.5, ""), (1.7, "warn"), (2.3, "bad")):
+        (tmp_path / str(hours)).mkdir()
+        study, run_dir = _study(tmp_path / str(hours))
+        (study / "config.yaml").write_text("budget: '01:00:00'\n")
+        (run_dir / "debug" / "run_started_at").write_text(str(time.time() - hours * 3600))
+        with _LiveServer(create_app(study)) as srv:
+            page.goto(f"{srv.url}/ui?run={RUN}")
+            page.wait_for_selector(".clock b")
+            assert (page.locator(".clock b").get_attribute("class") or "") == tone, hours

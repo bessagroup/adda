@@ -1397,6 +1397,14 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   tab on an open run, never by a hidden tab or a closed run. Send shows "Answered, undo for 10 s" and
   posts when the window ends (or at once if the tab is hidden or closed); Undo restores the text.
   `viewer_shots.py --banner` builds a pending-question fixture and shoots it.
+  **Build step 3, Data view (spec 15 4.3):** best-so-far over elapsed time from the declared objective
+  (`/figure_of_merit` + `/trajectory`), reference lines only from `objective.lines`, display scaling only
+  from `objective.unit_label` (one function, `disp`); feasible dots filled in the producing role's colour,
+  infeasible hollow, click selects `sel=row:N`. The funnel (`/funnel`) shows each stage's cumulative and
+  "alone" counts. The store table is virtualised, sortable, with a column picker remembered per viewer
+  (localStorage). `/trajectory` stores now also carry `inputs` and `text` (non-numeric output columns) so a
+  row inspector needs one request. The wall-clock fill turns warn past 1.5x and bad past 2x the budget.
+  `viewer_shots.py --data` shoots it on a copy of a study that declares an objective.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);
   `agent_runtime.py`'s `AgenticRun.serve_viewer`; `pyproject.toml`'s `viewer`
