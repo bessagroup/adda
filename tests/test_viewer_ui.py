@@ -82,4 +82,4 @@ def test_unbuilt_views_say_what_will_appear(tmp_path, page):
     with _LiveServer(create_app(study)) as srv:
         page.goto(f"{srv.url}/ui?run={RUN}&view=data")
         page.wait_for_selector(".empty")
-        assert "will appear" in page.locator(".empty").inner_text()
+        assert "isn't available" in page.locator(".empty").inner_text()

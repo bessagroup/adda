@@ -8,18 +8,14 @@ const VIEWS = [
   ["timeline", "Timeline"], ["hypotheses", "Hypotheses"], ["data", "Data"],
   ["deliverable", "Deliverable"], ["logs", "Logs"], ["setup", "Setup"],
 ];
-const LANES = [
-  ["literature_reviewer", "Literature"], ["datagenerator", "Data"],
-  ["implementer", "Implementer"], ["critic", "Critic"],
-];
 const UNBUILT = {
-  hypotheses: ["Hypotheses", "Every hypothesis with its prediction, falsification criterion and verdict history will appear here, arriving with build step 4."],
-  data: ["Data", "The oracle store's rows, the trajectory and the funnel will appear here, arriving with build step 3."],
-  deliverable: ["Deliverable", "The run's pipeline notebook, rendered, will appear here once the run has one, arriving with build step 5."],
-  logs: ["Logs", "The run log, diagnostics and agent transcripts will appear here, arriving with build step 6."],
-  setup: ["Setup", "The study's problem statement, configuration and launch controls will appear here, arriving with build step 7."],
+  hypotheses: ["Hypotheses", "This view isn't available in this version of the viewer yet."],
+  data: ["Data", "This view isn't available in this version of the viewer yet."],
+  deliverable: ["Deliverable", "This view isn't available in this version of the viewer yet."],
+  logs: ["Logs", "This view isn't available in this version of the viewer yet."],
+  setup: ["Setup", "This view isn't available in this version of the viewer yet."],
 };
-const HOUR_PX = 84, MIN_CARD = 76, POLL_MS = 5000;
+const HOUR_PX = 96, MIN_CARD = 26, POLL_MS = 5000;
 const $ = (id) => document.getElementById(id);
 
 const S = {
@@ -46,6 +42,7 @@ function fmtDur(sec) {
   if (sec >= 60) return Math.floor(sec / 60) + " m";
   return sec + " s";
 }
+function fmtH(sec) { return sec == null ? "—" : (sec / 3600).toFixed(1) + " h"; }
 function fmtElapsed(sec) { return sec == null ? "—" : "+" + fmtDur(sec); }
 function fmtCost(v) { return v == null ? "—" : "$" + (v >= 10 ? Math.round(v) : v.toFixed(2)); }
 function fmtTokens(n) { return n == null ? "—" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : String(n); }
@@ -194,15 +191,15 @@ async function tick() {
   const run = S.run;
   try {
     const base = "/api/runs/" + encodeURIComponent(run);
-    const [runs, vitals, dels, ledger, fom, rev] = await Promise.all([
+    const [runs, vitals, dels, ledger, fom, rev, oracle] = await Promise.all([
       get("/api/runs"), get(base + "/vitals"), get(base + "/delegations"),
-      get(base + "/ledger"), get(base + "/figure_of_merit"), get(base + "/critic_reviews"),
+      get(base + "/ledger"), get(base + "/figure_of_merit"), get(base + "/critic_reviews"), get(base + "/oracle"),
     ]);
     if (run !== S.run) return;
     S.error = null; S.loaded = true;
     S.runs = runs; S.vitals = vitals; S.dels = dels; S.ledger = ledger; S.fom = fom;
-    S.reviews = rev.reviews || [];
-    const sig = JSON.stringify([runs, vitals.closed, vitals.cost_usd, vitals.calls, dels, ledger, fom, S.reviews]);
+    S.reviews = rev.reviews || []; S.oracle = oracle;
+    const sig = JSON.stringify([runs, vitals.closed, vitals.cost_usd, vitals.calls, dels, ledger, fom, S.reviews, oracle]);
     if (sig !== S.sig) { S.sig = sig; render(); }
   } catch (e) {
     S.error = String(e.message || e);
@@ -245,7 +242,7 @@ function paintTitle() {
   if (!v) { $("title").innerHTML = `<div><div class="lbl">Run</div><div class="runid mono">${esc(S.run || "—")}</div></div>`; return; }
   const status = run ? run.status : null;
   const budget = v.budget_s, el = elapsedNow();
-  const frac = budget && el != null ? Math.min(1, el / budget) : null;
+  const frac = budget && el != null ? Math.min(1, el / (2 * budget)) : null;
   const done = S.dels.filter((d) => delState(d)[0] === "ok").length;
   const running = S.dels.filter((d) => delState(d)[0] === "live").length;
   const fom = S.fom && S.fom.declared && S.fom.n_counted ? S.fom : null;
@@ -254,18 +251,23 @@ function paintTitle() {
   $("title").innerHTML =
     `<div><div class="lbl">Run</div><div class="runid"><span class="mono">${esc(S.run)}</span>${runPill(status)}</div>` +
     `<div class="who" title="Study and model, from the study's config.yaml">${esc(who)}</div></div>` +
-    `<div><div class="lbl">Elapsed</div><div class="vital" id="elapsed">${fmtDur(el)}` +
-    (budget ? `<small>of ${fmtDur(budget)}</small>` : `<small title="The study's config.yaml declares no parseable budget">no budget</small>`) + `</div>` +
-    (frac != null ? `<div class="clock" title="${Math.round(frac * 100)}% of the wall-clock budget"><b style="width:${(frac * 100).toFixed(1)}%"></b></div>` : "") + `</div>` +
+    `<div><div class="lbl">Wall clock</div><div class="vital" id="elapsed">${fmtH(el)}` +
+    (budget ? `<small>/ ${fmtH(budget)}</small>` : `<small title="The study's config.yaml declares no parseable budget">no budget</small>`) + `</div>` +
+    (frac != null ? `<div class="clock" title="Track spans 2× the budget: 1× is the budget, 1.5× no new delegations, 2× stop"><b style="width:${(frac * 100).toFixed(1)}%"></b>` +
+      [["1×", 50], ["1.5×", 75], ["2×", 100]].map((t) => `<u style="left:${t[1]}%"></u><em style="left:${t[1]}%">${t[0]}</em>`).join("") + `</div>` : "") + `</div>` +
     `<div><div class="lbl">Cost</div><div class="vital" title="Summed over metered calls; calls with no price are counted separately">${fmtCost(v.cost_usd)}${unknown}</div></div>` +
     `<div><div class="lbl">Delegations</div><div class="vital">${S.dels.filter((d) => !isGate(d) && !isFB(d)).length}` +
     `<small>${running ? done + " done · " + running + " running" : "all done"}</small></div></div>` +
     `<div><div class="lbl">Best row · ${fom ? esc(fom.column) : "objective"}</div>` +
-    (fom ? `<button class="vital link mono" data-sel="row:${fom.row}" title="The store's best row by the declared objective (${esc(fom.direction)}). It is not the run's headline claim.">${esc(String(+(+fom.value).toPrecision(4)))}</button>`
-      : `<div class="vital">${dash(S.fom && S.fom.declared ? "No counted rows in the store yet" : "The study declares no objective column")}</div>`) + `</div>` +
-    `<div><button class="btn" disabled title="Arrives with build step 7 (write actions)">Note</button>` +
-    `<button class="btn" disabled title="Arrives with build step 7 (write actions)">Stop</button>` +
-    `<button class="btn" disabled title="Arrives with build step 7 (write actions)">Re-run</button></div>`;
+    (fom ? `<button class="vital link" data-sel="row:${fom.row}" title="The store's best row by the declared objective (${esc(fom.direction)}). It is not the run's headline claim.">${esc(String(+(+fom.value).toPrecision(4)))}</button>`
+      : `<div class="vital">${dash(!S.fom || !S.fom.declared ? "No objective declared for this study" : S.oracle && S.oracle.registered === false ? "No oracle registered for this run" : "No counted rows in the store yet")}</div>`) + `</div>` +
+    `<div>${actionsHtml(v.closed)}</div>`;
+}
+function actionsHtml(closed) {
+  const t = "This action isn't available in this version of the viewer yet.";
+  return closed
+    ? `<button class="btn primary" disabled title="${t}">Re-run study</button>`
+    : `<button class="btn primary" disabled title="${t}">Note to run</button><button class="btn" disabled title="${t}">Stop</button>`;
 }
 function paintNotice() {
   const n = $("notice");
@@ -300,64 +302,65 @@ function runT0() {
     Math.min(...S.dels.map((d) => parseT(d.started_at)).filter((x) => x != null));
 }
 function timelineHtml() {
-  const v = S.vitals;
-  const t0 = runT0();
-  const now = Date.now() / 1000;
+  const v = S.vitals, t0 = runT0(), now = Date.now() / 1000;
   const items = [];
   S.dels.forEach((d) => {
-    const a = parseT(d.started_at); if (a == null) return;
-    const b = d.completed_at ? parseT(d.completed_at) : now;
-    if (isGate(d)) { items.push({ d, kind: "gate", a: b ?? a, b: b ?? a }); return; }
-    const lane = LANES.findIndex((l) => l[0] === d.to_node);
-    if (lane < 0) return;
-    items.push({ d, kind: "card", lane, a, b: Math.max(b ?? a, a) });
+    const posted = parseT(d.started_at); if (posted == null) return;
+    const done = d.completed_at ? parseT(d.completed_at) : now;
+    if (isGate(d)) { items.push({ d, kind: "gate", a: done ?? posted }); return; }
+    const queued = "session_started_at" in d && d.session_started_at === null;
+    const begun = queued ? now : (parseT(d.session_started_at) ?? posted);
+    items.push({ d, kind: "card", queued, posted, a: begun, b: Math.max(done ?? begun, begun) });
   });
-  const end = Math.max(...items.map((i) => i.b), v.closed && v.elapsed_s ? t0 + v.elapsed_s : 0, now * (v.closed ? 0 : 1));
+  const end = Math.max(...items.map((i) => i.b ?? i.a), v.closed && v.elapsed_s ? t0 + v.elapsed_s : 0, v.closed ? 0 : now);
   const hours = Math.max(1, Math.ceil((end - t0) / 3600));
   const px = (t) => ((t - t0) / 3600) * HOUR_PX;
-  // pack overlapping cards into sub-columns within each lane; a lane is as wide as its busiest moment
-  const laneSubs = LANES.map(() => 1);
-  LANES.forEach((_, li) => {
-    const col = []; const cs = items.filter((i) => i.kind === "card" && i.lane === li).sort((x, y) => x.a - y.a);
-    cs.forEach((c) => {
-      c.h = Math.max(MIN_CARD, px(c.b) - px(c.a));
-      let k = col.findIndex((endPx) => endPx <= px(c.a) - 2);
-      if (k < 0) { k = col.length; col.push(0); }
-      col[k] = px(c.a) + c.h + 4; c.sub = k;
-    });
-    laneSubs[li] = Math.max(1, col.length);
+  // slots from the true session intervals; a card is never drawn shorter than MIN_CARD
+  const cards = items.filter((i) => i.kind === "card").sort((x, y) => x.a - y.a);
+  const slotEnd = [];
+  cards.forEach((c) => {
+    c.h = Math.max(MIN_CARD, px(c.b) - px(c.a));
+    let k = slotEnd.findIndex((e) => e <= px(c.a) - 2);
+    if (k < 0) { k = slotEnd.length; slotEnd.push(0); }
+    slotEnd[k] = px(c.a) + c.h; c.slot = k;
   });
-  const avail = $("work").clientWidth - 72;
-  const COL_PX = Math.max(132, Math.min(176, Math.floor(avail / laneSubs.reduce((a, b) => a + b, 0))));
-  const laneX = []; let acc = 0;
-  laneSubs.forEach((n) => { laneX.push(acc); acc += n * COL_PX; });
-  const stackW = acc;
+  const slots = Math.max(1, slotEnd.length);
+  const avail = $("work").clientWidth - 72 - 2 * 16;
+  const COL_PX = Math.max(150, Math.min(260, Math.floor(avail / slots)));
+  const stackW = slots * COL_PX;
   const totalPx = Math.max(px(end) + MIN_CARD, hours * HOUR_PX);
   const ticks = [], rules = [];
   for (let h = 0; h <= hours; h++) {
     ticks.push(`<div class="tick" style="top:${h * HOUR_PX}px">${h === 0 ? "0" : "+" + h + " h"}</div>`);
     rules.push(`<div class="hr" style="top:${h * HOUR_PX}px"></div>`);
   }
+  let lastGateY = -1e9, stagger = 0;
   const els = items.sort((x, y) => x.a - y.a).map((i) => {
     const d = i.d;
     if (i.kind === "gate") {
-      const [c, l] = delState(d);
-      const sel = S.sel === d.id ? " sel" : "";
-      return `<div class="gate${sel}" style="top:${px(i.a)}px;--gc:var(--${c === "open" ? "ink-3" : c})"><span role="button" tabindex="0" data-sel="${esc(d.id)}" title="Acceptance gate · ${esc(l)}">${esc(d.id)} · ${esc(l)}</span></div>`;
+      const [c, l] = delState(d), y = px(i.a);
+      stagger = y - lastGateY < 28 ? stagger + 1 : 0; lastGateY = y;
+      return `<div class="gate${S.sel === d.id ? " sel" : ""}" style="top:${y}px;--gc:var(--${c === "open" ? "ink-3" : c})">` +
+        `<span role="button" tabindex="0" data-sel="${esc(d.id)}" style="right:${stagger * 124}px" title="${esc(d.id)} · acceptance gate">gate · ${esc(l)}</span></div>`;
     }
-    const st = delState(d);
-    const hs = (d.hypothesis_ids || []).map((h) => `<span class="chip h">${esc(h)}</span>`).join("");
+    const st = delState(d), left = i.slot * COL_PX + 4, h = Math.round(i.h);
+    const queue = i.posted < i.a - 60
+      ? `<div class="queued" style="left:${left}px;width:${COL_PX - 8}px;top:${px(i.posted)}px;height:${Math.max(4, px(i.a) - px(i.posted))}px" title="${esc(d.id)} waited ${fmtDur(i.a - i.posted)} for a free slot"></div>` : "";
+    const mark = st[1] === "done" ? "" : stMark(st);
     const fa = d.is_falsification_attempt ? '<span class="chip f" title="A falsification attempt">falsify</span>' : "";
-    const cost = d.cost_usd ? `<span class="chip">${fmtCost(d.cost_usd)}</span>` : "";
-    const dur = d.completed_at ? fmtDur(i.b - i.a) : fmtDur(now - i.a);
-    return `<div class="card enter${S.sel === d.id ? " sel" : ""}" role="button" tabindex="0" data-sel="${esc(d.id)}" ` +
-      `style="--role:var(--r-${esc(d.to_node)});top:${px(i.a)}px;height:${i.h}px;left:${laneX[i.lane] + i.sub * COL_PX + 4}px;width:${COL_PX - 8}px">` +
-      `<div class="top"><span class="id">${esc(d.id)}</span>${stMark(st)}</div>` +
-      `<div class="intent">${esc(firstLine(d.task))}</div><div class="chips">${fa}${hs}${cost}<span class="dur">${dur}</span></div></div>`;
+    const hs = (d.hypothesis_ids || []).map((x) => `<span class="chip h">${esc(x)}</span>`).join("");
+    const ev = d.evals ? `<span class="chip" title="Oracle evaluations">${esc(d.evals)} evals</span>` : "";
+    const dur = i.queued ? "queued" : fmtDur(i.b - i.a);
+    const body = (h >= 56 ? `<div class="intent">${esc(firstLine(d.task))}</div>` : "") +
+      (h >= 84 && (fa || hs || ev) ? `<div class="chips">${fa}${hs}${ev}</div>` : "");
+    return queue + `<div class="card enter${S.sel === d.id ? " sel" : ""}${i.queued ? " isqueued" : ""}" role="button" tabindex="0" data-sel="${esc(d.id)}" ` +
+      `style="--role:var(--r-${esc(d.to_node)});top:${px(i.a)}px;height:${h}px;left:${left}px;width:${COL_PX - 8}px">` +
+      `<div class="top"><span class="id">${esc(d.id)}</span><span class="role">${esc(d.to_node)}</span>${mark}<span class="dur">${dur}</span></div>${body}</div>`;
   });
   const nowLine = liveNow() ? `<div class="now" style="top:${px(now)}px"><span>now ${fmtElapsed(now - t0)}</span></div>` : "";
-  return `<div class="tl" style="min-width:${56 + stackW + 16}px"><div class="ruler"><div class="rs" style="height:${totalPx}px">${ticks.join("")}</div></div>` +
-    `<div class="lanes" style="width:${stackW}px"><div class="lanehead" style="grid-template-columns:${laneSubs.map((n) => n * COL_PX + "px").join(" ")}">${LANES.map((l) => `<span>${l[1]}</span>`).join("")}</div>` +
+  return `<div class="tl"><div class="ruler"><div class="rs" style="height:${totalPx}px">${ticks.join("")}</div></div>` +
+    `<div class="lanes" style="width:${stackW}px"><div class="lanehead" style="grid-template-columns:repeat(${slots},${COL_PX}px)">` +
+    Array.from({ length: slots }, (_, k) => `<span>slot ${k + 1}</span>`).join("") + `</div>` +
     `<div class="stack" style="position:relative;height:${totalPx}px">${rules.join("")}${els.join("")}${nowLine}</div></div></div>`;
 }
 function firstLine(t) {
@@ -392,7 +395,7 @@ function inspectorHtml(id) {
     const f = S.fom;
     return head(id, "", null, "A row of the oracle store") +
       sec("Why this row", f && f.declared ? `<p>The store’s best row by the declared objective <span class="mono">${esc(f.column)}</span> (${esc(f.direction)}): <b class="mono">${esc(f.value)}</b>, row ${esc(f.row)} of ${esc(f.n)}.</p>` : '<p class="none">The study declares no objective.</p>') +
-      sec("Row detail", '<p class="none">The full row, the trajectory and the funnel will appear here once the Data view is built (build step 3).</p>');
+      sec("Row detail", '<p class="none">The full row isn’t available in this version of the viewer yet.</p>');
   }
   const d = S.dels.find((x) => x.id === id);
   if (d) return delegationHtml(d);
@@ -405,7 +408,7 @@ function delegationHtml(d) {
   const t0 = runT0();
   const meta = `${t0 != null && a != null ? "started " + fmtElapsed(a - t0) : "start unknown"} · ${b != null && a != null ? "took " + fmtDur(b - a) : "running"} · from ${esc(d.from_node)}`;
   const facts = `<div class="facts"><div><div class="lbl">Cost</div><b>${d.cost_usd == null ? dash("No price for this call") : fmtCost(d.cost_usd)}</b></div>` +
-    `<div><div class="lbl">Tokens out</div><b>${fmtTokens(d.tokens_out)}</b></div>` +
+    `<div><div class="lbl">Out tokens</div><b>${fmtTokens(d.tokens_out)}</b></div>` +
     `<div><div class="lbl">Evals</div><b>${d.evals == null ? dash("Not recorded") : esc(d.evals)}</b></div></div>`;
   const hyps = (d.hypothesis_ids || []).map((hid) => {
     const h = S.ledger.hypotheses.find((x) => x.id === hid);
@@ -523,7 +526,7 @@ $("rail").addEventListener("click", () => {
 });
 setInterval(() => {
   const e = $("elapsed"); if (!e || !liveNow()) return;
-  e.firstChild.nodeValue = fmtDur(elapsedNow());
+  e.firstChild.nodeValue = fmtH(elapsedNow());
 }, 1000);
 
 /* ── boot ────────────────────────────────────────────────────────────────── */

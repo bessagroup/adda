@@ -76,8 +76,26 @@ def main() -> int:
                         pg.wait_for_timeout(300)
                         pg.screenshot(
                             path=str(out / f"timeline-selected-{wname}-{theme}.png"))
+                        hits = pg.evaluate(
+                            "(()=>{const i=document.querySelector('#insp');"
+                            "if(!i||getComputedStyle(i).position==='fixed')return [];"
+                            "const r=i.getBoundingClientRect();"
+                            "return [...document.querySelectorAll('.card,.gate span')]"
+                            ".filter(c=>{const b=c.getBoundingClientRect();"
+                            "return b.width>0&&b.left<r.right&&b.right>r.left&&b.top<r.bottom&&b.bottom>r.top})"
+                            ".map(c=>c.textContent.trim().slice(0,12))})()")
+                        if hits:
+                            problems.append(f"timeline-selected-{wname}-{theme}: "
+                                            f"content under the inspector {hits}")
                         pg.goto(f"{base}/ui{q}")
                         pg.wait_for_selector(".views [role=tab]")
+                    if view == "timeline":
+                        pg.wait_for_selector(".gate", state="attached", timeout=5000)
+                        pg.locator(".gate").first.scroll_into_view_if_needed()
+                        pg.evaluate("document.getElementById('work').scrollTop-=200")
+                        pg.wait_for_timeout(200)
+                        pg.screenshot(path=str(out / f"timeline-gate-{wname}-{theme}.png"))
+                        pg.evaluate("document.getElementById('work').scrollTop=0")
                     clipped = pg.evaluate(
                         "[...document.querySelectorAll('.mono,.id')]"
                         ".filter(e=>e.scrollWidth>e.clientWidth+1&&e.clientWidth>0)"
