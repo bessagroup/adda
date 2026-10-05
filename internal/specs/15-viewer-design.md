@@ -250,7 +250,7 @@ The viewer serves ANY study. No study's vocabulary may appear in viewer code, te
    4. Hypotheses;
    5. Deliverable;
    6. Logs;
-   7. Setup and dialogs (built: Setup editors, Start sheet, Stop popover; New study, Note to run, and the launcher/ask-docs/download controls follow in Phase 5);
+   7. Setup and dialogs (built: Setup editors, Start sheet with launcher output and stop, Stop popover, New study, Note to run, Docs sheet, downloads);
    8. phone pass (built: finger-sized controls, sticky Start action; checked at 360, 390 and 400 px).
 
    Each step lands as its own commit with its screenshot set.

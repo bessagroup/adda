@@ -328,6 +328,34 @@ def test_no_launcher_declared_means_no_launcher_control(tmp_path, page):
         assert page.locator("#stoplaunch").count() == 0
 
 
+def test_note_to_run_queues_for_the_entry_node_or_a_running_delegation(tmp_path, page):
+    from adda._src.infra import operator_channel
+    study, run_dir = _study(tmp_path)
+    rows = [json.loads(x) for x in (run_dir / "debug" / "delegation_log.jsonl").read_text().splitlines()]
+    rows[-1]["completed_at"] = None
+    rows[-1]["status"] = "RUNNING"
+    _write_jsonl(run_dir / "debug" / "delegation_log.jsonl", rows)
+    with _LiveServer(create_app(study, token="t")) as srv:
+        page.set_viewport_size({"width": 390, "height": 700})
+        page.goto(f"{srv.url}/session?token=t&next=/ui?run={RUN}")
+        page.click("#opennote")
+        page.fill("#notetext", "  ")
+        page.click("#noteform button[type=submit]")
+        page.wait_for_selector("#notesheet >> text=empty")
+        page.fill("#notetext", "try the second branch")
+        page.select_option("#notesel", value=rows[-1]["id"])
+        page.click("#noteform button[type=submit]")
+        page.wait_for_selector("#notesheet >> text=Sent")
+        box = page.locator("#noteform button[type=submit]").bounding_box()
+        assert box["height"] >= 40 and box["y"] + box["height"] <= 700
+        sent = operator_channel.drain_note_rows(run_dir)
+        assert [r["text"] for r in sent] == ["try the second branch"]
+        page.keyboard.press("Escape")
+        assert page.is_hidden("#notesheet")
+    audit = [json.loads(x) for x in (study / "viewer_actions.jsonl").read_text().splitlines()]
+    assert audit[-1]["action"] == "note" and audit[-1]["to"] == rows[-1]["id"]
+
+
 def _ledger(run_dir, hyps):
     notes = run_dir / "debug" / "strategizer_notes"
     notes.mkdir(parents=True, exist_ok=True)

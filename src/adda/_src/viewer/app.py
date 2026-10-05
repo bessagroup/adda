@@ -730,6 +730,8 @@ def create_app(
         if not operator_channel.queue_note(
                 run_dir, body.get("text", ""), to_node=to_node):
             return JSONResponse({"error": "empty note"}, status_code=400)
+        _audit(study_dir, "note", run=run_id, to=to_node or "entry",
+               text=str(body.get("text", ""))[:2000])
         return JSONResponse({"ok": True})
 
     async def post_stop(request):

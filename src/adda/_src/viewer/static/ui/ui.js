@@ -298,10 +298,9 @@ function paintTitle() {
 }
 function clockTone(el, budget) { return el > 2 * budget ? "bad" : el > 1.5 * budget ? "warn" : ""; }
 function actionsHtml(closed) {
-  const t = "This action isn't available in this version of the viewer yet.";
   return closed
     ? `<button class="btn primary" id="openstart" title="Run the pre-flight checks and start a new run of this study">Re-run study</button>`
-    : `<button class="btn primary" disabled title="${t}">Note to run</button>` +
+    : `<button class="btn primary" id="opennote" title="Leave a note the run reads at its next tool call">Note to run</button>` +
       (S.pop.stopped[S.run] ? `<button class="btn" disabled title="A stop was requested; the run closes after its retrospectives">Stop requested</button>`
         : `<button class="btn" data-stop aria-haspopup="dialog" aria-expanded="${S.pop.open}">Stop</button>`);
 }
@@ -1482,6 +1481,32 @@ async function doStart() {
   paintSheet();
 }
 
+/* Note to run */
+S.note = { open: false, text: "", to: "", busy: false, err: null, sent: null };
+function paintNote() {
+  const el = $("notesheet"), s = S.note;
+  el.hidden = !s.open; if (!s.open) { el.innerHTML = ""; return; }
+  const live = S.dels.filter((d) => delState(d)[0] === "live");
+  const opts = ['<option value="">The entry node, at its next tool call</option>'].concat(live.map((d) =>
+    `<option value="${esc(d.id)}" ${d.id === s.to ? "selected" : ""}>${esc(d.id)} · ${esc(d.to_node)} (running)</option>`)).join("");
+  el.innerHTML = `<div class="dhd"><b>Note to run</b><span class="sp"></span><button type="button" class="btn ghost" data-note-close aria-label="Close">Close</button></div><div class="sbody">` +
+    `<form id="noteform"><label class="dcap" for="notesel">Send to</label><select id="notesel" style="width:100%;min-height:40px">${opts}</select>` +
+    `<label class="dcap" for="notetext">Note</label><textarea id="notetext" rows="6" style="width:100%">${esc(s.text)}</textarea>` +
+    (s.err ? `<p class="st bad">${esc(s.err)}</p>` : "") + (s.sent ? `<p class="st ok">${esc(s.sent)}</p>` : "") +
+    `<div class="sfoot"><button type="submit" class="btn primary" ${s.busy ? "disabled" : ""}>${s.busy ? "Sending…" : "Send note"}</button></div></form></div>`;
+}
+function openNote() { S.note = Object.assign(S.note, { open: true, err: null, sent: null }); paintNote(); const t = $("notetext"); if (t) t.focus(); }
+async function sendNote() {
+  const s = S.note; s.text = $("notetext").value; s.to = $("notesel").value;
+  if (!s.text.trim()) { s.err = "The note is empty."; paintNote(); return; }
+  s.busy = true; s.err = null; paintNote();
+  const body = { text: s.text }; if (s.to) body.delegation_id = s.to;
+  const r = await send("/api/runs/" + encodeURIComponent(S.run) + "/note", body);
+  s.busy = false;
+  if (r.ok) { s.sent = "Sent. " + (s.to ? "Delegation " + s.to : "The entry node") + " reads it at its next tool call."; s.text = ""; } else s.err = r.error || "Not sent (" + r.status + ").";
+  paintNote();
+}
+
 /* New / duplicate study */
 S.newst = { open: false, list: null, err: null, busy: false, done: null, name: "", tpl: "", ps: "", cfg: "budget: 3600\n" };
 function paintNew() {
@@ -1594,6 +1619,8 @@ document.addEventListener("click", (e) => {
   const sg = t.closest("[data-su-goto]");
   if (sg) { e.preventDefault(); S.su.file = sg.dataset.suGoto; closeSheet(); nav({ view: "setup", sel: null }); return; }
   if (t.closest("#openstart")) { openSheet(); return; }
+  if (t.closest("#opennote")) { openNote(); return; }
+  if (t.closest("[data-note-close]")) { S.note.open = false; paintNote(); return; }
   if (t.closest("#opennew")) { openNew(); return; }
   if (t.closest("[data-ns-close]")) { S.newst.open = false; paintNew(); return; }
   if (t.closest("#opendocs")) { openDocs(); return; }
@@ -1629,6 +1656,7 @@ document.addEventListener("change", (e) => {
 let gPending = false;
 document.addEventListener("keydown", (e) => {
   if (e.target.closest("input,textarea,select")) return;
+  if (e.key === "Escape" && S.note.open) { S.note.open = false; paintNote(); return; }
   if (e.key === "Escape" && S.newst.open) { S.newst.open = false; paintNew(); return; }
   if (e.key === "Escape" && S.docs.open) { S.docs.open = false; paintDocs(); return; }
   if (e.key === "Escape" && (S.sheet.open || S.pop.open)) { if (S.pop.open) { S.pop.open = false; paintPop(); paintTitle(); } else closeSheet(); return; }
@@ -1685,6 +1713,7 @@ let lastRun = null;
 function resetRunIfChanged() { if (S.run !== lastRun) { lastRun = S.run; resetRun(); } }
 document.addEventListener("visibilitychange", () => { if (visible()) tick(); else { clearTimeout(S.timer); flushPending(); } });
 window.addEventListener("pagehide", flushPending);
+$("notesheet").addEventListener("submit", (e) => { e.preventDefault(); sendNote(); });
 $("newstudy").addEventListener("submit", (e) => { e.preventDefault(); createNew(); });
 $("newstudy").addEventListener("change", (e) => { if (e.target.id === "nstpl") { readNew(); paintNew(); } });
 $("docs").addEventListener("submit", (e) => { e.preventDefault(); askDocs(); });

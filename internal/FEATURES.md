@@ -1488,6 +1488,7 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   `template` copies a sibling study's two files (a duplicate); the response carries `python -m adda.viewer <path>` because one viewer serves one study. The nav's `New study` opens the sheet. **Status:** done.
   **Launcher in the Start sheet (spec 14 Phase 5.5):** when `runtime.launch` is declared the sheet names its command, Start runs it (`POST /api/study/launch`) and shows the exact command line, the captured id and the launcher's stdout/stderr;
   while a captured id has not been stopped (and `stop_command` is declared) a `Stop launch <id>` button runs it (`POST /api/study/launch/stop`) and shows its output. Without `runtime.launch` neither appears. **Status:** done.
+  **Note to run (spec 14 Phase 5.7, spec 15):** on a live run the title's `Note to run` opens a sheet: free text, sent to the entry node or to one running delegation (`POST /api/runs/{id}/note`, which now also writes a `note` row to `viewer_actions.jsonl`). **Status:** done.
   **Timeline (spec 15):** any span over 30 min with no delegation running (and no gate) is drawn as a 24 px break
   band labelled "<duration> with no delegation running"; hour ticks inside it are skipped, the ruler resumes after
   it and the now line stays at the true end. Gate chips are laid out right to left so none overlap, each on its own
