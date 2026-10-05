@@ -1876,3 +1876,22 @@ def tail_jsonl(
                 except json.JSONDecodeError:
                     continue
         time.sleep(poll_interval)
+
+
+def read_study_history(study_dir: Path | str, limit: int = 200) -> dict[str, Any]:
+    """The study's own git history: commits touching the study directory,
+    each with its changed files and +/- counts.
+
+    The study usually lives inside a larger repository, so the repo root is
+    the nearest ancestor holding a ``.git`` and the log is confined to the
+    study's path. ``commits`` is empty and ``repo`` null when the study is
+    under no repository. Raises ``safe_git.GitViewError`` if git fails."""
+    from . import safe_git
+    study = Path(study_dir).resolve()
+    root = next((p for p in (study, *study.parents) if (p / ".git").exists()),
+                None)
+    if root is None:
+        return {"repo": None, "path": None, "commits": []}
+    rel = study.relative_to(root).as_posix() or "."
+    return {"repo": root.name, "path": rel,
+            "commits": safe_git.path_history(root, rel, limit)}

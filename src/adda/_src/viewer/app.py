@@ -952,6 +952,22 @@ def create_app(
             return _not_found(f"no committed delegation {did!r}")
         return JSONResponse(stat)
 
+    async def get_study_history(request):
+        """The study's git history (commits touching the study directory,
+        each with changed files and +/- counts). ``limit`` (default 200,
+        max 2000). 502 if git cannot answer."""
+        from . import safe_git
+        try:
+            limit = max(1, min(int(request.query_params.get("limit", 200)),
+                               2000))
+        except ValueError:
+            return JSONResponse({"error": "limit must be an integer"},
+                                status_code=400)
+        try:
+            return JSONResponse(readers.read_study_history(study_dir, limit))
+        except safe_git.GitViewError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=502)
+
     async def get_literature(request):
         """The study-scoped paper corpus (each paper flagged ``in_run`` by its
         ``added_at`` against this run's window), this run's literature-tool
@@ -1227,6 +1243,7 @@ def create_app(
         Route("/api/runs/{run_id}/answer", post_answer, methods=["POST"]),
         Route("/api/runs/{run_id}/note", post_note, methods=["POST"]),
         Route("/api/study/preflight", get_preflight),
+        Route("/api/study/history", get_study_history),
         Route("/api/study/start", post_start, methods=["POST"]),
         Route("/api/study/launch", post_launch, methods=["POST"]),
         Route("/api/study/launch/stop", post_launch_stop, methods=["POST"]),

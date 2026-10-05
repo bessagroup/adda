@@ -1375,6 +1375,10 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   start..end window; null when unparseable), `added_in_run`, `run_window`, this run's literature-tool
   `errors` (cooldowns and other failures are the same ERROR_RETURN row, so indistinguishable) and its
   `RETRIEVAL_DEGRADED` rows.
+  **Study history (spec 14 5.10):** `GET /api/study/history?limit=` returns the commits touching the
+  study directory (repo root = nearest ancestor with `.git`; log confined to the study path after
+  `--`, path chosen server-side), each with its changed files and +/- counts, via `safe_git`. Empty
+  with `repo: null` when the study is under no repository; 502 if git fails.
   The viewer binds loopback only: any other `--host` needs `--allow-network` and prints a warning.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);

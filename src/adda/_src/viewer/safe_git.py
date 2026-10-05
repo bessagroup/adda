@@ -24,7 +24,8 @@ from typing import Any
 
 from ..infra.workspace_vcs import _HERMETIC_CONFIG
 
-__all__ = ["GitViewError", "commit_files", "diff_stat", "log", "show_stat"]
+__all__ = ["GitViewError", "commit_files", "diff_stat", "log", "path_history",
+           "show_stat"]
 
 _SHA = re.compile(r"[0-9a-f]{7,40}")
 _TIMEOUT_S = 10
@@ -116,3 +117,22 @@ def show_stat(repo: Path, sha: str) -> str:
 def diff_stat(repo: Path, older: str, newer: str) -> str:
     """``git diff --stat <older> <newer>``, as git prints it."""
     return _run(repo, "diff", "--stat", _sha(older), _sha(newer))
+
+
+def path_history(repo: Path, relpath: str, limit: int = 200) -> list[dict[str, Any]]:
+    """Commits touching ``relpath`` (newest first), each with its changed
+    files: ``{sha, author, date, subject, files[{path, insertions,
+    deletions}]}``. ``relpath`` is chosen by the server (never a request
+    value) and goes after ``--`` so it can only be a pathspec."""
+    out = _run(repo, "log", f"-n{max(1, int(limit))}", "--numstat",
+               f"--format={_RECORD}%H{_FIELD}%an{_FIELD}%aI{_FIELD}%s",
+               "--", relpath)
+    rows = []
+    for chunk in out.split(_RECORD)[1:]:
+        head, _, rest = chunk.partition("\n")
+        parts = head.split(_FIELD)
+        if len(parts) == 4:
+            rows.append({"sha": parts[0], "author": parts[1],
+                         "date": parts[2], "subject": parts[3],
+                         "files": _parse_numstat(rest)})
+    return rows
