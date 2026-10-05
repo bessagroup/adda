@@ -214,3 +214,122 @@ def test_cli_exits_2_on_a_network_bind_without_the_flag(study, capsys):
 
     assert main([str(study), "--host", "0.0.0.0"]) == 2
     assert "allow-network" in capsys.readouterr().err
+
+
+# --- study launcher (spec 14 Phase 5.5) --------------------------------------
+
+def _declare_launcher(study, tmp_path, *, stop=True, extra=""):
+    """A launcher that prints an sbatch-style line, and a stop that records the
+    id it was handed. Both are real subprocesses on the local machine."""
+    out = tmp_path / "stopped_ids.txt"
+    (study / "launch.py").write_text(
+        "import sys\nprint('Submitted batch job 4242', ' '.join(sys.argv[1:]))\n")
+    (study / "stop.py").write_text(
+        f"import sys\nopen({str(out)!r}, 'a').write(sys.argv[1] + '\\n')\n")
+    cfg = (study / "config.yaml").read_text()
+    block = (
+        "runtime:\n  launch:\n"
+        f"    command: [{sys.executable}, launch.py, --nodes, '2']\n"
+        "    id_pattern: 'Submitted batch job (\\d+)'\n"
+        + (f"    stop_command: [{sys.executable}, stop.py, '{{id}}']\n"
+           if stop else "") + extra)
+    (study / "config.yaml").write_text(cfg + block)
+    return out
+
+
+def _audit_rows(study):
+    return [json.loads(line) for line in
+            (study / "viewer_actions.jsonl").read_text().splitlines()]
+
+
+def test_no_declared_launcher_means_no_control(study):
+    client = _writer(study)
+    assert client.get("/api/study/preflight").json()["launcher"] is None
+    resp = client.post("/api/study/launch", json={})
+    assert resp.status_code == 409 and "no runtime.launch" in resp.json()["error"]
+    assert run_control.launched(study) == []
+
+
+def test_launch_runs_the_declared_argv_and_audits_it(study, tmp_path):
+    _declare_launcher(study, tmp_path)
+    client = _writer(study)
+    assert client.get("/api/study/preflight").json()["launcher"]["can_stop"]
+    body = client.post("/api/study/launch", json={}).json()
+    assert body["launch_id"] == "4242"
+    assert "--nodes 2" in body["stdout"]
+    rows = [r for r in _audit_rows(study) if r["action"] == "launch"]
+    assert rows[0]["command"] == body["cmdline"] == rows[-1]["command"]
+    assert rows[-1]["phase"] == "done" and rows[-1]["returncode"] == 0
+    reg = json.loads((study / "runs" / "_viewer" / "registry.json").read_text())
+    assert reg[0]["launch_id"] == "4242"
+
+
+def test_stop_runs_stop_command_with_the_stored_id_only(study, tmp_path):
+    out = _declare_launcher(study, tmp_path)
+    client = _writer(study)
+    assert client.post("/api/study/launch/stop", json={}).status_code == 404
+    assert not out.exists()
+    client.post("/api/study/launch", json={})
+    resp = client.post("/api/study/launch/stop", json={})
+    assert resp.status_code == 200 and resp.json()["ok"]
+    assert out.read_text() == "4242\n"
+    row = [r for r in _audit_rows(study) if r["action"] == "launch_stop"][-1]
+    assert row["command"].endswith("stop.py 4242")
+    assert client.post("/api/study/launch/stop", json={}).status_code == 404
+    assert out.read_text() == "4242\n"
+
+
+def test_a_second_launch_moments_later_is_refused(study, tmp_path):
+    _declare_launcher(study, tmp_path)
+    client = _writer(study)
+    assert client.post("/api/study/launch", json={}).status_code == 200
+    again = client.post("/api/study/launch", json={})
+    assert again.status_code == 409
+    assert len(run_control.launched(study)) == 1
+
+
+def test_a_launcher_that_prints_no_id_records_nothing(study, tmp_path):
+    _declare_launcher(study, tmp_path)
+    (study / "launch.py").write_text("print('hello')\n")
+    resp = _writer(study).post("/api/study/launch", json={})
+    assert resp.status_code == 409 and "id_pattern" in resp.json()["error"]
+    assert run_control.launched(study) == []
+    assert [r["phase"] for r in _audit_rows(study)] == ["run", "done"]
+
+
+def test_a_failing_launcher_is_reported_and_audited(study, tmp_path):
+    _declare_launcher(study, tmp_path)
+    (study / "launch.py").write_text("import sys\nsys.exit(3)\n")
+    resp = _writer(study).post("/api/study/launch", json={})
+    assert resp.status_code == 409 and "exited 3" in resp.json()["error"]
+    assert _audit_rows(study)[-1]["returncode"] == 3
+
+
+@pytest.mark.parametrize("block, needle", [
+    ("runtime:\n  launch:\n    comand: [x]\n", "unknown runtime.launch"),
+    ("runtime:\n  launch:\n    command: [x]\n    stop_command: [y, '{id}']\n",
+     "needs id_pattern"),
+    ("runtime:\n  launch:\n    command: [x]\n    id_pattern: '(a)'\n"
+     "    stop_command: [y]\n", "must contain {id}"),
+    ("runtime:\n  launch:\n    command: [x]\n    id_pattern: 'a'\n",
+     "exactly one capture group"),
+])
+def test_a_malformed_launcher_is_refused_not_ignored(study, block, needle):
+    (study / "config.yaml").write_text(
+        (study / "config.yaml").read_text() + block)
+    with pytest.raises(run_control.LauncherError, match=needle):
+        run_control.launcher_config(study)
+    resp = _writer(study).post("/api/study/launch", json={})
+    assert resp.status_code == 409 and needle in resp.json()["error"]
+
+
+def test_launch_needs_the_write_token(study, tmp_path):
+    from starlette.testclient import TestClient
+
+    from adda._src.viewer.app import create_app
+
+    _declare_launcher(study, tmp_path)
+    anon = TestClient(create_app(study))
+    assert anon.post("/api/study/launch", json={}).status_code == 403
+    assert anon.post("/api/study/launch/stop", json={}).status_code == 403
+    assert run_control.launched(study) == []

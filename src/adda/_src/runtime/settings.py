@@ -55,6 +55,7 @@ KNOWN_KEYS: frozenset[str] = frozenset({
     "f3dasm_api",
     "followup_wait_s",
     "hypothesis_ledger",
+    "launch",
     "llm_max_buffer_mb",
     "llm_metadata_fetch",
     "allow_arm_drift",

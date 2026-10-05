@@ -113,6 +113,7 @@ reviewer.
 | `retrieval_mode` | corpus ranking strategy: `auto` (RRF when BM25+dense are available, else BM25, else substring), `hybrid`, `bm25`, `substring`. Only `auto` degrades — an explicitly requested mode that cannot be satisfied errors rather than silently falling back to a different one | `auto` |
 | `citation_weighting` | multiply BM25 scores by `1 + log10(citations+1)` before rank fusion. A popularity prior on the lexical side only; untested | `true` |
 | `semantic_scholar_api_key` | Semantic Scholar key; raises the literature rate limit | none |
+| `launch` | how the viewer starts a run for a study that has its own launcher (an `sbatch` wrapper, say): a mapping with `command` (argument list, run in the study directory), `id_pattern` (regex with one group, matched against the launcher's output to capture the job id), `stop_command` (argument list containing `{id}`; needs `id_pattern`) and `timeout_s` (default 120). The viewer runs only these commands and stops only an id it captured. Absent: the viewer offers no launcher control. Read by the viewer, not by the run | none |
 
 #### Ablation switches — leave these alone unless you are running an experiment
 

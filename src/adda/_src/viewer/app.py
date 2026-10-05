@@ -12,6 +12,7 @@ import json
 import queue
 import re
 import secrets
+import shlex
 import threading
 import time
 from pathlib import Path
@@ -814,7 +815,15 @@ def create_app(
 
     async def get_preflight(request):
         checks = run_control.preflight(study_dir)
+        try:
+            lc = run_control.launcher_config(study_dir)
+            launcher = None if lc is None else {
+                "command": shlex.join(lc["command"]),
+                "can_stop": "stop_command" in lc}
+        except run_control.LauncherError as exc:
+            launcher = {"error": str(exc)}
         return JSONResponse({
+            "launcher": launcher,
             "checks": checks,
             "can_start": not any(c["ok"] is False for c in checks),
             "launched": run_control.launched(study_dir),
@@ -832,6 +841,37 @@ def create_app(
         _audit(study_dir, "start", pid=entry["pid"],
                command=entry["cmdline"], log=entry["log"])
         return JSONResponse({"ok": True, **entry})
+
+    async def post_launch(request):
+        refused = _check_write(request, token)
+        if refused is not None:
+            return refused
+        audit = lambda action, **f: _audit(study_dir, action, **f)  # noqa: E731
+        try:
+            entry = await asyncio.to_thread(
+                run_control.start_via_launcher, study_dir, audit=audit)
+        except run_control.StartRefused as exc:
+            return JSONResponse(
+                {"error": str(exc), "checks": exc.checks}, status_code=409)
+        except run_control.LauncherError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        return JSONResponse({"ok": True, **entry})
+
+    async def post_launch_stop(request):
+        refused = _check_write(request, token)
+        if refused is not None:
+            return refused
+        audit = lambda action, **f: _audit(study_dir, action, **f)  # noqa: E731
+        try:
+            out = await asyncio.to_thread(
+                run_control.stop_via_launcher, study_dir, audit=audit)
+        except run_control.LauncherError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        if out is None:
+            return JSONResponse(
+                {"error": "this viewer has recorded no launch that is still "
+                          "to be stopped"}, status_code=404)
+        return JSONResponse({"ok": out["returncode"] == 0, **out})
 
     async def post_kill(request):
         refused = _check_write(request, token)
@@ -1118,6 +1158,8 @@ def create_app(
         Route("/api/runs/{run_id}/note", post_note, methods=["POST"]),
         Route("/api/study/preflight", get_preflight),
         Route("/api/study/start", post_start, methods=["POST"]),
+        Route("/api/study/launch", post_launch, methods=["POST"]),
+        Route("/api/study/launch/stop", post_launch_stop, methods=["POST"]),
         Route("/api/study/kill", post_kill, methods=["POST"]),
         Route("/api/runs/{run_id}/log", get_log),
         Route("/api/runs/{run_id}/stop", post_stop, methods=["POST"]),

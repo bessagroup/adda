@@ -18,6 +18,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -42,6 +43,10 @@ __all__ = [
     "kill_run",
     "launched",
     "StartRefused",
+    "LauncherError",
+    "launcher_config",
+    "start_via_launcher",
+    "stop_via_launcher",
 ]
 
 # A run directory with no run_status.json is a run that has not closed — or
@@ -329,3 +334,188 @@ def kill_run(
         return {"pid": entry["pid"], "signal": "SIGTERM",
                 "escalates_after_s": grace_s}
     return None
+
+
+# --- study launcher (spec 14 Phase 5.5) -------------------------------------
+#
+# A study on a cluster is started by its own script (``sbatch``, a wrapper),
+# not by the local watchdog. The study declares it in ``config.yaml``::
+#
+#   runtime:
+#     launch:
+#       command: [bash, launch.sh, --nodes, "2"]   # argv, run in the study dir
+#       stop_command: [scancel, "{id}"]            # optional; needs id_pattern
+#       id_pattern: "Submitted batch job (\\d+)"   # one group, searched in stdout
+#       timeout_s: 120                             # optional
+#
+# The viewer runs exactly these argvs (no shell) and never composes a cluster
+# command of its own. Stop substitutes ``{id}`` with the id the launcher
+# printed and stored, and only ever for an id it stored.
+
+_LAUNCH_KEYS = {"command", "stop_command", "id_pattern", "timeout_s"}
+_LAUNCH_TIMEOUT_S = 120.0
+# A launcher submits and returns before the run writes anything; this is how
+# long a second Start is refused on the strength of the viewer's own record.
+_SUBMITTED_WINDOW_S = LIVE_WINDOW_S
+
+
+class LauncherError(Exception):
+    """The launcher is declared wrongly, or running it failed."""
+
+
+def _argv(value: Any, what: str) -> list[str]:
+    if isinstance(value, str):
+        value = shlex.split(value)
+    if (not isinstance(value, list) or not value
+            or not all(isinstance(a, (str, int, float)) for a in value)):
+        raise LauncherError(f"runtime.launch.{what} must be a non-empty "
+                            "argument list (or a command string)")
+    return [str(a) for a in value]
+
+
+def launcher_config(study_dir: Path | str) -> dict[str, Any] | None:
+    """The study's declared launcher, validated, or None when it declares none.
+    A malformed declaration raises ``LauncherError``: a typo must not read as
+    "no launcher" and quietly fall back to something else."""
+    try:
+        cfg = yaml.safe_load(
+            (Path(study_dir) / "config.yaml").read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    runtime = cfg.get("runtime") if isinstance(cfg, dict) else None
+    launch = runtime.get("launch") if isinstance(runtime, dict) else None
+    if launch is None:
+        return None
+    if not isinstance(launch, dict):
+        raise LauncherError("runtime.launch must be a mapping")
+    unknown = sorted(set(launch) - _LAUNCH_KEYS)
+    if unknown:
+        raise LauncherError(
+            f"unknown runtime.launch key(s) {unknown}; known: "
+            f"{sorted(_LAUNCH_KEYS)}")
+    out: dict[str, Any] = {"command": _argv(launch.get("command"), "command")}
+    pattern = launch.get("id_pattern")
+    if pattern is not None:
+        try:
+            if re.compile(str(pattern)).groups != 1:
+                raise LauncherError(
+                    "runtime.launch.id_pattern needs exactly one capture group")
+        except re.error as exc:
+            raise LauncherError(f"runtime.launch.id_pattern: {exc}") from exc
+        out["id_pattern"] = str(pattern)
+    if launch.get("stop_command") is not None:
+        out["stop_command"] = _argv(launch["stop_command"], "stop_command")
+        if "id_pattern" not in out:
+            raise LauncherError(
+                "runtime.launch.stop_command needs id_pattern: the viewer "
+                "cannot know which id to stop otherwise")
+        if "{id}" not in " ".join(out["stop_command"]):
+            raise LauncherError(
+                "runtime.launch.stop_command must contain {id}")
+    try:
+        out["timeout_s"] = float(launch.get("timeout_s", _LAUNCH_TIMEOUT_S))
+    except (TypeError, ValueError) as exc:
+        raise LauncherError("runtime.launch.timeout_s must be a number") from exc
+    return out
+
+
+def _run_declared(
+    argv: list[str], study_dir: Path, timeout_s: float, audit, action: str,
+) -> dict[str, Any]:
+    """Run one declared argv in the study directory and capture its output.
+    The audit row is written whatever happens, so a failed launch still shows
+    the exact command line that was run."""
+    if audit:
+        audit(action, command=shlex.join(argv), phase="run")
+    try:
+        proc = subprocess.run(  # noqa: S603 — declared argv, no shell
+            argv, cwd=study_dir, stdin=subprocess.DEVNULL, capture_output=True,
+            text=True, timeout=timeout_s, start_new_session=True)
+    except subprocess.TimeoutExpired as exc:
+        if audit:
+            audit(action, command=shlex.join(argv), phase="timeout")
+        raise LauncherError(
+            f"{shlex.join(argv)} did not return within {timeout_s:g}s") from exc
+    except OSError as exc:
+        raise LauncherError(f"{shlex.join(argv)} could not run: {exc}") from exc
+    if audit:
+        audit(action, command=shlex.join(argv), phase="done",
+              returncode=proc.returncode, stdout=proc.stdout[-2000:],
+              stderr=proc.stderr[-2000:])
+    return {"returncode": proc.returncode, "stdout": proc.stdout,
+            "stderr": proc.stderr, "cmdline": shlex.join(argv)}
+
+
+def _launcher_entries(study_dir: Path) -> list[dict[str, Any]]:
+    return [e for e in _read_registry(study_dir) if e.get("kind") == "launcher"]
+
+
+def start_via_launcher(study_dir: Path | str, *, audit=None) -> dict[str, Any]:
+    """Run the study's declared launcher and record what it printed.
+
+    Raises ``LauncherError`` when no launcher is declared or it is declared
+    wrongly, ``StartRefused`` when a run is already live or was submitted a
+    moment ago, and ``LauncherError`` when the launcher exits non-zero or
+    prints no id although it was asked to.
+    """
+    study_dir = Path(study_dir).resolve()
+    cfg = launcher_config(study_dir)
+    if cfg is None:
+        raise LauncherError("this study declares no runtime.launch")
+    live = live_run(study_dir)
+    recent = [e for e in _launcher_entries(study_dir)
+              if not e.get("stopped_at")
+              and time.time() - e["started_at"] < _SUBMITTED_WINDOW_S]
+    if live is not None or recent:
+        check = _check("no_live_run", False,
+                       f"a run is already live ({live['reason']})" if live
+                       else "a launch was submitted moments ago")
+        raise StartRefused([check], [check])
+
+    result = _run_declared(
+        cfg["command"], study_dir, cfg["timeout_s"], audit, "launch")
+    entry: dict[str, Any] = {
+        "kind": "launcher", "started_at": time.time(),
+        "cmd": cfg["command"], "cmdline": result["cmdline"],
+        "returncode": result["returncode"],
+        "stdout": result["stdout"], "stderr": result["stderr"],
+    }
+    if result["returncode"] != 0:
+        raise LauncherError(
+            f"{result['cmdline']} exited {result['returncode']}: "
+            f"{(result['stderr'] or result['stdout']).strip()[-500:]}")
+    if "id_pattern" in cfg:
+        m = re.search(cfg["id_pattern"], result["stdout"], re.MULTILINE)
+        if not m:
+            raise LauncherError(
+                f"the launcher ran but its output did not match id_pattern "
+                f"{cfg['id_pattern']!r}; nothing is recorded, so it cannot "
+                "be stopped from here")
+        entry["launch_id"] = m.group(1)
+    _write_registry(study_dir, _read_registry(study_dir) + [entry])
+    return entry
+
+
+def stop_via_launcher(
+    study_dir: Path | str, *, audit=None,
+) -> dict[str, Any] | None:
+    """Run ``stop_command`` with the id of the latest launch the viewer
+    recorded and has not yet stopped. None when there is none."""
+    study_dir = Path(study_dir).resolve()
+    cfg = launcher_config(study_dir)
+    if cfg is None or "stop_command" not in cfg:
+        raise LauncherError("this study declares no runtime.launch.stop_command")
+    entries = _read_registry(study_dir)
+    target = next((e for e in reversed(entries)
+                   if e.get("kind") == "launcher" and e.get("launch_id")
+                   and not e.get("stopped_at")), None)
+    if target is None:
+        return None
+    argv = [a.replace("{id}", str(target["launch_id"]))
+            for a in cfg["stop_command"]]
+    result = _run_declared(
+        argv, study_dir, cfg["timeout_s"], audit, "launch_stop")
+    if result["returncode"] == 0:
+        target["stopped_at"] = time.time()
+        _write_registry(study_dir, entries)
+    return {**result, "launch_id": target["launch_id"]}

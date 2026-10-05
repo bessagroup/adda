@@ -1307,6 +1307,17 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   `POST /api/study/kill` SIGTERMs that watchdog (which reaps the run's tree), then SIGKILLs the
   survivors among the descendants of that exact PID after 30 s; 404 if the viewer started nothing
   alive. Every start/kill is a `viewer_actions.jsonl` line with the exact command and signal.
+  **Start via study launcher (spec 14 5.5):** `run_control.start_via_launcher` / `stop_via_launcher`.
+  A study declares `runtime.launch: {command, id_pattern, stop_command, timeout_s}` in `config.yaml`
+  (argv lists, no shell; `id_pattern` has one capture group applied to the launcher's stdout;
+  `stop_command` contains `{id}` and requires `id_pattern`). `POST /api/study/launch` runs exactly
+  `command` in the study directory, stores its output and the printed id in the registry
+  (`kind: launcher`); `POST /api/study/launch/stop` runs `stop_command` with the latest stored,
+  not-yet-stopped id and never any other. No `runtime.launch` means the control is absent
+  (`launcher: null` in the preflight, 409 on the endpoints); a malformed declaration is refused
+  with the reason, never read as "none". A second launch is refused while a run is live or the
+  viewer submitted one in the last 600 s. Every run (before, timeout, after with return code and
+  output) is a `viewer_actions.jsonl` row (`launch` / `launch_stop`) with the exact command line.
   The viewer binds loopback only: any other `--host` needs `--allow-network` and prints a warning.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);

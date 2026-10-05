@@ -35,6 +35,9 @@ _CALL = re.compile(
 _DERIVED_DEFAULTS = {"stop_grace_s": ("math.nan", "min(900, deadline/10)")}
 
 
+_VIEWER_READ = {"launch"}
+
+
 def _keys_read_in_source() -> set[str]:
     found: set[str] = set()
     for path in _SRC.rglob("*.py"):
@@ -47,6 +50,9 @@ def _keys_read_in_source() -> set[str]:
     # the knob live, and features.enabled() raises on a key it does not know.
     from adda._src.runtime import features
     found |= set(features.FEATURE_KEYS)
+    # `launch` is a mapping the viewer reads from config.yaml itself
+    # (viewer/run_control.py::launcher_config), not through get_*.
+    found |= _VIEWER_READ
     return found
 
 
