@@ -1370,6 +1370,11 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   predecessor. All git goes through `viewer/safe_git.py`: fixed argv, no shell, commit ids
   `[0-9a-f]{7,40}` only, explicit `--git-dir` (never discovers a parent repo), scrubbed env, timeout,
   capped output; it can only read. The same module serves study history (5.10).
+  **Literature (spec 14 2.9):** `GET /api/runs/<id>/literature` returns the study-scoped corpus
+  (`corpus.csv`, shared by every run) with each paper's `in_run` (its own `added_at` inside this run's
+  start..end window; null when unparseable), `added_in_run`, `run_window`, this run's literature-tool
+  `errors` (cooldowns and other failures are the same ERROR_RETURN row, so indistinguishable) and its
+  `RETRIEVAL_DEGRADED` rows.
   The viewer binds loopback only: any other `--host` needs `--allow-network` and prints a warning.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);

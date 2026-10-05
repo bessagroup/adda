@@ -509,6 +509,65 @@ def read_evidence_stat(run_dir: Path | str, delegation_id: str
                       if pred else None)}
 
 
+#: The tools whose failures read as "a literature source failed".
+_LITERATURE_TOOLS = frozenset({
+    "SearchPapers", "CitationGraph", "PaperDetails", "ConsultLiterature",
+    "CorpusAdd"})
+
+
+def _iso_epoch(text: str) -> float | None:
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(text).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def read_literature(run_dir: Path | str) -> dict[str, Any]:
+    """The study's paper corpus, what this run added, and what failed.
+
+    The corpus is STUDY-scoped (``<study>/runs/lit_reviewer_notes/``, shared
+    by every run), so ``papers`` is the whole corpus and each paper's
+    ``in_run`` says whether the corpus's own ``added_at`` falls inside this
+    run's window (True/False; None when the row has no parseable timestamp,
+    so only the study-wide view holds for it). ``errors`` are this run's
+    diagnostics rows for literature tools. A source cooldown and any other
+    failure come back as the same ERROR_RETURN row (the tool returns a
+    string, the exception type is not recorded), so they are indistinguishable
+    here; a raised exception carries its type in ``error_type``.
+    ``degraded`` holds the run's RETRIEVAL_DEGRADED rows (dense retrieval
+    down, BM25 only).
+    """
+    import csv
+
+    run_dir = Path(run_dir)
+    started, ended = _run_window(run_dir)
+    csv_path = run_dir.parent / "lit_reviewer_notes" / "corpus.csv"
+    papers: list[dict[str, Any]] = []
+    if csv_path.is_file():
+        with csv_path.open(encoding="utf-8", newline="") as fh:
+            for row in csv.DictReader(fh):
+                at = _iso_epoch(row.get("added_at", ""))
+                in_run = (None if at is None or started is None else
+                          at >= started and (ended is None or at <= ended))
+                papers.append({
+                    **{k: row.get(k, "") for k in (
+                        "paper_id", "title", "authors", "year", "doi",
+                        "arxiv_id", "venue", "abstract", "added_at",
+                        "source", "citation_count", "full_text")},
+                    "in_run": in_run})
+    diag = read_diagnostics_tail(run_dir)
+    errors = [d for d in diag if d.get("tool") in _LITERATURE_TOOLS
+              and _diagnostic_kind(d) != "RETRIEVAL_DEGRADED"]
+    degraded = [d for d in diag if _diagnostic_kind(d) == "RETRIEVAL_DEGRADED"
+                or d.get("tool") == "RETRIEVAL_DEGRADED"]
+    return {
+        "papers": papers, "total": len(papers),
+        "added_in_run": sum(1 for p in papers if p["in_run"] is True),
+        "run_window": {"started": started, "ended": ended},
+        "errors": errors, "degraded": degraded}
+
+
 def read_diagnostics_tail(run_dir: Path | str) -> list[dict[str, Any]]:
     """Every diagnostics.jsonl row seen so far (open vocabulary — no fixed
     schema beyond ``ts``/``node``/``tool``/``error_type``/``fault``/
@@ -955,6 +1014,43 @@ def read_oracle(
     }
 
 
+def _run_window(run_dir: Path | str) -> tuple[float | None, float | None]:
+    """``(started, ended)`` as epoch seconds; ``ended`` is None while the run
+    is still going (``run_status.json`` is written once, at close)."""
+    debug = Path(run_dir) / "debug"
+    # The EARLIEST mtime among the files written once at run start, not any
+    # single one of them. run_config.json alone was wrong: something
+    # rewrites it mid-run (oracle registration), and anchoring on it made a
+    # run that had been going 1h58m report 67 seconds — the wall clock
+    # visibly reset to zero while the operator watched. Taking the minimum
+    # is robust to any one of these being rewritten.
+    started = ended = None
+    # The run now records its own start explicitly, and that is authoritative:
+    # it is the same anchor the run itself charges its wall budget against, so
+    # the viewer and the critic cannot disagree about how long a run has been
+    # going. The mtime heuristic below stays as a fallback for runs recorded
+    # before the anchor existed.
+    try:
+        started = float((debug / "run_started_at").read_text().strip())
+    except (OSError, ValueError):
+        started = None
+    if started is None:
+        stamps = []
+        for name in ("thread_id", "PROBLEM_STATEMENT_snapshot.md",
+                     "run_config.json"):
+            path = debug / name
+            try:
+                stamps.append(path.stat().st_mtime)
+            except OSError:
+                continue
+        if stamps:
+            started = min(stamps)
+    status = debug / "run_status.json"
+    if status.exists():
+        ended = status.stat().st_mtime
+    return started, ended
+
+
 def read_vitals(run_dir: Path | str) -> dict[str, Any]:
     """The run's REAL cost and wall clock, from telemetry and file times.
 
@@ -1012,36 +1108,7 @@ def read_vitals(run_dir: Path | str) -> dict[str, Any]:
             slot["calls"] += 1
             slot["cost_usd"] += c
 
-    # The EARLIEST mtime among the files written once at run start, not any
-    # single one of them. run_config.json alone was wrong: something
-    # rewrites it mid-run (oracle registration), and anchoring on it made a
-    # run that had been going 1h58m report 67 seconds — the wall clock
-    # visibly reset to zero while the operator watched. Taking the minimum
-    # is robust to any one of these being rewritten.
-    started = ended = None
-    # The run now records its own start explicitly, and that is authoritative:
-    # it is the same anchor the run itself charges its wall budget against, so
-    # the viewer and the critic cannot disagree about how long a run has been
-    # going. The mtime heuristic below stays as a fallback for runs recorded
-    # before the anchor existed.
-    try:
-        started = float((debug / "run_started_at").read_text().strip())
-    except (OSError, ValueError):
-        started = None
-    if started is None:
-        stamps = []
-        for name in ("thread_id", "PROBLEM_STATEMENT_snapshot.md",
-                     "run_config.json"):
-            path = debug / name
-            try:
-                stamps.append(path.stat().st_mtime)
-            except OSError:
-                continue
-        if stamps:
-            started = min(stamps)
-    status = debug / "run_status.json"
-    if status.exists():
-        ended = status.stat().st_mtime
+    started, ended = _run_window(run_dir)
     elapsed = None
     if started is not None:
         elapsed = (ended if ended is not None else time.time()) - started

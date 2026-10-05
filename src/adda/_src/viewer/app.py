@@ -833,6 +833,10 @@ def create_app(
         return JSONResponse(out)
 
     async def get_oracle(request):
+        """Oracle ledger rows, newest first, paged by offset (``after``,
+        ``limit`` default 400 / max 5000; ``namespace=`` empty = the canonical
+        store). ``next_cursor`` is an int offset, or ``null`` once drained
+        (a ledger page is finite). ``total_evals`` always sums every store."""
         run_id = request.path_params["run_id"]
         run_dir = _run_dir(study_dir, run_id)
         if run_dir is None:
@@ -948,6 +952,16 @@ def create_app(
             return _not_found(f"no committed delegation {did!r}")
         return JSONResponse(stat)
 
+    async def get_literature(request):
+        """The study-scoped paper corpus (each paper flagged ``in_run`` by its
+        ``added_at`` against this run's window), this run's literature-tool
+        errors and its RETRIEVAL_DEGRADED rows."""
+        run_id = request.path_params["run_id"]
+        run_dir = _run_dir(study_dir, run_id)
+        if run_dir is None:
+            return _not_found(f"no such run {run_id!r}")
+        return JSONResponse(readers.read_literature(run_dir))
+
     async def get_retrospectives(request):
         """Every retrospective split into CONSISTENCY / DECISION / FRICTION /
         BLOCKED / TIME, plus ``missing``: the runtime's RETROSPECTIVES_MISSING
@@ -978,6 +992,10 @@ def create_app(
             readers.list_node_transcripts(run_dir, name, is_entry=is_entry))
 
     async def get_transcript(request):
+        """Raw transcript records, paged (``after``, ``limit`` default 200 /
+        max 1000). ``next_cursor`` is ALWAYS an int (the index of the next
+        record), never null: a live transcript keeps growing, so a client
+        polls from ``next_cursor`` and compares it with ``total``."""
         run_id = request.path_params["run_id"]
         key = request.path_params["key"]
         run_dir = _run_dir(study_dir, run_id)
@@ -1000,6 +1018,11 @@ def create_app(
                              "total": len(events)})
 
     async def get_transcript_events(request):
+        """The transcript in one backend-neutral event shape (see
+        ``transcript_events.normalise_events``). ``after`` is a RAW record
+        index and ``limit`` caps emitted events; a raw record is never split
+        across pages. ``next_cursor`` is ALWAYS an int, never null (live
+        transcripts never drain); compare it with ``total``."""
         run_id = request.path_params["run_id"]
         key = request.path_params["key"]
         try:
@@ -1224,6 +1247,7 @@ def create_app(
         Route("/api/runs/{run_id}/problem_statement", get_problem_statement),
         Route("/api/runs/{run_id}/diagnostics", get_diagnostics),
         Route("/api/runs/{run_id}/notes", get_notes),
+        Route("/api/runs/{run_id}/literature", get_literature),
         Route("/api/runs/{run_id}/evidence", get_evidence),
         Route("/api/runs/{run_id}/evidence/{delegation_id}", get_evidence_stat),
         Route("/api/runs/{run_id}/retrospectives", get_retrospectives),
