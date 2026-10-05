@@ -287,6 +287,47 @@ def test_stop_asks_first_and_kill_is_behind_a_second_confirm(tmp_path, page, mon
                 pass
 
 
+def test_launcher_start_shows_its_output_and_stops_the_id_it_captured(tmp_path, page, monkeypatch):
+    import sys
+
+    from adda._src.viewer import run_control
+    study, run_dir = _study(tmp_path)
+    (run_dir / "debug" / "run_status.json").write_text('{"status": "GATED"}')
+    (study / "launch.py").write_text(
+        "import sys\nprint('Submitted batch job 4242' if len(sys.argv) < 2 else 'stopped ' + sys.argv[1])\n")
+    (study / "config.yaml").write_text(json.dumps({
+        "model": "m1", "budget": "00:10:00",
+        "runtime": {"launch": {
+            "command": [sys.executable, "launch.py"], "id_pattern": r"job (\d+)",
+            "stop_command": [sys.executable, "launch.py", "{id}"]}}}))
+    monkeypatch.setattr(run_control, "preflight", lambda _s: [])
+    with _LiveServer(create_app(study, token="t")) as srv:
+        page.goto(f"{srv.url}/session?token=t&next=/ui?run={RUN}")
+        page.click("#openstart")
+        page.wait_for_selector("#dostart:not([disabled])")
+        assert "launch.py" in page.inner_text("#sheet")
+        page.click("#dostart")
+        page.wait_for_selector("#sheet >> text=Launcher output")
+        assert "Submitted batch job 4242" in page.inner_text("#sheet pre")
+        assert "4242" in page.inner_text("#sheet")
+        page.click("#stoplaunch")
+        page.wait_for_selector("#sheet >> text=Stopped launch 4242")
+        assert "stopped 4242" in page.inner_text("#sheet pre")
+        assert page.locator("#stoplaunch").count() == 0
+
+
+def test_no_launcher_declared_means_no_launcher_control(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    (run_dir / "debug" / "run_status.json").write_text('{"status": "GATED"}')
+    (study / "config.yaml").write_text("model: m1\nbudget: '00:10:00'\n")
+    with _LiveServer(create_app(study, token="t")) as srv:
+        page.goto(f"{srv.url}/session?token=t&next=/ui?run={RUN}")
+        page.click("#openstart")
+        page.wait_for_selector("#dostart")
+        assert "launcher" not in page.inner_text("#sheet").lower()
+        assert page.locator("#stoplaunch").count() == 0
+
+
 def _ledger(run_dir, hyps):
     notes = run_dir / "debug" / "strategizer_notes"
     notes.mkdir(parents=True, exist_ok=True)

@@ -1418,9 +1418,9 @@ async function openCommit(sha) {
 }
 
 /* Start-run sheet */
-S.sheet = { open: false, pre: null, err: null, busy: false, done: null };
+S.sheet = { open: false, pre: null, err: null, busy: false, done: null, out: null };
 async function openSheet() {
-  S.sheet = { open: true, pre: null, err: null, busy: false, done: null };
+  S.sheet = { open: true, pre: null, err: null, busy: false, done: null, out: null };
   paintSheet();
   try { S.sheet.pre = await get("/api/study/preflight"); } catch (e) { S.sheet.err = "Could not run the pre-flight (" + e.message + ")."; }
   paintSheet();
@@ -1446,17 +1446,39 @@ function paintSheet() {
       `<h4>Pre-flight</h4><ul class="checks">${checks}</ul>` +
       (lc && lc.command ? `<p class="dcap">This study starts through its launcher: <span class="mono">${esc(lc.command)}</span></p>` : "") +
       (lc && lc.error ? `<p class="st bad">${esc(lc.error)}</p>` : "") : "") +
-    (s.done ? `<p class="st ok">${esc(s.done)}</p>` : "") +
+    (s.done ? `<p class="st ok">${esc(s.done)}</p>` : "") + launchOut(s.out) +
+    (pendingLaunch(p) ? `<p class="dcap">Launch ${esc(pendingLaunch(p).launch_id)} has not been stopped from here.</p><button type="button" class="btn" id="stoplaunch" ${s.busy ? "disabled" : ""}>Stop launch ${esc(pendingLaunch(p).launch_id)}</button>` : "") +
     `<div class="sfoot"><button type="button" class="btn primary" id="dostart" ${!p || !p.can_start || s.busy || s.done || (lc && lc.error) ? "disabled" : ""}>${s.busy ? "Starting…" : "Start run"}</button>` +
     (p && !p.can_start ? '<span class="dcap">Blocked checks must pass first.</span>' : "") + `</div></div>`;
+}
+const pendingLaunch = (p) => p && p.launcher && p.launcher.can_stop
+  ? (p.launched || []).slice().reverse().find((e) => e.kind === "launcher" && e.launch_id && !e.stopped_at) : null;
+function launchOut(o) {
+  if (!o) return "";
+  const text = [o.stdout, o.stderr].filter((x) => x && x.trim()).join("\n").trim();
+  return `<h4>Launcher output</h4><p class="dcap mono">${esc(o.cmdline || "")}</p>` +
+    (o.launch_id ? `<p class="dcap">Captured id: <b class="mono">${esc(o.launch_id)}</b></p>` : "") +
+    `<pre class="mono" style="white-space:pre-wrap;max-height:14rem;overflow:auto">${esc(text || "(no output)")}</pre>`;
+}
+async function doStopLaunch() {
+  const s = S.sheet; s.busy = true; s.err = null; paintSheet();
+  const r = await send("/api/study/launch/stop", {});
+  s.busy = false;
+  if (r.json && r.json.cmdline) s.out = r.json;
+  if (r.ok) s.done = "Stopped launch " + r.json.launch_id + ".";
+  else s.err = (r.json && r.json.returncode != null ? "The stop command exited " + r.json.returncode + "." : r.error) || "Not stopped (" + r.status + ").";
+  try { s.pre = await get("/api/study/preflight"); } catch (e) { /* keep the last view */ }
+  paintSheet();
 }
 async function doStart() {
   const s = S.sheet; s.busy = true; s.err = null; paintSheet();
   const lc = s.pre && s.pre.launcher && !s.pre.launcher.error;
   const r = await send(lc ? "/api/study/launch" : "/api/study/start", {});
   s.busy = false;
+  if (r.json && r.json.cmdline) s.out = r.json;
   if (r.ok) { s.done = "Started" + (r.json && r.json.pid ? " (pid " + r.json.pid + ")" : "") + ". The run appears in the list once it writes its first files."; tick(); }
-  else s.err = (r.error || "The run was not started (" + r.status + ").") + (r.json && r.json.checks ? "" : "");
+  else s.err = r.error || "The run was not started (" + r.status + ").";
+  if (lc && r.ok) { try { s.pre = await get("/api/study/preflight"); } catch (e) { /* keep the last view */ } }
   paintSheet();
 }
 
@@ -1578,6 +1600,7 @@ document.addEventListener("click", (e) => {
   if (t.closest("[data-docs-close]")) { S.docs.open = false; paintDocs(); return; }
   if (t.closest("[data-sheet-close]")) { closeSheet(); return; }
   if (t.closest("#dostart")) { doStart(); return; }
+  if (t.closest("#stoplaunch")) { doStopLaunch(); return; }
   const st = t.closest("[data-stop]");
   if (st) { openPop(st); return; }
   if (t.closest("#stopgrace")) { doStop(false); return; }
