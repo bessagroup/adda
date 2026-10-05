@@ -695,9 +695,39 @@ def test_a_closed_hypothesis_returned_to_open_is_a_retraction_not_a_revision(tmp
 
     h1, h2 = read_hypotheses(run)
     assert [e["retraction"] for e in h1["status_log"]] == [False, False, False, True]
+    assert [e["revision"] for e in h1["status_log"]] == [False, False, True, False]
     assert h1["retractions"] == 1
     assert h1["status_log"][1]["delegation"] == "D2"
     assert h2["retractions"] == 0
+
+
+def test_read_notebook_states_the_headline_the_notebook_prints_and_keeps_tables(tmp_path):
+    """The deliverable's own headline is the REPRODUCED/CLAIMED_HEADLINE it
+    prints, taken from its stored stdout and nothing else; a table output keeps
+    its markup for the client to render as a table."""
+    import nbformat
+
+    from adda._src.viewer.readers import read_notebook
+    nb = nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell("x")])
+    nb.cells[0].outputs = [
+        nbformat.v4.new_output("stream", name="stdout",
+                               text="CLAIMED_HEADLINE: 3.5\nREPRODUCED: 3.25e0\n"),
+        nbformat.v4.new_output("execute_result", execution_count=1, data={
+            "text/plain": "df", "text/html": "<table><tr><td>1</td></tr></table>"}),
+    ]
+    nbformat.write(nb, str(tmp_path / "pipeline_r1.ipynb"))
+    got = read_notebook(tmp_path, "r1")
+    assert got["headline"] == {"reproduced": "3.25e0", "claimed": "3.5"}
+    assert got["cells"][0]["outputs"][1]["html"].startswith("<table")
+
+
+def test_read_notebook_headline_is_absent_when_the_notebook_prints_none(tmp_path):
+    import nbformat
+
+    from adda._src.viewer.readers import read_notebook
+    nbformat.write(nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell("x")]),
+                   str(tmp_path / "pipeline_r1.ipynb"))
+    assert read_notebook(tmp_path, "r1")["headline"] == {"reproduced": None, "claimed": None}
 
 
 def test_read_vitals_counts_calls_with_no_recorded_cost_as_unknown(tmp_path):

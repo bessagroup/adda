@@ -1,0 +1,1 @@
+KaTeX 0.16.11 (MIT), vendored from the npm package; only the woff2 fonts are kept. Loaded on demand by the Deliverable view; nothing is fetched from a CDN.

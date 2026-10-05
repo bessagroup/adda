@@ -60,7 +60,7 @@ def test_the_viewer_carries_no_study_vocabulary():
     terms = set(_BENCHMARK_TERMS) | _study_terms()
     found = {}
     for path in _SCANNED:
-        if path.suffix not in _SUFFIXES or not path.is_file():
+        if path.suffix not in _SUFFIXES or not path.is_file() or "vendor" in path.parts:
             continue
         hit = _hits(path.read_text(encoding="utf-8", errors="ignore"), terms)
         if hit:

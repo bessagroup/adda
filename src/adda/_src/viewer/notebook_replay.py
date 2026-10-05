@@ -10,7 +10,6 @@ a multi-threaded server would leak into every other request.
 from __future__ import annotations
 
 import json
-import re
 import shlex
 import subprocess
 import sys
@@ -25,6 +24,7 @@ import yaml
 __all__ = ["ReplayError", "replay_notebook"]
 
 _RESULT_MARK = "ADDA_REPLAY_RESULT "
+_EVENT_MARK = "ADDA_REPLAY_EVENT "
 _DEFAULT_TIMEOUT_S = 300.0
 # Sandbox copy + snapshots around the notebook's own time limit.
 _OVERHEAD_S = 120.0
@@ -63,13 +63,15 @@ def _kill_tree(proc: subprocess.Popen) -> None:
 
 
 def replay_notebook(
-    study_dir: Path | str, run_id: str, *, audit=None,
+    study_dir: Path | str, run_id: str, *, audit=None, on_event=None,
 ) -> dict[str, Any]:
     """Replay the run's deliverable and return pass/fail plus its output.
 
     ``passed`` is the gate's own contract: clean exit, zero new ledger rows,
     existing rows unchanged. ``audit(action, **fields)`` gets the exact
     command line before the child starts and the outcome after.
+    ``on_event(event)`` is called from this thread as the worker progresses:
+    ``{"event": "started" | "phase" | "cell", "line": <display text>, ...}``.
     """
     from . import readers
 
@@ -96,21 +98,47 @@ def replay_notebook(
         if audit:
             audit("reexecute", run_id=run_id, phase="run",
                   command=shlex.join(cmd))
+        emit = on_event or (lambda e: None)
+        emit({"event": "started", "run_id": run_id, "notebook": notebook.name,
+              "line": f"Re-executing {notebook.name} against a copy of the run's ledger"})
         t0 = time.time()
         proc = subprocess.Popen(  # noqa: S603 — fixed argv, no shell
             cmd, cwd=study_dir, stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             start_new_session=True)
+        out_lines: list[str] = []
+        err_parts: list[str] = []
+
+        def _pump_out() -> None:
+            for line in proc.stdout:
+                out_lines.append(line)
+                if line.startswith(_EVENT_MARK):
+                    try:
+                        emit(json.loads(line[len(_EVENT_MARK):]))
+                    except ValueError:
+                        pass
+
+        pumps = [threading.Thread(target=_pump_out, daemon=True),
+                 threading.Thread(
+                     target=lambda: err_parts.append(proc.stderr.read()),
+                     daemon=True)]
+        for t in pumps:
+            t.start()
         try:
-            out, err = proc.communicate(timeout=timeout + _OVERHEAD_S)
+            proc.wait(timeout=timeout + _OVERHEAD_S)
         except subprocess.TimeoutExpired:
             _kill_tree(proc)
-            proc.communicate()
+            proc.wait()
+            for t in pumps:
+                t.join(5)
             result: dict[str, Any] = {
                 "passed": False, "timed_out": True,
                 "error": f"did not finish within {timeout:.0f}s"}
         else:
-            result = _parse(out, err, proc.returncode)
+            for t in pumps:
+                t.join(5)
+            result = _parse("".join(out_lines), "".join(err_parts),
+                            proc.returncode)
         result.update(run_id=run_id, notebook=notebook.name,
                       duration_s=round(time.time() - t0, 1))
         if audit:
@@ -130,30 +158,44 @@ def _parse(out: str, err: str, returncode: int) -> dict[str, Any]:
             "stderr_tail": err[-_TAIL:]}
 
 
+def _event(event: str, line: str, **fields: Any) -> None:
+    print(_EVENT_MARK + json.dumps({"event": event, "line": line, **fields}),
+          flush=True)
+
+
 def _worker(args: dict[str, Any]) -> dict[str, Any]:
     from ..evaluation.notebook_exec import (
         ledger_snapshot,
+        parse_headline,
         replay_sandbox,
         run_deliverable,
     )
+
+    _event("phase", "Copying the run's ledger to a throwaway sandbox", name="sandbox")
 
     with replay_sandbox(
             Path(args["store_dir"]), Path(args["run_config"]),
             args["study_root"]) as (sandbox, sb_store, env):
         before_n, before_hash = ledger_snapshot(sb_store)
+        _event("phase", f"Ledger snapshot: {before_n} rows", name="ledger", rows=before_n)
         if before_n == 0:
             return {"passed": False, "timed_out": False,
                     "error": "the run's ledger has no rows to replay against"}
+        _event("phase", "Starting the notebook kernel", name="execute")
+
+        def _on_cell(done: int, total: int, errored: bool) -> None:
+            _event("cell", f"Cell {done} of {total} " + ("raised an error" if errored else "done"),
+                   done=done, total=total, errored=errored)
         try:
             proc = run_deliverable(
                 Path(args["notebook"]), cwd=sandbox, env=env,
-                timeout=args["timeout"])
+                timeout=args["timeout"], on_cell=_on_cell)
         except subprocess.TimeoutExpired:
             return {"passed": False, "timed_out": True,
                     "error": f"did not finish within {args['timeout']:.0f}s"}
+        _event("phase", "Checking the ledger: no new rows, existing rows unchanged", name="check")
         after_n, after_hash = ledger_snapshot(sb_store)
-    m = re.search(r"REPRODUCED:\s*([-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)",
-                  proc.stdout or "")
+    headline = parse_headline(proc.stdout)
     lazy = after_n == before_n
     unchanged = not (before_hash and after_hash and before_hash != after_hash)
     return {
@@ -161,7 +203,8 @@ def _worker(args: dict[str, Any]) -> dict[str, Any]:
         "timed_out": False, "returncode": proc.returncode,
         "rows_before": before_n, "rows_after": after_n,
         "lazy": lazy, "unchanged": unchanged,
-        "reproduced": m.group(1) if m else None,
+        "reproduced": headline["reproduced"],
+        "claimed": headline["claimed"],
         "stdout_tail": (proc.stdout or "")[-_TAIL:],
         "stderr_tail": (proc.stderr or "")[-_TAIL:],
     }

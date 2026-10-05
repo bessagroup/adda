@@ -659,13 +659,16 @@ def read_hypotheses(run_dir: Path | str) -> list[dict[str, Any]]:
 
 
 _CLOSED = {"SUPPORTED", "FALSIFIED", "INCONCLUSIVE"}
+_DOWNGRADED = {"SUPPORTED", "FALSIFIED"}
 
 
 def _status_steps(log: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The status log as the viewer draws it.
 
     An entry that returns a closed hypothesis to OPEN is a *retraction*: the
-    claim was withdrawn, a step back rather than forward. That is ledger
+    claim was withdrawn, a step back rather than forward. A *revision* is a
+    verdict downgraded to INCONCLUSIVE: weakened, not withdrawn, so it never
+    counts as a retraction. That is ledger
     semantics (it is what the ledger's own reopen rule is about), so it is
     resolved here and not re-derived in the client. ``delegation`` is the
     delegation the entry's evidence cites, if any.
@@ -678,6 +681,7 @@ def _status_steps(log: list[dict[str, Any]]) -> list[dict[str, Any]]:
                                      "triggered_by", "validator_note")},
             "delegation": (e.get("evidence") or {}).get("delegation"),
             "retraction": status == "OPEN" and prev in _CLOSED,
+            "revision": status == "INCONCLUSIVE" and prev in _DOWNGRADED,
         })
         prev = status
     return steps
@@ -1332,7 +1336,15 @@ def _normalize_output(out: dict[str, Any]) -> dict[str, Any] | None:
         text = data.get("text/plain", "")
         if isinstance(text, list):
             text = "".join(text)
-        return {"kind": "text", "text": text}
+        html = data.get("text/html", "")
+        if isinstance(html, list):
+            html = "".join(html)
+        res = {"kind": "text", "text": text}
+        # Tables (e.g. a rendered frame) are shown as tables; the client keeps
+        # only table markup from this, never scripts or styles.
+        if html and "<table" in html and len(html) <= 400_000:
+            res["html"] = html
+        return res
     return None
 
 
@@ -1411,8 +1423,13 @@ def read_notebook(
                 "execution_count": cell.get("execution_count"),
                 "outputs": [o for o in outs if o is not None],
             })
+    from ..evaluation.notebook_exec import parse_headline
+    stdout = "".join(o["text"] for c in cells if c["type"] == "code"
+                     for o in c["outputs"]
+                     if o["kind"] == "stream" and o.get("name") == "stdout")
     return {"cells": cells, "path": str(path),
-            "live": path == Path(study_dir) / "pipeline.ipynb", "error": None}
+            "live": path == Path(study_dir) / "pipeline.ipynb", "error": None,
+            "headline": parse_headline(stdout)}
 
 
 # Logs a client may ask for, by name. A name, never a path: the file is

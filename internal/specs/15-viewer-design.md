@@ -135,9 +135,10 @@ When an agent is waiting on a human, a question banner (§4.4) spans the full wi
   - **Keyboard:** `j`/`k` step through delegations in start order.
   - **Not yet in the prototype, required:** connectors from a card to its hypotheses' rows (spec 14 1.1) appear only for the selected card, as one faint line per hypothesis, never all at once.
 - **Hypotheses.**
-  - **Rows:** id; statement (full, wrapping); status mark plus word; a posterior bar with prior → posterior; linked delegations as id links.
+  - **Rows:** id; statement (clamped to four lines with a more/less toggle in the list; the inspector always has the full text); status mark plus word; a posterior bar with prior → posterior; linked delegations as id links.
   - **Selecting a row:** the inspector shows the falsification criterion, the prediction, and the full status history with validator notes. A retraction is drawn as a back-step in the history, not hidden.
   - **Filter chips:** all · open · closed · retracted, each with a count. *Open* means no verdict now; *closed* means a verdict now (supported, falsified or inconclusive); *retracted* means the status log ever returned a closed verdict to open, whatever the status is now. A retracted row carries a "retracted" tag.
+  - **Revision:** a downgrade (supported or falsified to inconclusive) is a revision, not a retraction: the history marks it "revised" in its own dashed style, and the retracted filter leaves it out.
   - **Linked delegations:** those that carry the hypothesis plus those its evidence cites.
   - **Empty states:** no hypothesis yet says what will appear; a filter with no match says what the filter means.
 - **Data.**
@@ -158,7 +159,8 @@ When an agent is waiting on a human, a question banner (§4.4) spans the full wi
     - **the stage funnel** (spec 14 2.2), stages side by side, each with its own pass count, labelled with column names. A funnel is drawn ONLY when the study declares its stages (`funnel: [col, …]` in config.yaml). Without a declaration the 0/1 columns are independent flags, not ordered stages, so a cumulative funnel over them would be meaningless. The default is instead one compact, sortable table titled "0/1 columns": column, count of 1s, n, and a small bar. No column name is ever built into the viewer;
     - **the store** as a virtualised table with sortable columns, the column picker remembered per viewer. Columns are sized to their content (numbers right-aligned); the table may be narrower than its panel and is left-aligned, never stretched to fill it.
   - **Store switcher:** it highlights. The focus store's dots are at full opacity, and its flags/funnel and table are shown. It never hides a store's dots or the best-so-far line, which always span every scored store. Selecting a row focuses its store.
-- **Deliverable.** The notebook rendered at a 75 ch prose measure, with figures and tables allowed to 1000 px. Math via KaTeX. A "Re-execute" button (spec 14, 5.8) streams progress into a log drawer and ends with a pass/fail mark.
+- **Deliverable.** The notebook rendered at a 75 ch prose measure, with figures and tables allowed to 1000 px. Math via KaTeX, vendored locally (no CDN at runtime). A "Re-execute" button (spec 14, 5.8) streams progress (`POST …/notebook/reexecute/stream`, NDJSON) into a log drawer and ends with a pass/fail mark.
+  - **Headline:** the run's own, as the notebook prints it (`REPRODUCED:` / `CLAIMED_HEADLINE:`), unconverted and never mixed with the store's best row (Q1). A stored notebook that carries no outputs has none to show; the strip says so, and shows the re-executed value once a Re-execute passes.
 - **Logs.** A live tail in mono, with source filter chips (orchestrator, watchdog, role transcripts) and a pause button. Lines that carry an id link it (P4).
 - **Setup.** The problem statement and config editors (spec 14, 3.1/3.2). Side-by-side diff before commit, a commit message field, and the study's history list (spec 14, 5.10).
 

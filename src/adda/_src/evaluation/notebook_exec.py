@@ -189,10 +189,30 @@ def _patched_environ(env: dict | None):
         os.environ.update(saved)
 
 
-def _execute_notebook(path: Path, cwd: Path, env: dict, timeout: float):
+_NUMBER = r"[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?"
+
+
+def parse_headline(stdout: str) -> dict[str, str | None]:
+    """The headline markers a deliverable prints: ``REPRODUCED: <v>`` (what its
+    own computation yields) and ``CLAIMED_HEADLINE: <v>`` (what its write-up
+    states). The strings as printed, ``None`` where a marker is absent."""
+    import re as _re
+
+    def _grab(tag: str):
+        m = _re.search(tag + r":\s*(" + _NUMBER + ")", stdout or "")
+        return m.group(1) if m else None
+
+    return {"reproduced": _grab("REPRODUCED"), "claimed": _grab("CLAIMED_HEADLINE")}
+
+
+def _execute_notebook(path: Path, cwd: Path, env: dict, timeout: float,
+                      on_cell=None):
     """Execute a notebook in THIS interpreter's env (so f3dasm/get_evaluator
     import) and return a CompletedProcess-shaped result. Raises
-    subprocess.TimeoutExpired on timeout (mirrors the .py path)."""
+    subprocess.TimeoutExpired on timeout (mirrors the .py path).
+
+    ``on_cell(done, total, errored)``, if given, is called after each code cell
+    finishes, so a caller can show progress while the kernel runs."""
     import nbformat
     from jupyter_client.manager import KernelManager
     from nbclient import NotebookClient
@@ -206,10 +226,21 @@ def _execute_notebook(path: Path, cwd: Path, env: dict, timeout: float):
         km.kernel_spec.argv[0] = sys.executable
     except Exception:  # noqa: BLE001 — fall back to the spec's python
         pass
+    hooks = {}
+    if on_cell is not None:
+        total = sum(1 for c in nb.cells if c.get("cell_type") == "code")
+        done = [0]
+
+        def _cell_done(cell, cell_index, execute_reply):
+            done[0] += 1
+            on_cell(done[0], total, any(
+                o.get("output_type") == "error" for o in cell.get("outputs", [])))
+        hooks["on_cell_executed"] = _cell_done
     client = NotebookClient(
         nb, km=km, timeout=int(timeout),
         allow_errors=True,                      # capture errors, don't raise
         resources={"metadata": {"path": str(cwd)}},
+        **hooks,
     )
     with _patched_environ(env):
         try:
@@ -317,13 +348,14 @@ def replay_sandbox(store_dir: Path, run_config: Path, study_root):
         shutil.rmtree(sandbox, ignore_errors=True)
 
 
-def run_deliverable(path: Path, *, cwd: Path, env: dict, timeout: float):
+def run_deliverable(path: Path, *, cwd: Path, env: dict, timeout: float,
+                    on_cell=None):
     """Run the deliverable; return a subprocess.CompletedProcess. `.ipynb` →
     nbclient (in-env kernel); anything else → `python <file>` subprocess.
     Raises subprocess.TimeoutExpired on timeout in BOTH paths."""
     path = Path(path)
     if path.suffix == ".ipynb" and notebook_available():
-        return _execute_notebook(path, Path(cwd), env, timeout)
+        return _execute_notebook(path, Path(cwd), env, timeout, on_cell)
     return subprocess.run(
         [sys.executable, str(path)],
         cwd=str(cwd), env=env, capture_output=True, text=True, timeout=timeout,

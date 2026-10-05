@@ -137,6 +137,41 @@ def hypothesis_shots(base: str, out: Path, problems: list[str]) -> None:
         browser.close()
 
 
+def deliverable_shots(base: str, out: Path, problems: list[str]) -> None:
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        for wname, (w, h) in WIDTHS.items():
+            for theme in THEMES:
+                ctx = browser.new_context(viewport={"width": w, "height": h},
+                                          color_scheme=theme)
+                pg = ctx.new_page()
+                pg.on("pageerror", lambda e: problems.append(f"JS error: {e}"))
+                pg.goto(f"{base}/session?token=shots&next=/ui?view=deliverable")
+                pg.wait_for_selector(".nbhead, .empty", timeout=8000)
+                pg.wait_for_timeout(800)
+                pg.screenshot(path=str(out / f"deliverable-{wname}-{theme}.png"))
+                sw = pg.evaluate("document.documentElement.scrollWidth - "
+                                 "document.documentElement.clientWidth")
+                if w <= 400 and sw > 0:
+                    problems.append(f"deliverable-{wname}-{theme}: horizontal scroll by {sw}px")
+                if pg.locator(".katex").count() == 0 and pg.locator("code.tex").count():
+                    problems.append(f"deliverable-{wname}-{theme}: math not rendered")
+                if pg.locator("#reexec").count() and theme == "light":
+                    pg.locator("#nbcode").check()
+                    pg.locator("#reexec").click()
+                    try:
+                        pg.wait_for_selector("#drawer:not([hidden]) .st.ok, #drawer:not([hidden]) .st.bad",
+                                             timeout=120000)
+                    except Exception:  # noqa: BLE001
+                        problems.append(f"deliverable-{wname}: no verdict from the re-execution")
+                    pg.wait_for_timeout(300)
+                    pg.screenshot(path=str(out / f"deliverable-reexec-{wname}-{theme}.png"))
+                ctx.close()
+        browser.close()
+
+
 def banner_shots(base: str, out: Path, problems: list[str]) -> None:
     from playwright.sync_api import sync_playwright
 
@@ -173,6 +208,7 @@ def main() -> int:
     ap.add_argument("--objective", metavar="JSON",
                     help="objective declaration (JSON file) to record on a copy of the run")
     ap.add_argument("--hypotheses", action="store_true", help="shoot the Hypotheses view")
+    ap.add_argument("--deliverable", action="store_true", help="shoot the Deliverable view")
     ap.add_argument("--banner", action="store_true",
                     help="shoot the question banner on a fixture with a pending question")
     a = ap.parse_args()
@@ -182,7 +218,7 @@ def main() -> int:
     study = (question_fixture(Path(a.study)) if a.banner
              else data_fixture(Path(a.study), json.loads(Path(a.objective).read_text()))
              if a.objective else Path(a.study))
-    cfg = uvicorn.Config(create_app(study), host="127.0.0.1",
+    cfg = uvicorn.Config(create_app(study, token="shots"), host="127.0.0.1",
                          port=a.port, log_level="error")
     server = uvicorn.Server(cfg)
     threading.Thread(target=server.run, daemon=True).start()
@@ -197,8 +233,9 @@ def main() -> int:
     from playwright.sync_api import sync_playwright
 
     problems: list[str] = []
-    if a.banner or a.data or a.hypotheses:
-        (banner_shots if a.banner else hypothesis_shots if a.hypotheses else data_shots)(base, out, problems)
+    if a.banner or a.data or a.hypotheses or a.deliverable:
+        (banner_shots if a.banner else hypothesis_shots if a.hypotheses
+         else deliverable_shots if a.deliverable else data_shots)(base, out, problems)
         server.should_exit = True
         for p in problems:
             print("PROBLEM:", p)

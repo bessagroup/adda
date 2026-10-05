@@ -5,5 +5,5 @@ recursive-include src *.py *.pyi
 recursive-include src/adda/_src/knowledge *.md *.json
 recursive-include src/adda/_src/viewer/templates *.html
 recursive-include docs *.md *.rst *.ipynb
-recursive-include src/adda/_src/viewer/static *.woff2 *.txt *.html *.css *.js
+recursive-include src/adda/_src/viewer/static *.woff2 *.txt *.html *.css *.js LICENSE
 recursive-include src/adda/_src/infra *.yaml

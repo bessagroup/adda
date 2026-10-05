@@ -81,7 +81,7 @@ def test_no_horizontal_scroll_on_a_phone(tmp_path, page):
 def test_unbuilt_views_say_what_will_appear(tmp_path, page):
     study, _ = _study(tmp_path)
     with _LiveServer(create_app(study)) as srv:
-        page.goto(f"{srv.url}/ui?run={RUN}&view=deliverable")
+        page.goto(f"{srv.url}/ui?run={RUN}&view=logs")
         page.wait_for_selector(".empty")
         assert "isn't available" in page.locator(".empty").inner_text()
 
@@ -462,3 +462,147 @@ def test_the_store_table_is_sized_to_its_content_not_stretched(tmp_path, page):
         tbl, panel = page.locator("#tbl").bounding_box(), page.locator(".data .dh").first.bounding_box()
         assert tbl["width"] < panel["width"] * 0.6
         assert abs(tbl["x"] - panel["x"]) < 2
+
+
+def test_a_long_statement_is_clamped_to_four_lines_with_a_more_toggle(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    hyps = _hyps()
+    hyps["H1"]["statement"] = "A long statement " * 60
+    _ledger(run_dir, hyps)
+    with _LiveServer(create_app(study)) as srv:
+        page.set_viewport_size({"width": 1400, "height": 900})
+        page.goto(f"{srv.url}/ui?run={RUN}&view=hypotheses")
+        page.wait_for_selector(".hrow")
+        h1, h2 = page.locator(".hrow", has_text="H1"), page.locator(".hrow", has_text="second")
+        assert h2.locator(".more").is_hidden()
+        lh = h1.locator(".clamp").evaluate("e => parseFloat(getComputedStyle(e).lineHeight)")
+        short = h1.locator(".clamp").evaluate("e => e.clientHeight")
+        assert short <= 4 * lh + 1
+        h1.locator(".more").click()
+        assert h1.locator(".more").inner_text() == "less"
+        assert h1.locator(".clamp").evaluate("e => e.clientHeight") > short
+        assert "sel=" not in page.url
+        h1.locator(".more").click()
+        assert h1.locator(".clamp").evaluate("e => e.clientHeight") == short
+
+
+def test_a_downgrade_is_revised_not_retracted(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    hyps = _hyps()
+    hyps["H3"]["status_log"] = [
+        {"status": "OPEN", "posterior": 0.3}, {"status": "SUPPORTED", "posterior": 0.8},
+        {"status": "INCONCLUSIVE", "posterior": 0.5}]
+    _ledger(run_dir, hyps)
+    with _LiveServer(create_app(study)) as srv:
+        page.set_viewport_size({"width": 1400, "height": 900})
+        page.goto(f"{srv.url}/ui?run={RUN}&view=hypotheses&sel=H3")
+        page.wait_for_selector(".hist li")
+        assert page.locator(".hist li.revised").count() == 1
+        assert page.locator(".hist li.stepback").count() == 0
+        assert "revised" in page.locator(".hist li.revised").inner_text()
+        page.locator("[data-hfilter=retracted]").click()
+        assert {t.split()[0] for t in page.locator(".hrow").all_inner_texts()} == {"H2"}
+
+
+def _notebook(study, cells, run=RUN):
+    import nbformat
+
+    nb = nbformat.v4.new_notebook(cells=cells)
+    nb.metadata["agentic"] = {"run": run}
+    nbformat.write(nb, str(study / "pipeline.ipynb"))
+
+
+def _nb_cells():
+    import nbformat
+
+    code = nbformat.v4.new_code_cell("print('REPRODUCED: 0.25')")
+    code.outputs = [
+        nbformat.v4.new_output("stream", name="stdout",
+                               text="REPRODUCED: 0.25\nCLAIMED_HEADLINE: 0.25\n"),
+        nbformat.v4.new_output("display_data", data={
+            "text/plain": "frame",
+            "text/html": "<table><tr><th>a</th></tr><tr><td>1<script>window.pwn=1</script></td></tr></table>"})]
+    return [nbformat.v4.new_markdown_cell(
+                "# Title\n\nThe energy is $E = mc^2$ and a [link](https://example.org).\n\n"
+                "$$\\int_0^1 x\\,dx = \\tfrac12$$\n\n" + "Prose sentence. " * 40), code]
+
+
+def test_the_deliverable_is_prose_at_75ch_with_local_math_and_the_notebook_headline(tmp_path, page):
+    study, _ = _study(tmp_path)
+    _notebook(study, _nb_cells())
+    external = []
+    page.on("request", lambda r: external.append(r.url) if not r.url.startswith("http://127.0.0.1") and not r.url.startswith("data:") else None)
+    with _LiveServer(create_app(study)) as srv:
+        page.set_viewport_size({"width": 1400, "height": 900})
+        page.goto(f"{srv.url}/ui?run={RUN}&view=deliverable")
+        page.wait_for_selector(".nbmd .katex", timeout=8000)
+        assert page.locator(".nbmd .katex-display").count() == 1
+        width = page.locator(".nbmd").first.evaluate("e => e.getBoundingClientRect().width")
+        ch = page.evaluate("(() => { const s = document.createElement('span'); s.style.cssText = 'font:400 14px Instrument Sans,system-ui,sans-serif;position:absolute;visibility:hidden'; s.textContent = '0'.repeat(75); document.body.appendChild(s); const w = s.getBoundingClientRect().width; s.remove(); return w })()")
+        assert width < ch * 1.15 and width < 900
+        assert page.locator(".nbhead").inner_text().count("0.25") >= 1
+        assert "not" in page.locator(".nbhead").inner_text().lower()
+        assert page.locator(".nb .tbl table").count() == 1
+        assert page.evaluate("window.pwn") is None
+        assert page.locator("a[href='https://example.org']").count() == 1
+        assert page.locator("details.nbcode").count() == 1 and not page.locator("details.nbcode[open]").count()
+        page.locator("#nbcode").check()
+        assert page.locator("details.nbcode[open]").count() == 1
+    assert external == []
+
+
+def test_a_notebook_without_a_headline_marker_states_none_instead_of_borrowing_one(tmp_path, page):
+    import nbformat
+
+    study, _ = _study(tmp_path)
+    _notebook(study, [nbformat.v4.new_markdown_cell("only prose")])
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=deliverable")
+        page.wait_for_selector(".nbhead")
+        assert "REPRODUCED" in page.locator(".nbhead").inner_text() or \
+            page.locator(".nbhead .dash, .nbhead [title]").count() >= 1
+
+
+def test_a_run_without_a_notebook_says_so(tmp_path, page):
+    study, _ = _study(tmp_path)
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=deliverable")
+        page.wait_for_selector(".empty")
+        assert "no pipeline notebook" in page.locator(".empty").inner_text()
+
+
+def test_re_execute_streams_into_a_drawer_and_ends_with_a_pass_mark(tmp_path, page, monkeypatch):
+    from adda._src.viewer import notebook_replay
+
+    def fake(study_dir, run_id, *, audit=None, on_event=None):
+        on_event({"event": "started", "line": "started"})
+        for i in (1, 2):
+            on_event({"event": "cell", "line": f"cell {i}/2", "done": i, "total": 2, "errored": False})
+        return {"passed": True, "run_id": run_id, "reproduced": "0.25", "rows_before": 3,
+                "rows_after": 3, "duration_s": 1.5, "stdout_tail": "", "stderr_tail": ""}
+
+    monkeypatch.setattr(notebook_replay, "replay_notebook", fake)
+    study, _ = _study(tmp_path)
+    _notebook(study, _nb_cells())
+    with _LiveServer(create_app(study, token="t")) as srv:
+        page.set_viewport_size({"width": 1400, "height": 900})
+        page.goto(f"{srv.url}/session?token=t&next=/ui?run={RUN}%26view=deliverable")
+        page.wait_for_selector("#reexec")
+        page.click("#reexec")
+        page.wait_for_selector("#drawer:not([hidden]) .st.ok", timeout=8000)
+        text = page.locator("#drawer").inner_text()
+        assert "cell 2/2" in text and "PASSED" in text
+        assert "matches" in page.locator(".nbhead").inner_text()
+        page.locator("[data-drawer-close]").click()
+        assert page.locator("#drawer").is_hidden()
+
+
+def test_re_execute_without_the_write_token_says_the_page_is_read_only(tmp_path, page):
+    study, _ = _study(tmp_path)
+    _notebook(study, _nb_cells())
+    with _LiveServer(create_app(study, token="t")) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=deliverable")
+        page.wait_for_selector("#reexec")
+        page.click("#reexec")
+        page.wait_for_selector("#drawer:not([hidden]) .st.bad", timeout=8000)
+        assert "read-only" in page.locator("#drawer").inner_text()

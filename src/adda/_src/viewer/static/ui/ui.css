@@ -396,3 +396,41 @@ a.idlink:hover{text-decoration:underline}
 .hist .by{font-size:var(--t-meta);color:var(--ink-3);margin-top:var(--s1)}
 .hist .vnote{margin-top:var(--s2);padding:var(--s2) var(--s3);background:var(--sunken);border-radius:var(--r-ctl);font-size:var(--t-meta);color:var(--ink-2)}
 .hist .vnote b{color:var(--ink);margin-right:var(--s1)}
+
+/* Hypotheses: statement clamp and the revised mark (spec 15 4.3) */
+.hrow .clamp{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;line-clamp:4;overflow:hidden}
+.hrow.open .clamp{display:block;overflow:visible}
+.hrow .more{border:0;background:none;padding:0;margin-top:var(--s1);font-size:var(--t-meta);color:var(--select);cursor:pointer;text-decoration:underline}
+.hist li.revised::before{border-color:var(--warn);background:var(--surface);border-style:dashed}
+.hist .arrow.rev{font-weight:400}
+.chip.rev{background:transparent;border:1px dashed var(--warn);color:var(--warn);margin-left:var(--s1)}
+
+/* Deliverable (spec 15 4.3): prose at 75ch, figures and tables up to 1000px */
+.nb .md.nbmd{max-width:75ch}
+.nb .nbcell,.nb .nbmd{margin:var(--s3) 0}
+.nb .nbfig{margin:var(--s3) 0;max-width:1000px}
+.nb .nbfig img{display:block;max-width:100%;height:auto;background:white;border-radius:var(--r-ctl)}
+.nb .tbl{max-width:1000px;overflow:auto;margin:var(--s3) 0;border:1px solid var(--rule);border-radius:var(--r-ctl)}
+.nb .tbl table{border-collapse:collapse;font-size:var(--t-data);width:100%}
+.nb .tbl th,.nb .tbl td{border-bottom:1px solid var(--rule);padding:var(--s1) var(--s3);text-align:right;font-family:var(--f-mono);white-space:nowrap}
+.nb .tbl th{background:var(--surface-2);font-weight:500}
+.nb pre.nbout{max-width:1000px;margin:var(--s2) 0;padding:var(--s2) var(--s3);background:var(--sunken);border-radius:var(--r-ctl);font:400 var(--t-meta)/1.45 var(--f-mono);overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;max-height:24em}
+.nb pre.nbout.err{color:var(--bad)}
+.nb .nbcode{max-width:1000px;margin:var(--s2) 0}
+.nb .nbcode summary{font-size:var(--t-meta);color:var(--ink-3);cursor:pointer}
+.nb .nbcode pre{margin:var(--s2) 0 0;padding:var(--s3);background:var(--surface-2);border:1px solid var(--rule);border-radius:var(--r-ctl);font:400 var(--t-meta)/1.45 var(--f-mono);overflow:auto}
+.nb .tex{font:400 var(--t-meta)/1.4 var(--f-mono)}
+.nb .katex-display{overflow-x:auto;overflow-y:hidden}
+.nbhead{display:grid;grid-template-columns:minmax(120px,max-content) minmax(0,1fr);gap:var(--s5);padding:var(--s3) var(--s4);margin:var(--s3) 0 var(--s4);background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-panel);max-width:1000px}
+.nbhead .hv{font:500 var(--t-vital)/1.1 var(--f-ui);letter-spacing:-.02em}
+.nbhead .nhn{font-size:var(--t-data);color:var(--ink-2)}
+.nbhead .nhn p{margin:0 0 var(--s1)}
+.nbhead code{font:400 var(--t-meta)/1.4 var(--f-mono)}
+@media (max-width:819px){.nbhead{grid-template-columns:1fr;gap:var(--s2)}}
+
+.drawer{border-top:1px solid var(--rule-strong);background:var(--surface);display:flex;flex-direction:column;height:40vh;min-height:0}
+.drawer[hidden]{display:none}
+.drawer .dhd{display:flex;align-items:center;gap:var(--s3);padding:var(--s2) var(--s4);border-bottom:1px solid var(--rule)}
+.drawer .dlog{flex:1;min-height:0;overflow:auto;padding:var(--s2) var(--s4);font:400 var(--t-meta)/1.5 var(--f-mono);white-space:pre-wrap;overflow-wrap:anywhere}
+.drawer .dlog .ok{color:var(--ok)} .drawer .dlog .bad{color:var(--bad)} .drawer .dlog .dim{color:var(--ink-3)}
+.hrow .hst .chip.retr{display:inline-block;margin:var(--s1) 0 0}

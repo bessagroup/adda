@@ -802,6 +802,51 @@ def create_app(
             return JSONResponse({"error": str(exc)}, status_code=409)
         return JSONResponse(out)
 
+    async def post_reexecute_stream(request):
+        """Re-execute as an NDJSON stream: one JSON object per line, progress
+        events first, a final ``{"event": "result", ...}``. Same checks and
+        verdict as ``post_reexecute``; a refusal is still a plain 409."""
+        refused = _check_write(request, token)
+        if refused is not None:
+            return refused
+        run_id = request.path_params["run_id"]
+        if _run_dir(study_dir, run_id) is None:
+            return _not_found(f"no such run {run_id!r}")
+        loop = asyncio.get_running_loop()
+        q: asyncio.Queue = asyncio.Queue()
+
+        def put(item):
+            loop.call_soon_threadsafe(q.put_nowait, item)
+
+        def work():
+            try:
+                out = notebook_replay.replay_notebook(
+                    study_dir, run_id, on_event=put,
+                    audit=lambda action, **f: _audit(study_dir, action, **f))
+                put({"event": "result", **out})
+            except notebook_replay.ReplayError as exc:
+                put({"event": "refused", "error": str(exc)})
+            except Exception as exc:  # noqa: BLE001 — surface, never hang the stream
+                put({"event": "result", "passed": False, "run_id": run_id,
+                     "error": f"the re-execution failed: {exc}"})
+            finally:
+                put(None)
+
+        threading.Thread(target=work, daemon=True).start()
+        first = await q.get()
+        if first is not None and first.get("event") == "refused":
+            return JSONResponse({"error": first["error"]}, status_code=409)
+
+        async def lines():
+            item = first
+            while item is not None:
+                yield json.dumps(item, default=str) + "\n"
+                item = await q.get()
+
+        return StreamingResponse(
+            lines(), media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
     async def post_kill(request):
         refused = _check_write(request, token)
         if refused is not None:
@@ -1265,6 +1310,8 @@ def create_app(
         Route("/api/runs/{run_id}/notebook", get_notebook),
         Route("/api/runs/{run_id}/notebook/reexecute", post_reexecute,
               methods=["POST"]),
+        Route("/api/runs/{run_id}/notebook/reexecute/stream",
+              post_reexecute_stream, methods=["POST"]),
         Route("/api/runs/{run_id}/problem_statement", get_problem_statement),
         Route("/api/runs/{run_id}/diagnostics", get_diagnostics),
         Route("/api/runs/{run_id}/notes", get_notes),

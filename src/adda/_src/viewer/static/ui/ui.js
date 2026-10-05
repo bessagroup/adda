@@ -9,7 +9,6 @@ const VIEWS = [
   ["deliverable", "Deliverable"], ["logs", "Logs"], ["setup", "Setup"],
 ];
 const UNBUILT = {
-  deliverable: ["Deliverable", "This view isn't available in this version of the viewer yet."],
   logs: ["Logs", "This view isn't available in this version of the viewer yet."],
   setup: ["Setup", "This view isn't available in this version of the viewer yet."],
 };
@@ -22,6 +21,8 @@ const S = {
   reviews: [], evidence: {}, follow: false, timer: null, sig: "", loaded: false,
   error: null, questions: [], drafts: {}, errs: {}, holding: {}, toast: null, qsig: "",
   data: null, dsig: "", ns: undefined, sort: null, cols: null, tscroll: 0,
+  nb: null, nbsig: "", nbrun: null, codeOpen: false, hopen: {},
+  rx: { state: "idle", run: null, lines: [], result: null, open: false },
 };
 
 /* ── helpers ─────────────────────────────────────────────────────────────── */
@@ -84,7 +85,8 @@ function known() {
 function inline(t) {
   return t.replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/(^|[^*\w])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>");
+    .replace(/(^|[^*\w])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>")
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
 }
 function md(src) {
   const lines = esc(src || "").replace(/\r/g, "").split("\n");
@@ -171,6 +173,7 @@ function nav(over, replace) {
   render();
   if (S.sel) ensureEvidence(S.sel);
   if (wantsData()) loadData();
+  if (S.view === "deliverable") loadNotebook();
 }
 
 /* ── data ────────────────────────────────────────────────────────────────── */
@@ -182,6 +185,7 @@ async function get(path) {
 function resetRun() {
   lastRun = S.run;
   S.vitals = null; S.dels = []; S.ledger = { hypotheses: [], milestones: [] };
+  S.nb = null; S.nbsig = ""; S.nbrun = null;
   S.fom = null; S.data = null; S.dsig = ""; S.ns = undefined; S.xmode = "eval"; S.logy = false; S.sort = null; S.tscroll = 0;
   S.reviews = []; S.evidence = {}; S.sig = ""; S.loaded = false; S.error = null; S.questions = []; S.qsig = "";
   clearTimeout(S.timer);
@@ -217,6 +221,7 @@ async function tick() {
     paintBanner();
     if (sig !== S.sig) { S.sig = sig; render(); }
     if (wantsData()) loadData();
+    if (S.view === "deliverable") loadNotebook();
   } catch (e) {
     S.error = String(e.message || e);
     paintNotice();
@@ -250,7 +255,7 @@ async function ensureEvidence(id) {
 
 /* ── rendering ───────────────────────────────────────────────────────────── */
 function render() {
-  paintNav(); paintTitle(); paintNotice(); paintViews(); paintInspector(); paintWork(); paintBanner();
+  paintNav(); paintTitle(); paintNotice(); paintViews(); paintInspector(); paintWork(); paintBanner(); paintDrawer();
 }
 function paintNav() {
   $("studyname").textContent = S.vitals && S.vitals.study ? S.vitals.study : "";
@@ -379,7 +384,8 @@ function paintWork() {
   const w = $("work"), top = w.scrollTop;
   if (!S.loaded) { w.innerHTML = '<div class="skel"><div></div><div></div><div></div></div>'; return; }
   if (S.view === "data") { paintData(w); return; }
-  if (S.view === "hypotheses") { w.innerHTML = hypothesesHtml(); return; }
+  if (S.view === "hypotheses") { w.innerHTML = hypothesesHtml(); markClamps(w); return; }
+  if (S.view === "deliverable") { paintDeliverable(w, top); return; }
   if (S.view !== "timeline") {
     const [t, d] = UNBUILT[S.view];
     w.innerHTML = `<div class="empty"><h3>${t}</h3><p>${d}</p></div>`; return;
@@ -543,14 +549,23 @@ function hypothesesHtml() {
     retracted: "No hypothesis has been retracted. A retraction is a verdict the strategizer later withdrew, returning the hypothesis to open." }[f];
   const rows = sets[f].map((h) => {
     const dels = hypDelegations(h).map((id) => `<a class="mono" href="${esc(url({ sel: id }))}" data-sel="${esc(id)}">${esc(id)}</a>`).join("");
-    return `<div class="hrow${S.sel === h.id ? " sel" : ""}" role="button" tabindex="0" data-sel="${esc(h.id)}">` +
+    return `<div class="hrow${S.sel === h.id ? " sel" : ""}${S.hopen[h.id] ? " open" : ""}" role="button" tabindex="0" data-sel="${esc(h.id)}">` +
       `<span class="mono hid">${esc(h.id)}</span>` +
-      `<div class="hst">${esc(h.statement || "")}${hypRetracted(h) ? ` <span class="chip retr" title="This hypothesis was returned to open after a verdict.">retracted${h.retractions > 1 ? " ×" + h.retractions : ""}</span>` : ""}</div>` +
+      `<div class="hst"><div class="clamp">${esc(h.statement || "")}</div><button type="button" class="more" data-hmore="${esc(h.id)}" hidden>more</button>${hypRetracted(h) ? ` <span class="chip retr" title="This hypothesis was returned to open after a verdict.">retracted${h.retractions > 1 ? " ×" + h.retractions : ""}</span>` : ""}</div>` +
       `<div class="hv">${stMark(hypState(h))}</div>${beliefBar(h)}` +
       `<div class="hd">${dels || '<span class="none">none yet</span>'}</div></div>`;
   }).join("");
   return `<div class="data hyps"><div class="dh"><h3>Hypotheses</h3><span class="dcap">${all.length} stated · ${sets.open.length} open · ${sets.closed.length} with a verdict</span><span class="sp"></span>${chips}</div>` +
     (rows ? `<div class="hlist">${rows}</div>` : `<p class="dnote">${none}</p>`) + `</div>`;
+}
+function markClamps(w) {
+  w.querySelectorAll(".hrow").forEach((row) => {
+    const c = row.querySelector(".clamp"), b = row.querySelector(".more");
+    if (!c || !b) return;
+    const open = row.classList.contains("open");
+    b.hidden = !(open || c.scrollHeight > c.clientHeight + 1);
+    b.textContent = open ? "less" : "more";
+  });
 }
 function historyHtml(h) {
   const log = h.status_log || [], t0 = runT0();
@@ -558,8 +573,8 @@ function historyHtml(h) {
   return `<ol class="hist">` + log.map((e) => {
     const t = parseT(e.ts), when = t != null && isFinite(t0) ? fmtElapsed(t - t0) : "";
     const d = e.delegation ? `<a class="mono" href="${esc(url({ sel: e.delegation }))}" data-sel="${esc(e.delegation)}">${esc(e.delegation)}</a>` : "";
-    return `<li class="${e.retraction ? "stepback" : ""}"><div class="hh">${e.retraction ? '<span class="arrow" aria-hidden="true">↩</span>' : ""}${stMark(hypState(e))}` +
-      `${e.retraction ? '<span class="chip retr">retracted</span>' : ""}<span class="pp">${e.posterior == null ? "" : "belief " + pct(e.posterior)}</span><span class="sp"></span><span class="when">${esc(when)}</span></div>` +
+    return `<li class="${e.retraction ? "stepback" : e.revision ? "revised" : ""}"><div class="hh">${e.retraction ? '<span class="arrow" aria-hidden="true">↩</span>' : e.revision ? '<span class="arrow rev" aria-hidden="true">↘</span>' : ""}${stMark(hypState(e))}` +
+      `${e.retraction ? '<span class="chip retr">retracted</span>' : e.revision ? '<span class="chip rev" title="The verdict was weakened to inconclusive, not withdrawn.">revised</span>' : ""}<span class="pp">${e.posterior == null ? "" : "belief " + pct(e.posterior)}</span><span class="sp"></span><span class="when">${esc(when)}</span></div>` +
       (e.comment ? `<p>${esc(e.comment)}</p>` : "") +
       (d || e.triggered_by ? `<div class="by">${d ? "evidence " + d : ""}${d && e.triggered_by ? " · " : ""}${e.triggered_by ? "after " + esc(e.triggered_by) : ""}</div>` : "") +
       (e.validator_note ? `<div class="vnote"><b>Validator</b> ${esc(e.validator_note)}</div>` : "") + `</li>`;
@@ -575,6 +590,184 @@ function hypothesisHtml(h) {
     field("Statement", h.statement) + field("Falsification criterion", h.falsification_criterion) + field("Prediction", h.prediction) +
     sec("Status history", historyHtml(h)) +
     sec("Delegations", list ? `<div class="links">${list}</div>` : '<p class="none">No delegation has been tied to this hypothesis yet.</p>');
+}
+
+/* ── Deliverable view (spec 15 4.3) ──────────────────────────────────────── */
+let katexP = null;
+function loadKatex() {
+  if (window.katex) return Promise.resolve(true);
+  if (!katexP) {
+    katexP = new Promise((res) => {
+      const l = document.createElement("link");
+      l.rel = "stylesheet"; l.href = "/static/vendor/katex/katex.min.css"; document.head.appendChild(l);
+      const sc = document.createElement("script");
+      sc.src = "/static/vendor/katex/katex.min.js"; sc.onload = () => res(true); sc.onerror = () => res(false);
+      document.head.appendChild(sc);
+    });
+  }
+  return katexP;
+}
+function texHtml(tex, display) {
+  if (window.katex) {
+    try { return window.katex.renderToString(tex, { displayMode: display, throwOnError: false }); } catch (e) { /* fall through to the source */ }
+  }
+  return `<code class="tex">${esc(tex)}</code>`;
+}
+/* Math is lifted out before the markdown pass (which escapes angle brackets) and put back after. */
+function mdMath(src) {
+  const math = [];
+  const stash = (tex, display) => { math.push([tex, display]); return "\u0001" + (math.length - 1) + "\u0002"; };
+  const text = String(src || "").replace(/<!--[\s\S]*?-->\n?/g, "").split(/(```[\s\S]*?```|`[^`\n]*`)/).map((p, i) => (i % 2 ? p : p
+    .replace(/\$\$([\s\S]+?)\$\$/g, (m, x) => stash(x, true))
+    .replace(/\\\[([\s\S]+?)\\\]/g, (m, x) => stash(x, true))
+    .replace(/\\\(([\s\S]+?)\\\)/g, (m, x) => stash(x, false))
+    .replace(/(^|[^\\$\w])\$(?!\s)([^$\n]*[^$\s\\])\$(?![\w$])/g, (m, a, x) => a + stash(x, false)))).join("");
+  return md(text).replace(/\u0001(\d+)\u0002/g, (m, n) => texHtml(math[n][0], math[n][1]));
+}
+const TBL_OK = new Set(["TABLE", "THEAD", "TBODY", "TFOOT", "TR", "TH", "TD", "CAPTION"]);
+/* A notebook's HTML output is untrusted: rebuild only its tables, from escaped text. */
+function safeTable(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const walk = (n) => {
+    if (n.nodeType === 3) return esc(n.nodeValue);
+    if (n.nodeType !== 1 || n.tagName === "SCRIPT" || n.tagName === "STYLE") return "";
+    const kids = [...n.childNodes].map(walk).join("");
+    if (!TBL_OK.has(n.tagName)) return kids;
+    const t = n.tagName.toLowerCase();
+    const span = ["colspan", "rowspan"].map((a) => (/^\d{1,3}$/.test(n.getAttribute(a) || "") ? ` ${a}="${n.getAttribute(a)}"` : "")).join("");
+    return `<${t}${span}>${kids}</${t}>`;
+  };
+  return [...doc.body.querySelectorAll("table")].filter((t) => !t.parentElement.closest("table"))
+    .map((t) => `<div class="tbl">${walk(t)}</div>`).join("");
+}
+const ANSI = /\u001b\[[0-9;]*[A-Za-z]/g;
+function nbOutput(o) {
+  const pre = (t, cls) => `<pre class="nbout${cls ? " " + cls : ""}">${esc(String(t || "").replace(ANSI, ""))}</pre>`;
+  if (o.kind === "stream") return pre(o.text, o.name === "stderr" ? "err" : "");
+  if (o.kind === "error") return pre(o.text || o.ename + ": " + o.evalue, "err");
+  if (o.kind === "image") return `<figure class="nbfig"><img alt="Figure produced by the code cell above" src="data:${esc(o.mime)};base64,${esc(String(o.data).replace(/\s/g, ""))}"></figure>`;
+  if (o.kind === "image_too_large") return '<p class="none">A figure here is too large to show (over 4 MB).</p>';
+  if (o.kind === "text") return (o.html && safeTable(o.html)) || pre(o.text);
+  return "";
+}
+function nbCell(c) {
+  if (c.type === "markdown") return `<section class="md nbmd">${mdMath(c.source)}</section>`;
+  const n = (c.source || "").split("\n").length;
+  const code = (c.source || "").trim()
+    ? `<details class="nbcode"${S.codeOpen ? " open" : ""}><summary>Code · ${n} line${n === 1 ? "" : "s"}</summary><pre>${esc(c.source)}</pre></details>` : "";
+  return `<section class="nbcell">${code}${(c.outputs || []).map(nbOutput).join("")}</section>`;
+}
+const sameNum = (a, b) => { const x = parseFloat(a), y = parseFloat(b); return isFinite(x) && isFinite(y) && Math.abs(x - y) <= 1e-9 + 1e-3 * Math.abs(y); };
+/* The run's own headline: what the notebook prints, never the store's best row (spec 15 Q1). */
+function headlineHtml(nb) {
+  const h = nb.headline || {}, rx = S.rx.run === S.run && S.rx.result ? S.rx.result : null;
+  const notes = [];
+  let value;
+  if (h.reproduced != null) {
+    value = `<span class="mono">${esc(h.reproduced)}</span>`;
+    notes.push("Printed by the notebook as <code>REPRODUCED</code>, as written, with no unit conversion. This is the run’s own answer; the best row in the Data view is a different number, taken from the store.");
+    if (h.claimed != null) notes.push(sameNum(h.claimed, h.reproduced)
+      ? "The write-up states the same value."
+      : `<span class="st warn">differs</span> The write-up states <span class="mono">${esc(h.claimed)}</span> (<code>CLAIMED_HEADLINE</code>).`);
+  } else {
+    const kept = nb.cells.some((c) => (c.outputs || []).length);
+    value = rx && rx.passed && rx.reproduced != null ? `<span class="mono">${esc(rx.reproduced)}</span>` : dash("No REPRODUCED line in the notebook");
+    notes.push((kept ? "The stored outputs hold no <code>REPRODUCED</code> line." : "The stored notebook carries no outputs, so no <code>REPRODUCED</code> line.") +
+      " Re-execute prints the headline if the notebook computes one. Nothing is substituted from the store.");
+  }
+  if (rx && rx.reproduced != null) {
+    const v = `<span class="mono">${esc(rx.reproduced)}</span>`;
+    notes.push(!rx.passed ? `<span class="st bad">failed</span> Re-execution failed after printing ${v}; it is a partial result.`
+      : h.reproduced == null ? `<span class="st ok">passed</span> Re-execution printed ${v}.`
+      : sameNum(rx.reproduced, h.reproduced) ? `<span class="st ok">matches</span> Re-execution printed ${v}.`
+      : `<span class="st warn">differs</span> Re-execution printed ${v}.`);
+  }
+  return `<div class="nbhead"><div><div class="lbl">Notebook headline</div><div class="hv">${value}</div></div><div class="nhn">${notes.map((x) => `<p>${x}</p>`).join("")}</div></div>`;
+}
+function rxMark() {
+  if (S.rx.run !== S.run) return "";
+  return { running: '<span class="st live">re-executing</span>', passed: '<span class="st ok">passed</span>', failed: '<span class="st bad">failed</span>' }[S.rx.state] || "";
+}
+function paintDeliverable(w, top) {
+  const nb = S.nb;
+  if (!nb || S.nbrun !== S.run) { w.innerHTML = '<div class="skel"><div></div><div></div><div></div></div>'; return; }
+  if (nb.missing || nb.error) {
+    w.innerHTML = `<div class="empty"><h3>Deliverable</h3><p>${nb.error ? esc(nb.error) : "This run has no pipeline notebook. The implementer writes it before the run can close, so a run that never wrote one shows nothing here; that is a finding about the run."}</p></div>`;
+    return;
+  }
+  const name = String(nb.path || "").split("/").pop();
+  const running = S.rx.state === "running" && S.rx.run === S.run;
+  w.innerHTML = `<div class="data nb"><div class="dh"><h3>Deliverable</h3><span class="dcap">${esc(name)} · ${nb.cells.length} cell${nb.cells.length === 1 ? "" : "s"}</span><span class="sp"></span>` +
+    `<label class="toggle"><input type="checkbox" id="nbcode" ${S.codeOpen ? "checked" : ""}> Show code</label>${rxMark()}` +
+    `<button type="button" class="btn" id="reexec" ${running ? "disabled" : ""} title="Run the notebook again against a copy of this run’s ledger and check that it reproduces.">Re-execute</button></div>` +
+    headlineHtml(nb) + nb.cells.map(nbCell).join("") + `</div>`;
+  w.scrollTop = top;
+}
+let nbBusy = false;
+async function loadNotebook() {
+  const run = S.run; if (!run || nbBusy) return;
+  if (S.nb && S.nbrun === run && S.vitals && S.vitals.closed) return;
+  nbBusy = true;
+  try {
+    const r = await fetch("/api/runs/" + encodeURIComponent(run) + "/notebook", { headers: { Accept: "application/json" } });
+    if (!r.ok) throw new Error("notebook → " + r.status);
+    const text = await r.text();
+    if (run !== S.run) return;
+    const sig = text.length + ":" + run;
+    S.nb = JSON.parse(text); S.nbrun = run;
+    if (sig !== S.nbsig) { S.nbsig = sig; paintWork(); loadKatex().then((ok) => { if (ok && S.view === "deliverable") paintWork(); }); }
+  } catch (e) {
+    S.nb = { cells: [], error: "Could not read the notebook (" + String(e.message || e) + ")." }; S.nbrun = run; paintWork();
+  } finally { nbBusy = false; }
+}
+function rxLog(text, cls) { S.rx.lines.push([text, cls || ""]); }
+function rxFinish(passed, result) {
+  S.rx.state = passed ? "passed" : "failed"; S.rx.result = result; paintWork(); paintDrawer();
+}
+function rxFail(msg) { rxLog(msg, "bad"); rxFinish(false, null); }
+function rxEvent(ev) {
+  if (ev.event !== "result") { rxLog(ev.line, ev.event === "cell" && ev.errored ? "bad" : ""); paintDrawer(); return; }
+  const tail = (title, t) => { if (t && t.trim()) { rxLog("— " + title + " —", "dim"); String(t).replace(ANSI, "").trim().split("\n").forEach((l) => rxLog(l)); } };
+  tail("notebook output", ev.stdout_tail);
+  tail("errors", ev.stderr_tail);
+  if (ev.error) rxLog(ev.error, "bad");
+  const facts = [ev.rows_before != null ? `ledger ${ev.rows_before} → ${ev.rows_after} rows` : "", ev.duration_s != null ? ev.duration_s + " s" : ""].filter(Boolean).join(" · ");
+  rxLog((ev.passed ? "PASSED" : "FAILED") + (facts ? " · " + facts : ""), ev.passed ? "ok" : "bad");
+  rxFinish(!!ev.passed, ev);
+}
+async function reexecute() {
+  if (S.rx.state === "running" || !S.run) return;
+  const run = S.run;
+  S.rx = { state: "running", run, lines: [], result: null, open: true };
+  paintWork(); paintDrawer();
+  try {
+    const r = await fetch("/api/runs/" + encodeURIComponent(run) + "/notebook/reexecute/stream", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    if (r.status === 403 || r.status === 415) return rxFail("This page is read-only: open the /session?token=… URL printed when the viewer started to be allowed to re-execute.");
+    if (!r.ok) {
+      let m = ""; try { m = (await r.json()).error; } catch (e) { /* no body */ }
+      return rxFail(m || "The re-execution was not accepted (" + r.status + ").");
+    }
+    const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
+    for (;;) {
+      const { done, value } = await rd.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) { const ln = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (ln) rxEvent(JSON.parse(ln)); }
+    }
+  } catch (e) { if (S.rx.state === "running") return rxFail("Lost the connection to the viewer before a verdict arrived."); }
+  if (S.rx.state === "running") rxFail("The stream ended without a verdict.");
+}
+function paintDrawer() {
+  const d = $("drawer"), show = S.view === "deliverable" && S.rx.open && S.rx.run === S.run;
+  d.hidden = !show;
+  if (!show) return;
+  const prev = d.querySelector(".dlog"), stick = !prev || prev.scrollHeight - prev.scrollTop - prev.clientHeight < 24;
+  d.innerHTML = `<div class="dhd"><b>Re-execution</b>${rxMark()}<span class="sp"></span><button type="button" class="btn ghost" data-drawer-close aria-label="Close the log">Close</button></div>` +
+    `<div class="dlog" role="log" aria-live="polite" tabindex="0">${S.rx.lines.map(([t, c]) => `<div class="${c}">${esc(t)}</div>`).join("")}</div>`;
+  const log = d.querySelector(".dlog");
+  if (stick) log.scrollTop = log.scrollHeight; else if (prev) log.scrollTop = prev.scrollTop;
 }
 
 /* ── Data view (spec 15 4.3) ─────────────────────────────────────────────── */
@@ -874,6 +1067,10 @@ document.addEventListener("scroll", (e) => {
   if (e.target && e.target.id === "tbl") { S.tscroll = e.target.scrollTop; paintRows(); }
 }, true);
 document.addEventListener("click", (e) => {
+  const hm = e.target.closest("[data-hmore]");
+  if (hm) { e.stopImmediatePropagation(); S.hopen[hm.dataset.hmore] = !S.hopen[hm.dataset.hmore]; paintWork(); return; }
+  if (e.target.closest("#reexec")) { reexecute(); return; }
+  if (e.target.closest("[data-drawer-close]")) { S.rx.open = false; paintDrawer(); return; }
   const ns = e.target.closest("[data-store]");
   if (ns) { S.ns = ns.dataset.store || null; S.tscroll = 0; S.sort = null; paintWork(); return; }
   const hf = e.target.closest("[data-hfilter]");
@@ -935,6 +1132,7 @@ document.addEventListener("click", (e) => {
   if (r) { e.preventDefault(); nav({ run: r.dataset.run, sel: null }); return; }
 });
 document.addEventListener("change", (e) => {
+  if (e.target.id === "nbcode") { S.codeOpen = e.target.checked; paintWork(); return; }
   if (e.target.id === "follow") { S.follow = e.target.checked; paintWork(); }
 });
 let gPending = false;
@@ -945,7 +1143,7 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.key === "Escape") {
     const k = document.querySelector(".keys");
-    if (k) k.remove(); else if (S.sel) nav({ sel: null });
+    if (k) k.remove(); else if (!$("drawer").hidden) { S.rx.open = false; paintDrawer(); } else if (S.sel) nav({ sel: null });
     return;
   }
   if (e.target.classList.contains("grip") && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {

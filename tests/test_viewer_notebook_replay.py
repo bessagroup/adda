@@ -140,3 +140,36 @@ def test_a_second_replay_is_refused_while_one_runs(study):
         resp = _writer(study).post(
             f"/api/runs/{RUN}/notebook/reexecute", json={})
     assert resp.status_code == 409 and "already running" in resp.json()["error"]
+
+
+def test_the_stream_reports_progress_cell_by_cell_then_the_verdict(study):
+    _notebook(study, _LAZY)
+    with _writer(study).stream(
+            "POST", f"/api/runs/{RUN}/notebook/reexecute/stream", json={}) as resp:
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("application/x-ndjson")
+        events = [json.loads(line) for line in resp.iter_lines() if line]
+    kinds = [e["event"] for e in events]
+    assert kinds[0] == "started" and kinds[-1] == "result"
+    assert "cell" in kinds and kinds.index("cell") < kinds.index("result")
+    assert [e["name"] for e in events if e["event"] == "phase"] == [
+        "sandbox", "ledger", "execute", "check"]
+    assert all(e["line"] for e in events[:-1])
+    assert events[-1]["passed"] and events[-1]["reproduced"] == "2.0"
+
+
+def test_the_stream_refuses_with_a_409_before_streaming_when_busy(study):
+    _notebook(study, _LAZY)
+    lock = notebook_replay._locks.setdefault(str(study.resolve()),
+                                             notebook_replay.threading.Lock())
+    with lock:
+        resp = _writer(study).post(
+            f"/api/runs/{RUN}/notebook/reexecute/stream", json={})
+    assert resp.status_code == 409 and "already running" in resp.json()["error"]
+
+
+def test_the_stream_needs_the_write_token(study):
+    _notebook(study, _LAZY)
+    resp = TestClient(create_app(study)).post(
+        f"/api/runs/{RUN}/notebook/reexecute/stream", json={})
+    assert resp.status_code == 403

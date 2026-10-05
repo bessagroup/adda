@@ -1429,6 +1429,21 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   counts them). Selecting a row opens the falsification criterion, the prediction and the full status history in
   the inspector, each entry with its comment, evidence delegation and validator note; a retraction is drawn as a
   back-step (indented, with a return arrow). `viewer_shots.py --hypotheses` shoots it.
+  A statement is clamped to four lines in the list with a "more / less" toggle (the inspector always has the full
+  text). A downgrade (SUPPORTED or FALSIFIED to INCONCLUSIVE) is a revision, not a retraction: `read_hypotheses`
+  flags the entry `revision`, the history draws it with a dashed "revised" mark and no back-step, and the
+  retracted filter leaves it out.
+  **Build step 5, Deliverable view (spec 15 4.3):** the run's notebook as prose at a 75 ch measure, with figures
+  and tables up to 1000 px, code folded behind a "Show code" toggle, and notebook HTML tables rebuilt from table
+  markup only (never scripts or styles). Math ($..$, $$..$$, \\(..\\), \\[..\\]) is typeset by KaTeX, vendored under
+  `viewer/static/vendor/katex/` (woff2 fonts only, loaded on first use; no CDN at runtime). The headline strip
+  states what the notebook itself prints (`REPRODUCED:` / `CLAIMED_HEADLINE:`, parsed by
+  `notebook_exec.parse_headline`) exactly as printed, with no unit conversion and never the store's best row; a
+  stored notebook without outputs shows a dash and says why. **Re-execute** posts to the additive
+  `POST /api/runs/{run}/notebook/reexecute/stream` (NDJSON: `started`, `phase`, `cell` progress events from
+  `notebook_replay`, then a final `result`), which fills a log drawer and ends with a pass or fail mark and the
+  re-executed value next to the stored one. The earlier non-streaming endpoint is unchanged.
+  `viewer_shots.py --deliverable` shoots it, including a Re-execute.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);
   `agent_runtime.py`'s `AgenticRun.serve_viewer`; `pyproject.toml`'s `viewer`
