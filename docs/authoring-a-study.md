@@ -214,6 +214,9 @@ canonical store and each namespace. Results are therefore comparable across
 oracle families, and the best row names the store it came from. A store missing
 a declared column is listed as "not scored" rather than dropped.
 
+Without the block the ledger records `objective: undeclared`, judges rows by
+the finite rule alone, and reports the running min and max instead of a best.
+
 The viewer's stage funnel counts how many designs survive each 0/1 output
 column in turn. Declare the stages, in order, at the top level of config.yaml:
 
@@ -222,9 +225,8 @@ funnel: [valid, simulated, converged]
 ```
 
 Each must be an output the evaluator declares. With no `funnel:` the viewer
-shows every 0/1 output column in store order and ranks nothing.
-Without the block the ledger records `objective: undeclared`, judges rows by
-the finite rule alone, and reports the running min and max instead of a best.
+draws no funnel: the 0/1 columns are listed as independent flags (count of ones
+per column) in a compact table, because they are not ordered stages unless you say so.
 
 ## What the run produces
 

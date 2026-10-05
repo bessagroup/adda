@@ -1231,7 +1231,7 @@ def _funnel_run(tmp_path):
 
 
 def test_read_funnel_counts_cumulative_and_alone_and_names_the_binding_stage(tmp_path):
-    f = read_funnel(_funnel_run(tmp_path))
+    f = read_funnel(_funnel_run(tmp_path), ["gate_a", "gate_b", "gate_c"])
     (st,) = f["stores"]
     assert [r["column"] for r in st["stages"]] == ["gate_a", "gate_b", "gate_c"]
     assert [r["cumulative"] for r in st["stages"]] == [3, 2, 1]
@@ -1241,20 +1241,22 @@ def test_read_funnel_counts_cumulative_and_alone_and_names_the_binding_stage(tmp
     assert "score" not in st["available"]
 
 
-def test_read_funnel_with_no_declaration_lists_every_binary_column_in_store_order(tmp_path):
+def test_read_funnel_with_no_declaration_draws_no_stages_but_counts_every_flag(tmp_path):
     run = _funnel_run(tmp_path)
-    out = run / "experiment_data" / "experiment_data" / "output.csv"
-    out.write_text(out.read_text().replace("gate_a,gate_b,gate_c", "gate_c,gate_a,gate_b"), encoding="utf-8")
-    (st,) = read_funnel(run)["stores"]
-    assert [r["column"] for r in st["stages"]] == ["gate_c", "gate_a", "gate_b"]
+    f = read_funnel(run)
+    (st,) = f["stores"]
+    assert f["declared"] is False and st["stages"] == []
+    assert {r["column"]: (r["ones"], r["n"], r["unrecorded"]) for r in st["flags"]} == {
+        "gate_a": (3, 4, 0), "gate_b": (2, 4, 1), "gate_c": (3, 4, 0)}
 
 
 def test_read_funnel_uses_the_declared_order_from_run_config(tmp_path):
     run = _funnel_run(tmp_path)
     (run / "debug" / "run_config.json").write_text(
         json.dumps({"funnel": ["gate_b", "gate_a"]}), encoding="utf-8")
-    (st,) = read_funnel(run)["stores"]
-    assert [r["column"] for r in st["stages"]] == ["gate_b", "gate_a"]
+    f = read_funnel(run)
+    assert f["declared"] is True
+    assert [r["column"] for r in f["stores"][0]["stages"]] == ["gate_b", "gate_a"]
 
 
 def test_read_funnel_unrecorded_does_not_pass_and_is_counted(tmp_path):

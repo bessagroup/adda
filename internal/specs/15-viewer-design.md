@@ -151,11 +151,11 @@ When an agent is waiting on a human, a question banner (§4.4) spans the full wi
     - **A log-y toggle** appears when the counted values span more than two decades.
     - **Height:** 260 px at desktop, 200 px at phone width. The plot area takes at least 85% of the panel. No empty bands.
     - **Best-so-far:** a step line, with its current value labelled at the right end (value, unit label, store/row) and linked.
-    - **Dots:** counted dots are filled; uncounted ones are hollow at 40% opacity. Store identity is a mark shape; role is not encoded here.
+    - **Dots:** every scored store's dots are drawn, so the best-so-far line is never left without the points that set it. The focus store is at full opacity, the others at 30%. Counted dots are filled; uncounted ones are hollow at 40%. Store identity is a mark shape; role is not encoded here.
   - **Below the chart:**
-    - **the stage funnel** (spec 14 2.2), stages side by side, each with its own pass count, labelled with column names. The stages are the ones the study DECLARES (`funnel: [col, …]` in config.yaml). With no declaration, every 0/1 output column the store records is shown, in store order. No column name is ever built into the viewer;
-    - **the store** as a virtualised table with sortable columns, the column picker remembered per viewer.
-  - **Store switcher:** it filters the dots, the funnel and the table. It never hides the best-so-far line, which always spans every scored store.
+    - **the stage funnel** (spec 14 2.2), stages side by side, each with its own pass count, labelled with column names. A funnel is drawn ONLY when the study declares its stages (`funnel: [col, …]` in config.yaml). Without a declaration the 0/1 columns are independent flags, not ordered stages, so a cumulative funnel over them would be meaningless. The default is instead one compact, sortable table titled "0/1 columns": column, count of 1s, n, and a small bar. No column name is ever built into the viewer;
+    - **the store** as a virtualised table with sortable columns, the column picker remembered per viewer. Columns are sized to their content (numbers right-aligned); the table may be narrower than its panel and is left-aligned, never stretched to fill it.
+  - **Store switcher:** it highlights. The focus store's dots are at full opacity, and its flags/funnel and table are shown. It never hides a store's dots or the best-so-far line, which always span every scored store. Selecting a row focuses its store.
 - **Deliverable.** The notebook rendered at a 75 ch prose measure, with figures and tables allowed to 1000 px. Math via KaTeX. A "Re-execute" button (spec 14, 5.8) streams progress into a log drawer and ends with a pass/fail mark.
 - **Logs.** A live tail in mono, with source filter chips (orchestrator, watchdog, role transcripts) and a pause button. Lines that carry an id link it (P4).
 - **Setup.** The problem statement and config editors (spec 14, 3.1/3.2). Side-by-side diff before commit, a commit message field, and the study's history list (spec 14, 5.10).

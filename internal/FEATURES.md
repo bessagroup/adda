@@ -1412,13 +1412,13 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   **Build step 3, Data view (spec 15 4.3):** best-so-far from the declared objective, scored across every
   store that records its columns (`/figure_of_merit` + `/trajectory`); x is the evaluation number (a toggle
   gives elapsed hours), both axes fit the data (never forced to zero), a log-y toggle appears only when
-  counted values span more than two decades. The store switcher picks the focus store whose dots are drawn
-  (it follows a selected row); the best line and the "value unit · store row N" label span all stores and
+  counted values span more than two decades. The store switcher highlights the focus store (full opacity; the other
+  stores' dots stay drawn at 30%; it follows a selected row); the best line and the "value unit · store row N" label span all stores and
   the label selects that row. Reference lines come only from `objective.lines`; one outside the range becomes
   an edge tag ("above/below range"), and uncounted rows outside it become edge ticks. Display scaling only
   from `objective.unit_label` (one function, `disp`); counted dots filled in the producing role's colour,
-  infeasible hollow, click selects `sel=row:N`. The funnel (`/funnel`) shows each stage's cumulative and
-  "alone" counts. The store table is virtualised, sortable, with a column picker remembered per viewer
+  infeasible hollow, click selects `sel=row:N`. The funnel (`/funnel`) is drawn only when the study declares `funnel:` (each stage's cumulative and "alone"
+  counts); without it the 0/1 columns appear as a compact sortable "0/1 columns" table (`flags`: count of ones, n). The store table sizes its columns to content and is left-aligned. The store table is virtualised, sortable, with a column picker remembered per viewer
   (localStorage). `/trajectory` stores now also carry `inputs` and `text` (non-numeric output columns) so a
   row inspector needs one request. The wall-clock fill turns warn past 1.5x and bad past 2x the budget.
   `viewer_shots.py --data` shoots it on a copy of a study that declares an objective.

@@ -76,7 +76,7 @@ def data_shots(base: str, out: Path, problems: list[str]) -> None:
                 pg.wait_for_selector(".trow", timeout=8000)
                 pg.wait_for_timeout(400)
                 pg.screenshot(path=str(out / f"data-{wname}-{theme}.png"))
-                if w > 400:
+                if w > 400 and pg.locator(".cht .dot.f").count() > 3:
                     pg.locator(".cht .dot.f").nth(3).hover(force=True)
                     pg.wait_for_selector("#tip:not([hidden])")
                     pg.screenshot(path=str(out / f"data-hover-{wname}-{theme}.png"))
@@ -85,10 +85,11 @@ def data_shots(base: str, out: Path, problems: list[str]) -> None:
                     pg.wait_for_timeout(300)
                     pg.screenshot(path=str(out / f"data-selected-{wname}-{theme}.png"))
                     pg.goto(f"{base}/ui?view=data")
-                    pg.wait_for_selector(".seg")
-                    pg.locator(".seg button").nth(1).click()
-                    pg.wait_for_timeout(300)
-                    pg.screenshot(path=str(out / f"data-ns2-{wname}-{theme}.png"))
+                    pg.wait_for_selector(".seg, .dnote")
+                    if pg.locator(".seg button").count() > 1:
+                        pg.locator(".seg button").nth(1).click()
+                        pg.wait_for_timeout(300)
+                        pg.screenshot(path=str(out / f"data-ns2-{wname}-{theme}.png"))
                 if w > 400:
                     gap = pg.evaluate("(()=>{const t=document.getElementById('tbl'),h=t&&t.querySelector('.thead');"
                                       "return t&&h?t.clientWidth-h.getBoundingClientRect().width:0})()")

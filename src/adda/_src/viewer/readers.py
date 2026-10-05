@@ -938,9 +938,12 @@ def read_funnel(run_dir: Path | str, stages: list[str] | None = None) -> dict[st
     stages so far, ``dropped`` what this stage removed from the previous
     cumulative, ``unrecorded`` the rows with no value for it. ``binding`` names
     the stage that dropped the most. A requested stage the store never
-    recorded as 0/1 is listed in ``skipped``. The order is ``stages`` if
-    given, else the study's declared ``funnel`` (run_config.json), else every
-    0/1 column in store order; no column name is privileged.
+    recorded as 0/1 is listed in ``skipped``. The stages are ``stages`` if
+    given, else the study's declared ``funnel`` (run_config.json); with neither
+    there is no funnel (``declared`` false, ``stages`` empty), because 0/1
+    columns are not ordered stages unless the study says so. Every store also
+    carries ``flags``: each 0/1 column's count of ones, whatever the
+    declaration. No column name is privileged.
     """
     traj = read_trajectory(run_dir)
     order = stages if stages is not None else (
@@ -949,7 +952,7 @@ def read_funnel(run_dir: Path | str, stages: list[str] | None = None) -> dict[st
     for st in traj["stores"]:
         cols = st["columns"]
         binary = [c for c, v in cols.items() if v["kind"] == "binary"]
-        picked = list(order) if order is not None else list(binary)
+        picked = list(order) if order is not None else []
         n = st["n"]
         use = [c for c in picked if c in binary]
         skipped = [c for c in picked if c not in binary]
@@ -979,10 +982,17 @@ def read_funnel(run_dir: Path | str, stages: list[str] | None = None) -> dict[st
         for r in rows:
             if r["dropped"] > top:
                 top, binding = r["dropped"], r["column"]
+        flags = []
+        for c in binary:
+            vals = cols[c]["values"]
+            flags.append({"column": c, "n": n,
+                          "ones": sum(1 for v in vals if v == 1.0),
+                          "unrecorded": sum(1 for v in vals if v is None)})
         out.append({"namespace": st["namespace"], "n": n, "stages": rows,
                     "skipped": skipped, "binding": binding,
-                    "available": binary})
-    return {"store_found": traj["store_found"], "stores": out}
+                    "available": binary, "flags": flags})
+    return {"store_found": traj["store_found"], "declared": order is not None,
+            "stores": out}
 
 
 _ALL_STORES = object()

@@ -253,13 +253,15 @@ def test_the_best_row_and_chart_span_every_store_and_name_the_namespace(tmp_path
         page.wait_for_selector("svg.cht")
         best = page.locator("#title button.vital.link")
         assert "4 x unit" in best.inner_text() and "alpha row 1" in best.inner_text()
-        # the switcher opens on the store holding the best row and filters the dots, not the line
-        assert page.locator(".cht .dot.f[data-ns='alpha']").count() == 2
-        assert page.locator(".cht .dot[data-ns='']").count() == 0
+        # the switcher opens on the store holding the best row; it highlights, it never hides
+        assert page.locator(".cht .dot.f[data-ns='alpha']:not(.dim)").count() == 2
+        assert page.locator(".cht .dot.f[data-ns='alpha'].dim").count() == 0
+        assert page.locator(".cht .dot.f[data-ns=''].dim").count() == 3
+        assert page.locator(".cht .dot[data-ns='']:not(.dim)").count() == 0
         line = page.locator(".cht .step").get_attribute("d")
         page.click("[data-store='']")
-        assert page.locator(".cht .dot.f[data-ns='']").count() == 3
-        assert page.locator(".cht .dot[data-ns='alpha']").count() == 0
+        assert page.locator(".cht .dot.f[data-ns='']:not(.dim)").count() == 3
+        assert page.locator(".cht .dot.f[data-ns='alpha'].dim").count() == 2
         assert page.locator(".cht .step").get_attribute("d") == line
         best.click()
         page.wait_for_selector(".ih")
@@ -325,3 +327,42 @@ def test_a_log_toggle_appears_only_when_the_values_span_two_decades(tmp_path, pa
         page.wait_for_selector("[data-logy]")
         page.click("[data-logy='1']")
         assert page.locator("[data-logy='1'][aria-pressed='true']").count() == 1
+
+
+def test_without_a_funnel_declaration_the_zero_one_columns_are_a_flag_table(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _with_store(run_dir)
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector(".flags")
+        assert page.locator(".funnel").count() == 0
+        assert page.locator(".dh h3", has_text="0/1 columns").count() == 1
+        assert page.locator(".fr").first.inner_text().split() == ["feasible", "3", "6"]
+        page.click("[data-fsort='ones']")
+        assert page.locator(".flags .th[aria-sort='descending']").count() == 1
+
+
+def test_a_declared_funnel_is_drawn_as_stages(tmp_path, page):
+    import json
+    study, run_dir = _study(tmp_path)
+    _with_store(run_dir, objective=dict(OBJECTIVE))
+    cfg = json.loads((run_dir / "debug" / "run_config.json").read_text())
+    cfg["funnel"] = ["feasible"]
+    (run_dir / "debug" / "run_config.json").write_text(json.dumps(cfg))
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector(".funnel")
+        assert page.locator(".flags").count() == 0
+        assert page.locator(".stage").count() == 1
+
+
+def test_the_store_table_is_sized_to_its_content_not_stretched(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _with_store(run_dir, objective=None)
+    with _LiveServer(create_app(study)) as srv:
+        page.set_viewport_size({"width": 1600, "height": 1000})
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector(".trow")
+        tbl, panel = page.locator("#tbl").bounding_box(), page.locator(".data .dh").first.bounding_box()
+        assert tbl["width"] < panel["width"] * 0.6
+        assert abs(tbl["x"] - panel["x"]) < 2

@@ -673,14 +673,14 @@ function chartHtml(W) {
     else if (better(best, r.y) !== best) { d += `H${sx(xv(r))}V${sy(r.y)}`; best = r.y; bestRow = r; }
   });
   if (d) d += `H${sx(x1 - xp)}`;
-  const focusNs = nsOf(focus), mine = rows.filter((r) => nsOf(r.st) === focusNs);
+  const focusNs = nsOf(focus), mine = rows;
   const dot = (r) => {
     const key = rowKey(r.st, r.i);
-    return `<path class="dot ${r.ok ? "f" : "i"}${S.sel === key ? " sel" : ""}" d="${markPath(MARKS[r.si % MARKS.length], sx(xv(r)), sy(r.y))}" data-sel="${key}" data-row="${r.i}" data-ns="${esc(nsOf(r.st) || "")}"/>`;
+    return `<path class="dot ${r.ok ? "f" : "i"}${nsOf(r.st) === focusNs ? "" : " dim"}${S.sel === key ? " sel" : ""}" d="${markPath(MARKS[r.si % MARKS.length], sx(xv(r)), sy(r.y))}" data-sel="${key}" data-row="${r.i}" data-ns="${esc(nsOf(r.st) || "")}"/>`;
   };
   const inside = mine.filter((r) => r.y != null && inY(r.y)), edge = mine.filter((r) => r.y != null && !inY(r.y));
   const ticks = edge.map((r) => { const up = log ? r.y > 0 && tf(r.y) > hi : r.y > hi, y = up ? T : H - B;
-    return `<line class="edgetick" x1="${sx(xv(r))}" x2="${sx(xv(r))}" y1="${y}" y2="${y + (up ? 6 : -6)}"/>`; }).join("");
+    return `<line class="edgetick${nsOf(r.st) === focusNs ? "" : " dim"}" x1="${sx(xv(r))}" x2="${sx(xv(r))}" y1="${y}" y2="${y + (up ? 6 : -6)}"/>`; }).join("");
   let bestLab = "";
   if (bestRow) {
     const bx = W - R - 4, by = sy(best), flip = by < T + 18, bk = rowKey(bestRow.st, bestRow.i);
@@ -688,11 +688,11 @@ function chartHtml(W) {
   }
   const marks = all.length > 1 ? all.map((st, si) => `<span title="Mark shape for this store"><svg width="14" height="14" viewBox="-7 -7 14 14"><path class="dot f" d="${markPath(MARKS[si % MARKS.length], 0, 0)}"/></svg>${esc(nsOf(st) || "canonical")}</span>`).join("") : "";
   const noX = rows.length - drawable.length;
-  const cap = `${counted.length} counted of ${rows.length} rows` + (all.length > 1 ? ` across ${all.length} stores; dots for the ${esc(focusNs || "canonical")} store` : "") +
+  const cap = `${counted.length} counted of ${rows.length} rows` + (all.length > 1 ? ` across ${all.length} stores; the ${esc(focusNs || "canonical")} store is highlighted, the others drawn faint` : "") +
     (noX ? ` · ${noX} with no finite value are not drawn` : "") + (edge.length ? ` · ${edge.length} outside the range (ticks at the edge)` : "") +
     (S.xmode === "time" && !useTime ? " · some rows carry no time, so the axis is the evaluation number" : "") + (notScored.length ? ` · not scored: ${notScored.join("; ")}` : "");
   return `<div class="chartwrap"><svg class="cht" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Best ${esc(f.column)} so far over ${useTime ? "elapsed time" : "evaluations"}">` +
-    `${grid}${refs}<path class="step" d="${d}"/>${ticks}${inside.filter((r) => !r.ok).map(dot).join("")}${inside.filter((r) => r.ok).map(dot).join("")}${bestLab}</svg><div class="tip" id="tip" hidden></div></div>` +
+    `${grid}${refs}<path class="step" d="${d}"/>${ticks}${[...inside.filter((r) => nsOf(r.st) !== focusNs), ...inside.filter((r) => nsOf(r.st) === focusNs && !r.ok), ...inside.filter((r) => nsOf(r.st) === focusNs && r.ok)].map(dot).join("")}${bestLab}</svg><div class="tip" id="tip" hidden></div></div>` +
     `<div class="legend"><span><i class="dot f"></i>counted</span><span><i class="dot i"></i>not counted</span>${marks}<span><i class="stepkey"></i>best so far (${esc(f.direction)})</span></div>` +
     `<div class="dcap">${cap}</div>`;
 }
@@ -707,7 +707,9 @@ function chartControls() {
 }
 function funnelHtml(st) {
   const fn = S.data.fun && S.data.fun.stores.find((x) => x.namespace === st.namespace);
-  if (!fn || !fn.stages.length) return note("No 0/1 stage columns are recorded in this store yet, so there is no funnel to draw.");
+  if (!fn) return note("No 0/1 columns are recorded in this store yet.");
+  if (!S.data.fun.declared) return flagsHtml(fn);
+  if (!fn.stages.length) return note("None of the declared funnel stages is recorded as a 0/1 column in this store." + (fn.skipped && fn.skipped.length ? " Not 0/1 here: " + esc(fn.skipped.join(", ")) + "." : ""));
   return `<div class="funnel">` + fn.stages.map((s) =>
     `<div class="stage${fn.binding === s.column ? " bind" : ""}"><div class="sname" title="${esc(s.column)}">${esc(s.column)}</div>` +
     `<div class="snum">${s.cumulative}<small>of ${s.n}</small></div>` +
@@ -715,9 +717,26 @@ function funnelHtml(st) {
     `<div class="salone">${s.pass} alone${s.unrecorded ? ` · ${s.unrecorded} unrecorded` : ""}${fn.binding === s.column ? " · tightest" : ""}</div></div>`).join("") + `</div>` +
     `<div class="dcap">Each stage: rows passing every stage up to it (solid bar, large number), and rows passing it alone (line).${fn.skipped && fn.skipped.length ? " Not 0/1 in this store: " + esc(fn.skipped.join(", ")) + "." : ""}</div>`;
 }
+function flagsHtml(fn) {
+  if (!fn.flags || !fn.flags.length) return note("No 0/1 columns are recorded in this store yet.");
+  const so = S.fsort, rows = fn.flags.slice();
+  if (so) rows.sort((a, b) => (so.key === "column" ? String(a.column).localeCompare(b.column) : a.ones - b.ones) * (so.dir === "asc" ? 1 : -1));
+  const th = (key, label, cls) => `<button class="th${cls || ""}" data-fsort="${key}" aria-sort="${so && so.key === key ? (so.dir === "asc" ? "ascending" : "descending") : "none"}" title="Sort by ${esc(label)}">${esc(label)}<span>${so && so.key === key ? (so.dir === "asc" ? "↑" : "↓") : ""}</span></button>`;
+  return `<div class="flags"><div class="fh">${th("column", "Column")}${th("ones", "Rows with 1", " num")}<span class="th num">Rows</span><span></span></div>` +
+    rows.map((r) => `<div class="fr"><span class="mono" title="${esc(r.column)}">${esc(r.column)}</span><span class="num">${r.ones}</span><span class="num"${r.unrecorded ? ` title="${r.unrecorded} of these rows have no value recorded"` : ""}>${r.n}${r.unrecorded ? "*" : ""}</span>` +
+      `<span class="sbar"><i style="width:${r.n ? (100 * r.ones / r.n).toFixed(1) : 0}%"></i></span></div>`).join("") + `</div>` +
+    `<div class="dcap">* some rows record no value for it. These columns are independent flags, not ordered stages. Declare a <code>funnel:</code> list in config.yaml to draw them as a funnel.</div>`;
+}
+function colWidth(c, st) {
+  if (c.id) return c.w;
+  let len = String(c.label).length + 3;
+  const step = Math.max(1, Math.floor(st.n / 200));
+  for (let i = 0; i < st.n; i += step) len = Math.max(len, cellText(c, i).length);
+  return Math.min(c.w > 200 ? c.w : 240, Math.max(64, Math.round(len * 7.6 + 28)));
+}
 function tableHtml(st, m) {
   const cols = visibleCols(st, m), sort = S.sort || { key: "#", dir: "desc" };
-  const W = cols.reduce((a, c) => a + c.w, 0), tpl = cols.map((c) => `minmax(${c.w}px,1fr)`).join(" ");
+  const ws = cols.map((c) => colWidth(c, st)), W = ws.reduce((a, b) => a + b, 0), tpl = ws.map((w) => w + "px").join(" ");
   const groups = ["Inputs", "Outputs", "Text"].map((g) => {
     const cs = m.cols.filter((c) => c.group === g); if (!cs.length) return "";
     return `<div class="pg"><h4>${g}</h4>` + cs.map((c) => `<label><input type="checkbox" data-col="${esc(c.key)}" ${cols.includes(c) ? "checked" : ""}> ${esc(c.label)}</label>`).join("") + `</div>`;
@@ -755,11 +774,11 @@ function paintData(w) {
   DM = new Map(S.dels.map((d) => [d.id, d.to_node]));
   const m = model(st), all = stores();
   const seg = all.length > 1 ? `<div class="seg" role="group" aria-label="Store">` + all.map((x) =>
-    `<button data-store="${esc(nsOf(x) || "")}" aria-pressed="${nsOf(x) === nsOf(st)}" title="Show this store’s dots, funnel and rows. The best-so-far line always spans every scored store.">${esc(nsOf(x) || "canonical")}<small>${x.n}</small></button>`).join("") + `</div>` : "";
+    `<button data-store="${esc(nsOf(x) || "")}" aria-pressed="${nsOf(x) === nsOf(st)}" title="Highlight this store’s dots and show its flags and rows. The best-so-far line and every store’s dots stay drawn.">${esc(nsOf(x) || "canonical")}<small>${x.n}</small></button>`).join("") + `</div>` : "";
   const W = Math.max(320, w.clientWidth - 2 * 24);
   const f = S.fom && S.fom.declared ? S.fom : null;
   w.innerHTML = `<div class="data"><div class="dh"><h3>Best so far${f ? ` · ${esc(f.column)}${unitOf() ? " (" + esc(unitOf().label) + ")" : ""}` : ""}</h3>${f ? `<span class="dcap">${f.direction === "max" ? "higher" : "lower"} is better${f.feasible ? ", counting rows where " + esc(f.feasible) + " = 1" : ""}</span>` : ""}<span class="sp"></span>${seg}${chartControls()}</div>` +
-    chartHtml(W) + `<div class="dh"><h3>Stage funnel</h3></div>` + funnelHtml(st) + `<div class="dh"><h3>Store</h3></div>` + tableHtml(st, m) + `</div>`;
+    chartHtml(W) + `<div class="dh"><h3>${S.data.fun && S.data.fun.declared ? "Stage funnel" : "0/1 columns"}</h3></div>` + funnelHtml(st) + `<div class="dh"><h3>Store</h3></div>` + tableHtml(st, m) + `</div>`;
   const cols = visibleCols(st, m);
   TBL = { st, m, cols, order: tableOrder(st, m) };
   const box = $("tbl");
@@ -811,6 +830,8 @@ document.addEventListener("click", (e) => {
   if (xm) { S.xmode = xm.dataset.xmode; paintWork(); return; }
   const lg = e.target.closest("[data-logy]");
   if (lg) { S.logy = lg.dataset.logy === "1"; paintWork(); return; }
+  const fs = e.target.closest("[data-fsort]");
+  if (fs) { const cur = S.fsort; S.fsort = { key: fs.dataset.fsort, dir: cur && cur.key === fs.dataset.fsort && cur.dir === "desc" ? "asc" : "desc" }; paintWork(); return; }
   const so = e.target.closest("[data-sort]");
   if (so) {
     const cur = S.sort || { key: "#", dir: "desc" };
