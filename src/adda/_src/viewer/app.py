@@ -32,7 +32,7 @@ from starlette.templating import Jinja2Templates
 
 from ..infra import operator_channel, stop_request
 from ..nodes.notices import split_notices
-from . import notebook_replay, readers, run_control
+from . import notebook_replay, readers, run_control, study_edit
 from .transcript_events import (  # noqa: F401 — re-exported for the renderers below
     _ASSISTANT_TYPES,
     _HUMAN_TYPES,
@@ -1036,6 +1036,82 @@ def create_app(
         except safe_git.GitViewError as exc:
             return JSONResponse({"error": str(exc)}, status_code=502)
 
+    def _edit_error(exc):
+        return JSONResponse({"error": str(exc), **exc.extra}, status_code=exc.status)
+
+    async def get_study_file(request):
+        name = request.path_params["name"]
+        try:
+            out = await asyncio.to_thread(study_edit.read, study_dir, name)
+        except study_edit.StudyEditError as exc:
+            return _edit_error(exc)
+        if name == "config" and out["working"] is not None:
+            out["validation"] = study_edit.validate_config(out["working"])
+        return JSONResponse(out)
+
+    async def post_study_file_diff(request):
+        name = request.path_params["name"]
+        if name not in study_edit.FILES:
+            return _not_found(f"unknown file {name!r}")
+        try:
+            body = await request.json()
+            text = body["text"]
+            if not isinstance(text, str):
+                raise TypeError
+        except Exception:  # noqa: BLE001 — any malformed body
+            return JSONResponse({"error": "malformed body: need {text}"}, status_code=400)
+        try:
+            cur = await asyncio.to_thread(study_edit.read, study_dir, name)
+        except study_edit.StudyEditError as exc:
+            return _edit_error(exc)
+        out = {"rows": study_edit.diff_rows(cur["committed"], text),
+               "changed": text != cur["committed"]}
+        if name == "config":
+            out["validation"] = study_edit.validate_config(text)
+        return JSONResponse(out)
+
+    async def post_study_file_commit(request):
+        refused = _check_write(request, token)
+        if refused is not None:
+            return refused
+        name = request.path_params["name"]
+        try:
+            body = await request.json()
+            text, message = body["text"], body.get("message", "")
+            base = body.get("base")
+            if not isinstance(text, str) or not isinstance(message, str):
+                raise TypeError
+        except Exception:  # noqa: BLE001 — any malformed body
+            return JSONResponse({"error": "malformed body: need {text, message, base}"},
+                                status_code=400)
+        try:
+            before = await asyncio.to_thread(study_edit.read, study_dir, name)
+            done = await asyncio.to_thread(
+                study_edit.commit, study_dir, name, text, message, base, AUDIT_LOG)
+        except study_edit.StudyEditError as exc:
+            return _edit_error(exc)
+        _audit(study_dir, "commit_study_file", file=done["file"], sha=done["sha"],
+               message=message,
+               diff=[r for r in study_edit.diff_rows(before["committed"], text)
+                     if r["op"] != "same"])
+        return JSONResponse({"ok": True, **done})
+
+    async def get_study_commit(request):
+        from . import safe_git
+        sha = request.query_params.get("sha", "")
+        name = request.query_params.get("file", "")
+        if name not in study_edit.FILES:
+            return _not_found(f"unknown file {name!r}")
+        try:
+            root, base = study_edit.repo_of(study_dir)
+            _, rel = study_edit._rel(name, base)
+            patch = await asyncio.to_thread(safe_git.show_patch, root, sha, rel)
+        except study_edit.StudyEditError as exc:
+            return _edit_error(exc)
+        except safe_git.GitViewError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=502)
+        return JSONResponse({"sha": sha, "file": name, "patch": patch})
+
     async def get_literature(request):
         """The study-scoped paper corpus (each paper flagged ``in_run`` by its
         ``added_at`` against this run's window), this run's literature-tool
@@ -1316,6 +1392,10 @@ def create_app(
         Route("/api/runs/{run_id}/note", post_note, methods=["POST"]),
         Route("/api/study/preflight", get_preflight),
         Route("/api/study/history", get_study_history),
+        Route("/api/study/file/{name}", get_study_file),
+        Route("/api/study/file/{name}/diff", post_study_file_diff, methods=["POST"]),
+        Route("/api/study/file/{name}/commit", post_study_file_commit, methods=["POST"]),
+        Route("/api/study/commit", get_study_commit),
         Route("/api/study/start", post_start, methods=["POST"]),
         Route("/api/study/launch", post_launch, methods=["POST"]),
         Route("/api/study/launch/stop", post_launch_stop, methods=["POST"]),

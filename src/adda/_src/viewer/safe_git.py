@@ -136,3 +136,27 @@ def path_history(repo: Path, relpath: str, limit: int = 200) -> list[dict[str, A
                          "date": parts[2], "subject": parts[3],
                          "files": _parse_numstat(rest)})
     return rows
+
+
+def show_blob(repo: Path, ref: str, relpath: str) -> str | None:
+    """The text of ``relpath`` at ``ref`` (``HEAD`` or a commit id), or None
+    when the path does not exist there. ``relpath`` is chosen by the server."""
+    if ref != "HEAD":
+        _sha(ref)
+    try:
+        return _run(repo, "show", f"{ref}:{relpath}")
+    except GitViewError:
+        return None
+
+
+def show_patch(repo: Path, sha: str, relpath: str) -> str:
+    """The diff one commit made to ``relpath``, as git prints it."""
+    return _run(repo, "show", "--format=", "--patch", _sha(sha), "--", relpath)
+
+
+def dirty_paths(repo: Path, relpath: str) -> list[str]:
+    """Paths under ``relpath`` with uncommitted changes (tracked or not,
+    ignored files excluded), repo-relative."""
+    out = _run(repo, "status", "--porcelain", "--untracked-files=all", "--",
+               relpath)
+    return [line[3:].split(" -> ")[-1] for line in out.splitlines() if len(line) > 3]

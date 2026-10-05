@@ -1458,6 +1458,14 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   with time, delegation, tool, ok/error, parsed from the transcripts). A closed run's panel shrinks to its
   content. `viewer_shots.py --logs [--live]` shoots it; `--live` appends to a copy's run.log meanwhile.
   `viewer_shots.py --deliverable` shoots it, including a Re-execute.
+  **Study file editing (spec 14 §3.1/3.2, `viewer/study_edit.py`):** `GET /api/study/file/{problem_statement|config}`
+  returns the committed text, the disk text and the committed blob id (`base`); `POST .../diff` returns side-by-side
+  rows (and, for the config, its validation); `POST .../commit` (write-guarded, audited as `commit_study_file`)
+  writes the text and commits just that file with a required message, authored as the operator's git identity.
+  It refuses when `base` is stale, when the text equals the committed file, when other files of the study have
+  uncommitted changes (`runs/` and the audit log excepted), and, for `config.yaml`, when it does not parse, has an
+  unknown `runtime:` knob (with a did-you-mean) or an unparseable `budget`. A failed commit restores the file.
+  `GET /api/study/commit?sha=&file=` is one commit's patch of one of the two files. No push.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);
   `agent_runtime.py`'s `AgenticRun.serve_viewer`; `pyproject.toml`'s `viewer`
