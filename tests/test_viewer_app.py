@@ -256,7 +256,37 @@ def test_get_transcript_200_with_events(tmp_path):
     client = TestClient(create_app(study))
     resp = client.get("/api/runs/20260904T120000/transcript/D007")
     assert resp.status_code == 200
-    assert resp.json() == [{"ts": "t1", "type": "assistant", "text": "hi"}]
+    assert resp.json() == {
+        "events": [{"ts": "t1", "type": "assistant", "text": "hi"}],
+        "next_cursor": 1, "total": 1}
+
+
+def test_get_transcript_pages_raw_records_by_cursor(tmp_path):
+    study = _make_study(tmp_path)
+    run_dir = _make_run(study, "20260904T120000")
+    _write_jsonl(run_dir / "debug" / "transcripts" / "D007.jsonl", [
+        {"ts": f"t{i}", "type": "assistant", "text": str(i)} for i in range(5)])
+    client = TestClient(create_app(study))
+    body = client.get(
+        "/api/runs/20260904T120000/transcript/D007?after=2&limit=2").json()
+    assert [e["text"] for e in body["events"]] == ["2", "3"]
+    assert body["next_cursor"] == 4 and body["total"] == 5
+    bad = client.get("/api/runs/20260904T120000/transcript/D007?limit=x")
+    assert bad.status_code == 400
+
+
+def test_get_oracle_pages_by_cursor_and_namespace(tmp_path):
+    from tests.test_viewer_readers import _oracle_run
+    study = _make_study(tmp_path)
+    _oracle_run(study, 5, ns_rows=3)
+    client = TestClient(create_app(study))
+    base = "/api/runs/R1/oracle"
+    stores = client.get(f"{base}?limit=2").json()["stores"]
+    assert [s["next_cursor"] for s in stores] == [2, 2]
+    (canon,) = client.get(f"{base}?namespace=&after=2&limit=9").json()["stores"]
+    assert [e["index"] for e in canon["evals"]] == [2, 1, 0]
+    assert canon["next_cursor"] is None
+    assert client.get(f"{base}?after=x").status_code == 400
 
 
 def test_get_transcript_404_debug_flag_off(tmp_path):

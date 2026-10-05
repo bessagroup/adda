@@ -1915,7 +1915,7 @@
                   <span class="m" style="font-size:11.5px; color:var(--overlay0)"
                         x-text="`${st.n_evals} evals`"></span>
                   <span class="m" style="font-size:11.5px; color:var(--peach)"
-                        x-show="st.truncated"
+                        x-show="st.next_cursor !== null"
                         x-text="`showing newest ${st.evals.length}`"></span>
                 </div>
 

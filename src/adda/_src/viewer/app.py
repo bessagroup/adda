@@ -837,7 +837,19 @@ def create_app(
         run_dir = _run_dir(study_dir, run_id)
         if run_dir is None:
             return _not_found(f"no such run {run_id!r}")
-        return JSONResponse(readers.read_oracle(run_dir))
+        q = request.query_params
+        try:
+            after = max(0, int(q.get("after", 0)))
+            limit = min(5000, max(1, int(q.get("limit", 400))))
+        except (TypeError, ValueError):
+            return JSONResponse(
+                {"error": "after and limit must be integers"}, status_code=400)
+        # ``?namespace=`` (present, empty) pages the canonical store.
+        kw = {}
+        if "namespace" in q:
+            kw["namespace"] = q.get("namespace") or None
+        return JSONResponse(
+            readers.read_oracle(run_dir, after=after, limit=limit, **kw))
 
     async def get_trajectory(request):
         run_id = request.path_params["run_id"]
@@ -895,13 +907,21 @@ def create_app(
         run_dir = _run_dir(study_dir, run_id)
         if run_dir is None:
             return _not_found(f"no such run {run_id!r}")
+        try:
+            after = max(0, int(request.query_params.get("after", 0)))
+            limit = min(1000, max(1, int(request.query_params.get("limit", 200))))
+        except (TypeError, ValueError):
+            return JSONResponse(
+                {"error": "after and limit must be integers"}, status_code=400)
         events = readers.read_transcript(run_dir, key)
         if events is None:
             return _not_found(
                 "transcripts not recorded for this run (debug flag was off)")
         if not events:
             return _not_found(f"no such transcript {key!r}")
-        return JSONResponse(events)
+        page = events[after:after + limit]
+        return JSONResponse({"events": page, "next_cursor": after + len(page),
+                             "total": len(events)})
 
     async def get_transcript_events(request):
         run_id = request.path_params["run_id"]

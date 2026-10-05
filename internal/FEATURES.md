@@ -1336,6 +1336,13 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   backend format. `after` and `next_cursor` count RAW records (most are streaming partials that emit
   nothing); `limit` caps emitted events (default 200, max 1000). `next_cursor` is always an int, so a
   live transcript is polled from it. Tool names and `pending` calls resolve against the whole file.
+  **Pagination (spec 14 Phase 2):** `GET /api/runs/<id>/transcript/<key>?after=N&limit=M` returns
+  `{events: <raw records>, next_cursor, total}` (limit counts raw records, default 200, max 1000).
+  `GET /api/runs/<id>/oracle?after=N&limit=M[&namespace=<name>]` pages each store's ledger rows,
+  newest first (default 400, max 5000); a store's `next_cursor` (offset into that order, `null`
+  once drained) replaces the old `truncated` flag. Cursors are per store: `namespace=<name>` pages
+  one store only (`namespace=` with no value is the canonical store), and `total_evals` still counts
+  every store. A non-integer `after`/`limit` is a 400.
   The viewer binds loopback only: any other `--host` needs `--allow-network` and prints a warning.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);

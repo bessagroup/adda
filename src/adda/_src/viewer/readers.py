@@ -524,9 +524,9 @@ _PROVENANCE_COLS = {
 # accounting helper tells the canonical store from a namespace store.
 _DATA_DIR = "experiment_data"
 
-# Cap on rows returned per store. A campaign can ledger thousands; the
-# count is always reported in full so a truncated view never reads as the
-# whole ledger.
+# Default page of rows per store. A campaign can ledger thousands; the count
+# is always reported in full, and a store with more rows than the page carries
+# a ``next_cursor`` (an offset into its newest-first order) to fetch the rest.
 _MAX_EVAL_ROWS = 400
 
 
@@ -543,7 +543,10 @@ def _read_csv_rows(path: Path) -> tuple[list[str], list[list[str]]]:
     return rows[0], rows[1:]
 
 
-def _read_one_store(store: Path, namespace: str | None) -> dict[str, Any]:
+def _read_one_store(
+    store: Path, namespace: str | None, after: int = 0,
+    limit: int = _MAX_EVAL_ROWS,
+) -> dict[str, Any]:
     """One oracle store's input space and ledgered evaluations."""
     data = store / _DATA_DIR
     space: list[str] = []
@@ -559,7 +562,7 @@ def _read_one_store(store: Path, namespace: str | None) -> dict[str, Any]:
 
     n = max(len(in_rows), len(out_rows))
     # Newest first: a live run's interesting rows are the ones just added.
-    order = list(range(n))[::-1][:_MAX_EVAL_ROWS]
+    order = list(range(n))[::-1][after:after + limit]
     evals = []
     for i in order:
         inputs, outputs, prov = {}, {}, {}
@@ -586,7 +589,7 @@ def _read_one_store(store: Path, namespace: str | None) -> dict[str, Any]:
         "path": str(store),
         "input_space": space,
         "n_evals": n,
-        "truncated": n > len(order),
+        "next_cursor": after + len(order) if after + len(order) < n else None,
         "evals": evals,
     }
 
@@ -785,8 +788,19 @@ def read_funnel(run_dir: Path | str, stages: list[str] | None = None) -> dict[st
     return {"store_found": traj["store_found"], "stores": out}
 
 
-def read_oracle(run_dir: Path | str) -> dict[str, Any]:
-    """What the run's oracle is, and every evaluation it has ledgered.
+_ALL_STORES = object()
+
+
+def read_oracle(
+    run_dir: Path | str, *, after: int = 0, limit: int = _MAX_EVAL_ROWS,
+    namespace: Any = _ALL_STORES,
+) -> dict[str, Any]:
+    """What the run's oracle is, and the evaluations it has ledgered.
+
+    Rows are newest first, ``limit`` per store from offset ``after``; a store
+    with more rows carries ``next_cursor`` (``None`` when drained). Cursors are
+    per store, so to page one pass its ``namespace`` (``None`` is the canonical
+    store) and only that store is returned; ``total_evals`` still counts all.
 
     Namespaces are enumerated from DISK as well as from run_config.json's
     ``oracles`` map. A namespace store is created the moment it is
@@ -797,7 +811,9 @@ def read_oracle(run_dir: Path | str) -> dict[str, Any]:
     canonical store only).
     """
     cfg, base_path, found = _oracle_stores(Path(run_dir))
-    stores = [_read_one_store(path, name) for name, path in found]
+    all_stores = [_read_one_store(path, name, after, limit) for name, path in found]
+    stores = [s for s in all_stores
+              if namespace is _ALL_STORES or s["namespace"] == namespace]
 
     # "No oracle registered" and "an oracle is registered but was never
     # called" are different facts about a run, and only the second one was
@@ -821,7 +837,7 @@ def read_oracle(run_dir: Path | str) -> dict[str, Any]:
         "stores": stores,
         # Summed across canonical AND namespaces, for the same reason the
         # runtime's own accounting does.
-        "total_evals": (sum(s["n_evals"] for s in stores)
+        "total_evals": (sum(s["n_evals"] for s in all_stores)
                         if base_path.is_dir() or not registered else None),
     }
 

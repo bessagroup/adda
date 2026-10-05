@@ -1256,3 +1256,44 @@ def test_read_funnel_with_no_store_is_empty(tmp_path):
     run = tmp_path / "runs" / "R1"
     (run / "debug").mkdir(parents=True)
     assert read_funnel(run)["stores"] == []
+
+
+def _oracle_run(tmp_path, n, ns_rows=None):
+    run = tmp_path / "runs" / "R1"
+    (run / "debug").mkdir(parents=True)
+    store = run / "experiment_data"
+    _store(store, [(str(i), str(i), f"D{i}") for i in range(n)])
+    if ns_rows:
+        _store(store / "other", [(str(i), "0", "X") for i in range(ns_rows)])
+    (run / "debug" / "run_config.json").write_text(
+        json.dumps({"store_dir": str(store)}), encoding="utf-8")
+    return run
+
+
+def test_read_oracle_pages_a_store_by_cursor_without_loss_or_repeat(tmp_path):
+    run = _oracle_run(tmp_path, 5)
+    seen, after = [], 0
+    while True:
+        (st,) = read_oracle(run, after=after, limit=2)["stores"]
+        seen += [e["index"] for e in st["evals"]]
+        if st["next_cursor"] is None:
+            break
+        after = st["next_cursor"]
+    assert seen == [4, 3, 2, 1, 0]
+
+
+def test_read_oracle_drained_store_has_no_cursor(tmp_path):
+    (st,) = read_oracle(_oracle_run(tmp_path, 3), limit=3)["stores"]
+    assert st["next_cursor"] is None and st["n_evals"] == 3
+
+
+def test_read_oracle_pages_one_namespace_and_still_totals_all(tmp_path):
+    run = _oracle_run(tmp_path, 3, ns_rows=4)
+    o = read_oracle(run, namespace="other", after=1, limit=2)
+    (st,) = o["stores"]
+    assert st["namespace"] == "other"
+    assert [e["index"] for e in st["evals"]] == [2, 1]
+    assert st["next_cursor"] == 3
+    assert o["total_evals"] == 7
+    (canon,) = read_oracle(run, namespace=None)["stores"]
+    assert canon["namespace"] is None and canon["n_evals"] == 3
