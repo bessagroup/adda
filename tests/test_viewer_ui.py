@@ -574,6 +574,32 @@ def test_on_a_phone_the_first_output_column_is_in_view_without_scrolling(tmp_pat
         assert first_out["x"] <= box["x"] + box["width"] - 100, (first_out, box)
 
 
+def test_on_a_desktop_every_column_that_fits_is_shown_inputs_before_bookkeeping(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _with_store(run_dir)
+    with _LiveServer(create_app(study)) as srv:
+        page.set_viewport_size({"width": 1600, "height": 1000})
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector("#tbl .thead")
+        labels = [t.strip().rstrip("↑↓").strip() for t in page.locator("#tbl .thead > *").all_inner_texts()]
+        assert labels[:2] == ["Row", "x"], labels
+        assert labels[-2:] == ["Delegation", "When"], labels
+        n = len(labels)
+        assert page.locator(".tbar summary").inner_text().strip() == f"Columns · {n} of {n}"
+
+
+def test_on_a_phone_the_inputs_precede_the_outputs_and_bookkeeping_is_behind_columns(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _with_store(run_dir)
+    with _LiveServer(create_app(study)) as srv:
+        page.set_viewport_size({"width": 400, "height": 900})
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector("#tbl .thead")
+        labels = [t.strip().rstrip("↑↓").strip() for t in page.locator("#tbl .thead > *").all_inner_texts()]
+        assert labels[:3] == ["Row", "x", "score (x unit)"], labels
+        assert "Delegation" not in labels and "When" not in labels
+
+
 def test_data_view_draws_no_chart_and_no_lines_when_nothing_is_declared(tmp_path, page):
     study, run_dir = _study(tmp_path)
     _with_store(run_dir, objective=None)

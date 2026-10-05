@@ -979,8 +979,6 @@ function model(st) {
   if (cache[k]) return cache[k];
   const t0 = runT0(), f = declaredFor(st), cols = [];
   cols.push({ key: "#", label: "Row", get: (i) => i, w: 64, num: true });
-  cols.push({ key: "delegation", label: "Delegation", get: (i) => st.delegation[i] || null, w: 156, id: true });
-  cols.push({ key: "when", label: "When", get: (i) => { const t = parseT(st.ts[i]); return t == null || t0 == null ? null : t - t0; }, fmt: fmtElapsed, w: 96, num: true });
   Object.entries(st.inputs || {}).forEach(([n, v]) => cols.push({ key: "in:" + n, label: n, group: "Inputs", get: (i) => v[i], w: 112, num: v.some((x) => typeof x === "number") }));
   Object.entries(st.columns).forEach(([n, o]) => {
     const obj = !!f && n === f.column;
@@ -992,14 +990,27 @@ function model(st) {
   return (cache[k] = { cols, byKey, t0 });
 }
 function defaultCols(st, m) {
-  const f = declaredFor(st), keys = ["#", "delegation"];
-  if (!window.matchMedia("(max-width: 520px)").matches) keys.push("when");
-  if (f) { keys.push("out:" + f.column); if (f.feasible) keys.push("out:" + f.feasible); }
-  else keys.push(...m.cols.filter((c) => c.group === "Outputs").slice(0, 2).map((c) => c.key));
+  const f = declaredFor(st), phone = window.matchMedia("(max-width: 520px)").matches;
+  const outs = m.cols.filter((c) => c.group === "Outputs").map((c) => c.key);
+  const lead = [];
+  if (f) { lead.push("out:" + f.column); if (f.feasible) lead.push("out:" + f.feasible); }
   const fn = S.data.fun && S.data.fun.stores.find((x) => x.namespace === st.namespace);
-  ((fn && fn.stages) || []).forEach((s) => keys.push("out:" + s.column));
-  if (m.byKey["tx:status"]) keys.push("tx:status");
-  return [...new Set(keys)].filter((k) => m.byKey[k]);
+  cols.push({ key: "delegation", label: "Delegation", get: (i) => st.delegation[i] || null, w: 156, id: true });
+  cols.push({ key: "when", label: "When", get: (i) => { const t = parseT(st.ts[i]); return t == null || t0 == null ? null : t - t0; }, fmt: fmtElapsed, w: 96, num: true });
+  ((fn && fn.stages) || []).forEach((s) => lead.push("out:" + s.column));
+  const ins = m.cols.filter((c) => c.group === "Inputs").map((c) => c.key);
+  const outOrder = [...new Set([...lead, ...outs])];
+  const texts = m.cols.filter((c) => c.group === "Text").map((c) => c.key);
+  const pri = ["#", outOrder[0], ins[0], ...ins.slice(1), ...outOrder.slice(1), "tx:status",
+    ...(phone ? [] : ["delegation", "when"]), ...texts].filter((k) => k && m.byKey[k]);
+  const room = Math.max(320, ($("work") ? $("work").clientWidth : 1000) - 2 * 24 - 2);
+  const keys = new Set(); let used = 0;
+  [...new Set(pri)].forEach((k, n) => {
+    const w = colWidth(m.byKey[k], st);
+    if (n < 3 || used + w <= room) { keys.add(k); used += w; }
+  });
+  return m.cols.map((c) => c.key).filter((k) => keys.has(k));
+/* Row, inputs, outputs, then bookkeeping; a column is dropped only when it does not fit. */
 }
 const colStoreKey = (st) => "adda.cols." + ((S.vitals && S.vitals.study) || "") + "." + (nsOf(st) || "");
 function visibleCols(st, m) {
