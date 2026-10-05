@@ -54,6 +54,7 @@ def test_session_env_tolerates_missing_run_config(tmp_path):
     # opt-out here.
     assert set(env) <= {
         "F3DASM_DELEGATION_ID", "PATH", "CLAUDE_CODE_DISABLE_AUTO_MEMORY",
+        "BASH_DEFAULT_TIMEOUT_MS",
     }
 
 
