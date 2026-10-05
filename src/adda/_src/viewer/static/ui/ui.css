@@ -89,6 +89,7 @@ a{color:inherit}
 .runid{font-size:var(--t-title);font-weight:600;letter-spacing:-.015em;display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
 .vital{font:500 var(--t-vital)/1.1 var(--f-ui);font-variant-numeric:tabular-nums;letter-spacing:-.02em;white-space:nowrap}
 .vital small{font-size:var(--t-data);color:var(--ink-3);font-weight:400;margin-left:var(--s1);letter-spacing:0}
+.vital small.blk{display:block;margin:var(--s1) 0 0}
 .vital.link{cursor:pointer;background:none;border:0;padding:0;text-align:left;color:inherit}
 .vital.link:hover{text-decoration:underline}
 .vital.link small{display:block;margin:var(--s1) 0 0}.pill{display:inline-flex;align-items:center;gap:var(--s2);font:500 var(--t-meta)/1 var(--f-ui);padding:var(--s1) var(--s2);border-radius:var(--r-pill);border:1px solid currentColor;white-space:nowrap}

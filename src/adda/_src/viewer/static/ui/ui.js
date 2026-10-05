@@ -280,7 +280,7 @@ function paintTitle() {
   const running = S.dels.filter((d) => delState(d)[0] === "live").length;
   const fom = S.fom && S.fom.declared && S.fom.n_counted ? S.fom : null;
   const who = [v.study, v.model].filter(Boolean).join(" · ") || "—";
-  const unknown = v.unknown_cost_calls ? `<small>+${v.unknown_cost_calls} unknown</small>` : "";
+  const unknown = v.unknown_cost_calls ? `<small class="blk">+${v.unknown_cost_calls} ${v.unknown_cost_calls === 1 ? "call" : "calls"} without cost data</small>` : "";
   $("title").innerHTML =
     `<div><div class="lbl">Run</div><div class="runid"><span class="mono">${esc(S.run)}</span>${runPill(status)}</div>` +
     `<div class="who" title="Study and model, from the study's config.yaml">${esc(who)}</div></div>` +
