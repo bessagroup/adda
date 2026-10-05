@@ -995,17 +995,18 @@ function model(st) {
       fmt: obj ? (v) => fmtNum(disp(v)) : null, w: obj ? 184 : 128, num: true });
   });
   Object.entries(st.text || {}).forEach(([n, v]) => cols.push({ key: "tx:" + n, label: n, group: "Text", get: (i) => v[i] || null, w: n === "note" ? 280 : 112 }));
+  cols.push({ key: "delegation", label: "Delegation", get: (i) => st.delegation[i] || null, w: 156, id: true });
+  cols.push({ key: "when", label: "When", get: (i) => { const t = parseT(st.ts[i]); return t == null || t0 == null ? null : t - t0; }, fmt: fmtElapsed, w: 96, num: true });
   const byKey = Object.fromEntries(cols.map((c) => [c.key, c]));
   return (cache[k] = { cols, byKey, t0 });
 }
+/* Row, inputs, outputs, then bookkeeping; a column is dropped only when it does not fit. */
 function defaultCols(st, m) {
   const f = declaredFor(st), phone = window.matchMedia("(max-width: 520px)").matches;
   const outs = m.cols.filter((c) => c.group === "Outputs").map((c) => c.key);
   const lead = [];
   if (f) { lead.push("out:" + f.column); if (f.feasible) lead.push("out:" + f.feasible); }
   const fn = S.data.fun && S.data.fun.stores.find((x) => x.namespace === st.namespace);
-  cols.push({ key: "delegation", label: "Delegation", get: (i) => st.delegation[i] || null, w: 156, id: true });
-  cols.push({ key: "when", label: "When", get: (i) => { const t = parseT(st.ts[i]); return t == null || t0 == null ? null : t - t0; }, fmt: fmtElapsed, w: 96, num: true });
   ((fn && fn.stages) || []).forEach((s) => lead.push("out:" + s.column));
   const ins = m.cols.filter((c) => c.group === "Inputs").map((c) => c.key);
   const outOrder = [...new Set([...lead, ...outs])];
@@ -1019,7 +1020,6 @@ function defaultCols(st, m) {
     if (n < 3 || used + w <= room) { keys.add(k); used += w; }
   });
   return m.cols.map((c) => c.key).filter((k) => keys.has(k));
-/* Row, inputs, outputs, then bookkeeping; a column is dropped only when it does not fit. */
 }
 const colStoreKey = (st) => "adda.cols." + ((S.vitals && S.vitals.study) || "") + "." + (nsOf(st) || "");
 function visibleCols(st, m) {
@@ -1226,6 +1226,9 @@ function paintData(w) {
   const cols = visibleCols(st, m);
   TBL = { st, m, cols, order: tableOrder(st, m) };
   const box = $("tbl");
+  const scrolls = getComputedStyle(w).overflowY !== "visible";
+  const top = box.getBoundingClientRect().top - w.getBoundingClientRect().top + w.scrollTop;
+  box.style.height = (scrolls ? Math.max(280, w.clientHeight - top - 16) : Math.max(320, window.innerHeight - 160)) + "px";
   box.scrollTop = S.tscroll || 0;
   const sel = ROW_RE.exec(S.sel || "");
   if (sel && (sel[1] || null) === nsOf(st) && S.lastRowSel !== S.sel) {
@@ -1235,9 +1238,6 @@ function paintData(w) {
   S.lastRowSel = S.sel;
   paintRows();
 }
-  const scrolls = getComputedStyle(w).overflowY !== "visible";
-  const top = box.getBoundingClientRect().top - w.getBoundingClientRect().top + w.scrollTop;
-  box.style.height = (scrolls ? Math.max(280, w.clientHeight - top - 16) : Math.max(320, window.innerHeight - 160)) + "px";
 function tipHtml(st, i) {
   const m = model(st), r = DM.get(st.delegation[i]);
   const keys = visibleCols(st, m).filter((c) => c.key !== "#" && c.key !== "delegation").slice(0, 5);
