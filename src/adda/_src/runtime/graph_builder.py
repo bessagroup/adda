@@ -11,6 +11,7 @@ from langgraph.graph import StateGraph
 from ..backends.base import Agent, Graph
 from ..infra.delegation_log import DelegationLog
 from ..nodes import Node
+from . import settings
 from .graph_state import AgenticState
 
 __all__ = ["build_graph"]
@@ -55,6 +56,7 @@ def build_graph(
     CompiledGraph
         A compiled LangGraph graph ready to invoke.
     """
+    settings.set_graph_nodes(spec.nodes)
     builder = StateGraph(AgenticState)
 
     # ONE adapter per named node — shared across all orchestrating nodes.

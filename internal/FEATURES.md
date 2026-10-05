@@ -238,6 +238,12 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   kept byte-for-byte, an unknown key or unbalanced marker raises. KB chapters
   take a `feature:` frontmatter key and vanish from menu/TOC/search/`get` while
   it is off. The critic's GATE message is composed from the enabled features.
+- **Topology gates:** `[[if node:<name>]]` follows the graph's composition, not a
+  knob. `build_graph` records the node set (`settings.set_graph_nodes`, cleared by
+  `settings.configure`), so with the critic or the literature reviewer removed the
+  remaining prompts no longer mention or rely on it; `ConsultLiterature` stays
+  (it reads whatever corpus exists) and says the corpus may be empty.
+  `tests/test_prompt_arms.py` assembles both topology arms.
 - **Grounded in code, not paraphrased:** what the gate mechanically checks
   (the canonical store must hold ≥1 row before it will even run the
   notebook; zero new evals on replay; no modified/deleted rows; headline

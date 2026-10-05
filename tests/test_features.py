@@ -370,3 +370,15 @@ def test_feature_tagged_chapter_hidden_while_feature_off():
     settings.configure({"pipeline_deliverable": False})
     assert kb.get("pipeline-reproduces-from-store") is None
     assert all(e.id != "pipeline-reproduces-from-store" for e in kb.entries)
+
+
+def test_node_gate_follows_the_graph_and_clears_with_configure():
+    s = "a[[if node:critic]]C[[else]]n[[/if]]b"
+    assert features.resolve_gates(s) == "aCb"          # no graph built: present
+    settings.set_graph_nodes({"strategizer"})
+    assert features.resolve_gates(s) == "anb"
+    settings.set_graph_nodes({"strategizer", "critic"})
+    assert features.resolve_gates(s) == "aCb"
+    settings.set_graph_nodes({"strategizer"})
+    settings.configure(None)
+    assert features.resolve_gates(s) == "aCb"

@@ -125,7 +125,9 @@ def build_corpus_read_closures(corpus) -> dict:
         text of that paper. Anything else → passage search across the
         full-text papers, best match first, up to `limit`.
 
-        Papers enter the corpus only when the literature reviewer adds them;
+        Papers enter the corpus only when [[if node:literature_reviewer]]the literature reviewer adds them[[else]]an
+        earlier run of the study added them (this run has no literature
+        reviewer, so it may be empty)[[/if]];
         a search over a corpus with no full-text papers says so.
 
         A paper's text is returned in pages; the end of a page says the

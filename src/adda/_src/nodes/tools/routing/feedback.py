@@ -154,8 +154,8 @@ class FeedbackTools:
 
         The VERY FIRST Done() call of the run issues a one-time WARNING and
         does NOT close; call it again to confirm. That confirm is once per
-        RUN, not once per attempt — a later call (e.g. after a critic
-        REVISE/REJECT, or a retry after fixing something) proceeds straight
+        RUN, not once per attempt — a later call (e.g. [[if node:critic]]after a critic
+        REVISE/REJECT, or [[/if]]a retry after fixing something) proceeds straight
         to the real gates below, no repeat warning. Any open hypotheses or
         dangling falsification attempts are reported on EVERY call where
         they are still true, independent of that one-time warning.

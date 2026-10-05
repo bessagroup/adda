@@ -1150,8 +1150,8 @@ class NotebookTools:
         [[if reproduction_gate]]gate=True → the SAME reproduction gate Done() applies, as a dry run
         that does not close the run: the notebook must run cleanly, add zero
         new evals and leave the store unchanged, and its printed
-        'REPRODUCED: <value>' headline is surfaced (the critic checks its
-        provenance). On a pass, Done()'s gate will pass. Limited to 10 per run,
+        'REPRODUCED: <value>' headline is surfaced[[if node:critic]] (the critic checks its
+        provenance)[[/if]]. On a pass, Done()'s gate will pass. Limited to 10 per run,
         so localize a failure with the trace before re-checking the gate.[[else]]gate=True → this run has no reproduction gate, so the call executes
         nothing and reports a pass.[[/if]]"""
         if gate:

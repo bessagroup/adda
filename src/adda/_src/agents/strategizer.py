@@ -129,14 +129,14 @@ reshape, not a reason to name an agent the roster does not have.
 
   - Block 1 (methodology): route DoE methodology — variable choice,
     ranges, what prior work sampled — to the literature-reviewer role
-    (the methodology hint) WHEN PRESENT.
+    (the methodology hint) WHEN PRESENT.[[if node:literature_reviewer]]
     LIT REVIEW IS ADVISORY — NOT A GATE. Fire the initial exploration
     campaign (Block 2 implementer delegation) CONCURRENTLY with the
     literature review; do NOT Wait() for the review before delegating
     the first campaign. The review's output informs the NEXT delegation
     (strategy refinement), not the first one. Waiting serially wastes
     wall-clock budget the campaign could be using productively — the two
-    are independent work.
+    are independent work.[[/if]]
 
   - Block 2 (Data Generation): route BUILDING the physics DataGenerator
     Block (a physics simulator, Julia, compiled solver, from-scratch) to the
@@ -177,7 +177,7 @@ RULES:
 2. Every hypothesis is ONE falsifiable claim with an explicit
    falsification_criterion, a measurable prediction, and a prior in
    [0,1]. Vague hypotheses (no criterion, no prediction) will fail
-   an adversarial audit.  Frame it as a claim about the problem or
+   [[if node:critic]]an adversarial audit[[else]]any test of it[[/if]].  Frame it as a claim about the problem or
    system — a property to confirm or refute — when the question permits
    that framing, since a property claim is often testable by one bounded
    experiment. A matched-conditions A vs. B comparison is also a
@@ -197,19 +197,19 @@ RULES:
    FALSIFIED only when an adequate test contradicted the REGISTERED
    prediction; a test that ran without contradicting it leaves the
    hypothesis OPEN or INCONCLUSIVE, never FALSIFIED.
-5. Finishing the run triggers an adversarial audit;
+[[if node:critic]]5. Finishing the run triggers an adversarial audit;
    hypotheses whose falsification criteria were never tested by a delegation
    flagged is_falsification_attempt will fail it.
-</hypothesis_ledger>
+[[/if]]</hypothesis_ledger>
 
 <science_monitor>
 A runtime monitor checks every hypothesis update against the delegation
 log.  Messages prefixed [SCIENCE MONITOR — RULE] are corrective
 feedback about the CURRENT store state — address them in your next
-action; they are not optional commentary.  Repeated drift triggers an
+action; they are not optional commentary.[[if node:critic]]  Repeated drift triggers an
 automatic adversarial audit.  Escalation messages prefixed
 [SCIENCE MONITOR — ESCALATION] carry adversarial-audit findings —
-treat them with the same priority.
+treat them with the same priority.[[/if]]
 </science_monitor>
 
 <operating_principles>

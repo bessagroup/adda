@@ -86,6 +86,7 @@ KNOWN_KEYS: frozenset[str] = frozenset({
 _lock = threading.Lock()
 _config: dict = {}
 _explicit: dict = {}
+_graph_nodes: frozenset | None = None
 
 _TRUE = {"1", "true", "yes", "on"}
 
@@ -105,7 +106,7 @@ def configure(config: dict | None, explicit: dict | None = None) -> None:
     a caller that misspells a knob is not asking for the default, and for a
     sweep a typo'd override means the baseline runs under an arm's label and
     reports as a null result."""
-    global _config, _explicit
+    global _config, _explicit, _graph_nodes
     cfg = dict(config or {})
     exp = dict(explicit or {})
 
@@ -131,6 +132,22 @@ def configure(config: dict | None, explicit: dict | None = None) -> None:
     with _lock:
         _config = cfg
         _explicit = exp
+        _graph_nodes = None
+
+
+def set_graph_nodes(nodes) -> None:
+    """Record which nodes this run's graph contains (``build_graph`` calls it
+    once). ``configure`` clears it, so it is always a property of the run that
+    installed the knobs."""
+    global _graph_nodes
+    with _lock:
+        _graph_nodes = frozenset(nodes)
+
+
+def graph_nodes() -> frozenset | None:
+    """The live graph's node names, or ``None`` before any graph is built
+    (every node is then assumed present: the default topology)."""
+    return _graph_nodes
 
 
 def resolved() -> dict:

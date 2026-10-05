@@ -93,3 +93,58 @@ def test_a_disabled_arm_reads_nothing_of_its_feature(arm, tmp_path):
         for tell in tells:
             assert tell not in prompt, f"{arm}: {role} still mentions {tell!r}"
         assert not (features.disabled_tool_names() & tools), (arm, role)
+
+
+# --- topology arms: a role removed from the graph is not mentioned ----------
+
+# node removed -> strings that must not survive in any REMAINING role's prompt
+_TOPOLOGY = {
+    "critic": ("critic", "adversarial"),
+    "literature_reviewer": (
+        "LIT REVIEW IS ADVISORY", "CONCURRENTLY", "literature reviewer adds",
+    ),
+}
+
+
+def _mentions(text: str, tell: str) -> bool:
+    """All-lowercase tells match any case; a tell with capitals is exact."""
+    return tell in text if tell != tell.lower() else tell in text.lower()
+
+
+def _without(name: str):
+    from adda._src.agents._graphs import _default_graph
+    from adda._src.backends.base import Graph
+
+    g = _default_graph()
+    return Graph(
+        nodes={k: v for k, v in g.nodes.items() if k != name},
+        edges=tuple(e for e in g.edges if name not in (e.source, e.target)),
+        entry=g.entry,
+    )
+
+
+@pytest.mark.parametrize("gone", sorted(_TOPOLOGY))
+def test_a_node_absent_from_the_graph_is_not_mentioned(gone, tmp_path):
+    assembled = _assemble(tmp_path, {}, _without(gone))
+    assert gone not in assembled
+    for role, (prompt, _) in assembled.items():
+        assert not _GATE_MARKER.findall(prompt), role
+        for tell in _TOPOLOGY[gone]:
+            assert not _mentions(prompt, tell), (
+                f"{gone} removed: {role} still mentions {tell!r}")
+
+
+@pytest.mark.parametrize("gone", sorted(_TOPOLOGY))
+def test_the_same_text_is_present_while_the_node_is_in_the_graph(gone, tmp_path):
+    """Negative control: the tells above are real sentences, not strings that
+    never occurred."""
+    blob = "\n".join(p for p, _ in _assemble(tmp_path, {}).values())
+    for tell in _TOPOLOGY[gone]:
+        assert _mentions(blob, tell), tell
+
+
+def test_consult_literature_survives_without_the_reviewer_and_says_why(tmp_path):
+    assembled = _assemble(tmp_path, {}, _without("literature_reviewer"))
+    prompt, tools = assembled["strategizer"]
+    assert "ConsultLiterature" in prompt
+    assert "this run has no literature reviewer" in " ".join(prompt.split())

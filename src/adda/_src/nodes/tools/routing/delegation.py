@@ -1519,7 +1519,7 @@ class DelegationTools:
             "phase (optional): the f3dasm process stage this delegation advances —"
             " one of literature, doe, data_generation, ml, optimization, setup."
             " Tags the work's intent in the larger data-driven process; used by"
-            "[[if milestones_enabled]] milestone gates,[[/if]] timing, and the critic.\n\n"
+            "[[if milestones_enabled]] milestone gates,[[/if]] timing[[if node:critic]], and the critic[[/if]].\n\n"
             "namespace (optional): open a NEW design parametrization as its own"
             " oracle + ledger. Leave it UNSET (the default) for the baseline study —"
             " that is most problems. Set namespace='some_name' only when the"

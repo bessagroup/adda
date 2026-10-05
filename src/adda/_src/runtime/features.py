@@ -29,7 +29,10 @@ section (``sections``, removed by ``strip_disabled_sections``); an inline gate
 (``resolve_gates``, applied when the catalog is appended; the on branch is kept
 byte-for-byte, an unknown key or unbalanced marker raises); and a knowledge
 chapter's ``feature:`` frontmatter, which hides the chapter while the feature
-is off. ``requires`` declares a prerequisite feature and ``enabled`` resolves
+is off. A gate keyed ``node:<name>`` follows the graph's composition instead of
+a knob: ``build_graph`` records the node set once (``settings.set_graph_nodes``,
+cleared by ``settings.configure``), so a role removed from the graph is not
+mentioned or relied on by the prompts that remain. ``requires`` declares a prerequisite feature and ``enabled`` resolves
 it, so a combination is stated once and ``conflicts`` reports where a knob said
 on but a prerequisite said off.
 
@@ -48,6 +51,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from . import settings
 from .settings import get_bool, get_int
 
 __all__ = [
@@ -303,11 +307,23 @@ def strip_disabled_sections(prompt: str) -> str:
     return prompt
 
 
-_GATE_TOKEN = re.compile(r"\[\[(?:if (\w+)|(else)|(/if))\]\]")
+_GATE_TOKEN = re.compile(r"\[\[(?:if ([\w:]+)|(else)|(/if))\]\]")
+
+
+def _gate_on(key: str) -> bool:
+    """A gate key is a feature knob, or ``node:<name>`` for graph membership."""
+    if key.startswith("node:"):
+        nodes = settings.graph_nodes()
+        return nodes is None or key[5:] in nodes
+    return enabled(key)
 
 
 def resolve_gates(text: str) -> str:
     """Resolve inline ``[[if <feature>]]…[[else]]…[[/if]]`` gates.
+
+    ``[[if node:critic]]`` is the topology kind: true while the live graph
+    contains that node (``build_graph`` records the set once; before any graph
+    is built every node counts as present).
 
     A sentence that belongs to one feature but sits inside prose that does not
     (a tool's docstring, one criterion of the charter) is wrapped in a gate
@@ -328,7 +344,7 @@ def resolve_gates(text: str) -> str:
         pos = m.end()
         key, is_else, is_end = m.groups()
         if key is not None:
-            on = enabled(key)
+            on = _gate_on(key)
             stack.append([live, on, False])
             live = live and on
         elif is_else:

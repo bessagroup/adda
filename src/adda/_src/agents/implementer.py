@@ -92,7 +92,7 @@ PREFER f3dasm primitives over raw numpy/scipy equivalents.
   data = gen.call(data, mode="sequential")  # the one oracle door
   gen.flush()                               # flush buffered rows at the end
   # No path imports, no sys.path, no arguments. Unledgered evaluations are
-  # unreproducible and fail the critic gate. Full contract + the datagenerator
+  # unreproducible[[if node:critic]] and fail the critic gate[[/if]]. Full contract + the datagenerator
   # validation exception: ConsultHandbook("evaluate-through-get-evaluator").
   # mode="parallel" is REFUSED (ValueError): it falls through to f3dasm's local
   # multiprocessing.Pool on THIS run's shared orchestration node — CPU
