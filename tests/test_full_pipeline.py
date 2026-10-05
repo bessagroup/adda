@@ -22,6 +22,10 @@ from adda._src.backends.base import Agent, Edge, Graph
 
 from .fixtures import MockWorkerAdapter, ScriptedStrategistAdapter
 
+# Every run here ends in the reproduction gate, which starts a real Jupyter kernel;
+# kernels racing for ports under -n auto produced "Address already in use" (CI 53f3861).
+pytestmark = pytest.mark.xdist_group(name="jupyter_kernel")
+
 
 PROBLEM_MD = """\
 # Test Problem
