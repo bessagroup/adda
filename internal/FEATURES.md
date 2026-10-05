@@ -873,6 +873,15 @@ against the SDK's cost on calls it did price.
   event (namespace, column, key) and notifies the delegator; a manifest without
   `output_names` is reported the same way (key `output_names`). It never refuses a
   registration. Tests: `tests/test_objective_declaration.py`.
+- **Declared funnel and the problem-agnostic viewer (2026-10-05):** optional top-level
+  `funnel: [col, ...]` in config.yaml, the ordered 0/1 stage columns of the viewer's stage funnel;
+  `objective.py::parse_funnel` validates it like `objective` (non-empty, no repeats, each a declared
+  oracle output, refused at start otherwise) and `run_setup` records it as `funnel` in
+  run_config.json. With none, `/funnel` lists every 0/1 column in store order; no column name is
+  privileged. `tests/test_viewer_problem_agnostic.py` is the spec 15 §6a guard: it fails if the
+  shipped viewer, `internal/tools/viewer_shots.py`, or the viewer's UI/objective tests contain a term
+  from the denylist (every study's declared columns and names in `studies/`, plus the benchmark
+  suite's physics and columns). Tests: `tests/test_objective_declaration.py`, `tests/test_viewer_readers.py`.
 
 ### Run-ledger process KPIs (2026-10-04)
 `studies/run_ledger.py` adds `error_returns` (ERROR_RETURN count, target 0),
@@ -1290,8 +1299,10 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   per store, the 0/1 stage columns in order, each with `pass` (alone), `cumulative` (passed every
   earlier stage; an unrecorded value does not pass), `dropped`, `unrecorded`; plus `binding` (the
   stage that dropped most), `skipped` (requested but never recorded as 0/1) and `available`.
-  With no `stages`, the order is picked by column name (coil, prefilter, ran/solved, converged,
-  feas). The server computes it; a front end only draws it.
+  With no `stages`, the order is the study's declared top-level `funnel: [col, ...]` (validated
+  like `objective`, refused at start if it names a column the oracle does not produce, recorded in
+  run_config.json as `funnel`); with none declared, every 0/1 column in store order. No column
+  name is privileged. The server computes it; a front end only draws it.
   `GET /api/runs/<id>/log[?name=run&after=<byte>&limit=<bytes>]` (`readers.read_log_tail`) tails
   a run's log like `tail -f`: no `after` gives the last window, echoing `next_cursor` gives every
   byte once, a file that shrank comes back from the start with `reset: true`. The log is chosen

@@ -72,6 +72,29 @@ def parse_objective(
     return out
 
 
+def parse_funnel(raw: Any, known_columns: Iterable[str] | None = None) -> list[str] | None:
+    """Validate the ``funnel:`` list (ordered 0/1 stage columns); None when absent.
+
+    ``known_columns`` is what the oracle is declared to produce; when given, an
+    unknown stage is refused, as for ``objective``.
+    """
+    if raw is None:
+        return None
+    if (not isinstance(raw, list) or not raw
+            or not all(isinstance(c, str) and c for c in raw)):
+        raise ValueError("funnel: must be a non-empty list of column names")
+    if len(set(raw)) != len(raw):
+        raise ValueError(f"funnel: lists a column twice: {raw}")
+    if known_columns is not None:
+        known = list(known_columns)
+        bad = [c for c in raw if c not in known]
+        if bad:
+            raise ValueError(
+                f"funnel: {bad} is not a column this study's oracle produces "
+                f"(declared: {known}); fix config.yaml")
+    return list(raw)
+
+
 def _finite(v: Any) -> bool:
     return (isinstance(v, (int, float)) and not isinstance(v, bool)
             and math.isfinite(v))

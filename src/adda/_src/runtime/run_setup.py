@@ -128,6 +128,7 @@ def _init_canonical_store(
     eval_budget: int | None = None,
     mem_cap_bytes: int | None = None,
     objective_config: dict | None = None,
+    funnel_config: list | None = None,
 ) -> dict:
     """Create canonical store dirs and write run_config.json sidecar.
 
@@ -154,6 +155,11 @@ def _init_canonical_store(
         The ``objective:`` block (``column``, ``direction``, optional
         ``feasible``). Refused if it names a column the declared oracle does
         not produce; recorded in run_config.json as ``objective``.
+
+    funnel_config : list or None, optional
+        The top-level ``funnel:`` list of ordered 0/1 stage columns; refused
+        if it names a column the oracle does not produce; recorded as
+        ``funnel``.
 
     Returns the config dict that was written.
     """
@@ -196,13 +202,14 @@ def _init_canonical_store(
         raise ValueError(
             "incoherent ablation arms, refusing to start: "
             + "; ".join(_conflicts))
-    from ..evaluation.objective import parse_objective
+    from ..evaluation.objective import parse_funnel, parse_objective
     _declared = (existing.get("evaluator_output_names")
                  or eval_cfg.get("output_names")
                  or (eval_cfg.get("lookup") or {}).get("output_columns"))
     _known = ([*_declared, *(eval_cfg.get("provenance") or {})]
               if _declared else None)
     objective = parse_objective(objective_config, _known)
+    funnel = parse_funnel(funnel_config, _known)
     drift_from = None
     prior_arms = existing.get("arms")
     if prior_arms is not None and prior_arms != arms:
@@ -253,6 +260,7 @@ def _init_canonical_store(
         "runtime": _settings.resolved(),
         "arms": arms,
         "objective": objective,
+        "funnel": funnel,
     }
     if drift_from is not None:
         config["arms_initial"] = existing.get("arms_initial", drift_from)

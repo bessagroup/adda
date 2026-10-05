@@ -75,7 +75,7 @@ default graph).
   filled is feasible, hollow is not). The y axis (linear) is fitted to the
   best-so-far lines and the points that count, with 15% headroom; points
   outside it are small triangles pinned at the edge. The readout says what it
-  counts ("best feasible 2.224 (incl. salvaged) in freeform at #217 (D020)"),
+  counts ("best feasible 2.224 (incl. salvaged) in <namespace> at #217 (D020)"),
   and hovering a point shows its flags and delegation. Direction starts as
   maximise, marked "(default)" until you change it. The viewer ranks nothing
   on its own and draws no target line, because runs record none.

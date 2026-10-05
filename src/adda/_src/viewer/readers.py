@@ -885,9 +885,6 @@ def read_trajectory(run_dir: Path | str) -> dict[str, Any]:
             "stores": stores}
 
 
-_FUNNEL_DEFAULT_ORDER = ("coil", "prefilter", "ran|solved", "^converged$", "feas")
-
-
 def read_figure_of_merit(run_dir: Path | str) -> dict[str, Any]:
     """The run's best row under the study's DECLARED objective (config.yaml
     ``objective:``, recorded in run_config.json), over EVERY store that records
@@ -941,23 +938,18 @@ def read_funnel(run_dir: Path | str, stages: list[str] | None = None) -> dict[st
     stages so far, ``dropped`` what this stage removed from the previous
     cumulative, ``unrecorded`` the rows with no value for it. ``binding`` names
     the stage that dropped the most. A requested stage the store never
-    recorded as 0/1 is listed in ``skipped``. With no ``stages`` the order is
-    picked by column name from the common pipeline words; the reader ranks
-    nothing else.
+    recorded as 0/1 is listed in ``skipped``. The order is ``stages`` if
+    given, else the study's declared ``funnel`` (run_config.json), else every
+    0/1 column in store order; no column name is privileged.
     """
-    import re
     traj = read_trajectory(run_dir)
+    order = stages if stages is not None else (
+        _oracle_stores(Path(run_dir))[0].get("funnel") or None)
     out = []
     for st in traj["stores"]:
         cols = st["columns"]
         binary = [c for c, v in cols.items() if v["kind"] == "binary"]
-        picked = list(stages) if stages is not None else []
-        if stages is None:
-            for pat in _FUNNEL_DEFAULT_ORDER:
-                hit = next((c for c in binary
-                            if re.search(pat, c, re.I) and c not in picked), None)
-                if hit:
-                    picked.append(hit)
+        picked = list(order) if order is not None else list(binary)
         n = st["n"]
         use = [c for c in picked if c in binary]
         skipped = [c for c in picked if c not in binary]

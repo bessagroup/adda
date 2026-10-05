@@ -166,8 +166,7 @@ def _tool_headline(inp: dict) -> str:
 
 
 # Measured against a real run rather than guessed. Across the 78 tool
-# results of one delegation (supercompressible-material 20260907T024929,
-# D018) the median result is 15 lines and the 90th percentile is 146, so a
+# results of one benchmark delegation the median result is 15 lines and the 90th percentile is 146, so a
 # 3-line budget left only 19% of results readable without a click — a
 # transcript of stubs. The share fully visible by budget: 3 -> 19%,
 # 6 -> 40%, 8 -> 46%, 12 -> 49%, 16 -> 53%, 30 -> 54%. The knee is at 8 and

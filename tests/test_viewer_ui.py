@@ -148,14 +148,14 @@ def test_a_closed_run_never_polls_the_heartbeat(tmp_path, page):
 
 
 OBJECTIVE = {
-    "column": "sigma", "direction": "max", "feasible": "feasible",
-    "lines": [{"value": 2.0, "label": "2x pass bar"}],
-    "unit_label": {"divide_by": 2.0, "label": "x ref"},
+    "column": "score", "direction": "max", "feasible": "feasible",
+    "lines": [{"value": 2.0, "label": "reference"}],
+    "unit_label": {"divide_by": 2.0, "label": "x unit"},
 }
 
 
 def _with_store(run_dir, n=6, objective=OBJECTIVE):
-    """A canonical store of `n` rows: sigma = row index, odd rows infeasible."""
+    """A canonical store of `n` rows: score = row index, odd rows infeasible."""
     import json
     cfg = {"objective": objective} if objective else {}
     (run_dir / "debug" / "run_config.json").write_text(json.dumps(cfg))
@@ -164,7 +164,7 @@ def _with_store(run_dir, n=6, objective=OBJECTIVE):
     (data / "domain.json").write_text(json.dumps({"input_space": {"x": {}}}))
     (data / "input.csv").write_text(",x\n" + "".join(f"{i},{i * 0.5}\n" for i in range(n)))
     (data / "output.csv").write_text(
-        ",sigma,feasible,note,_delegation_id,_ts\n" + "".join(
+        ",score,feasible,note,_delegation_id,_ts\n" + "".join(
             f"{i},{i + 1},{int(i % 2 == 0)},n{i},D00{i % 3 + 1},2026-09-17T12:{i:02d}:00+00:00\n"
             for i in range(n)))
     (data / "jobs.csv").write_text(",0\n" + "".join(f"{i},FINISHED\n" for i in range(n)))
@@ -180,8 +180,8 @@ def test_data_view_draws_the_declared_objective_in_display_units(tmp_path, page)
         # the axis follows the counted rows; the infeasible row above it is reported, not drawn
         assert page.locator(".cht .dot.i").count() == 2
         assert "1 outside the axis" in page.locator(".dcap", has_text="outside the axis").inner_text()
-        assert "2x pass bar" in page.locator(".cht .refl").text_content()
-        assert page.locator(".cht .ylab").text_content() == "x ref"   # one scaling, in one place
+        assert "reference" in page.locator(".cht .refl").text_content()
+        assert page.locator(".cht .ylab").text_content() == "x unit"   # one scaling, in one place
         assert "Best so far" in page.locator(".dh h3").first.inner_text()
         page.locator(".cht .dot.f").first.click(force=True)
         page.wait_for_selector(".ih")
@@ -230,13 +230,13 @@ def test_the_wall_clock_fill_warns_past_one_and_a_half_and_fails_past_two(tmp_pa
 
 
 def _with_namespace(run_dir):
-    """A 'freeform' store whose best counted row (sigma 8, row 1) beats every canonical one."""
-    ff = run_dir / "experiment_data" / "freeform" / "experiment_data"
+    """A 'alpha' store whose best counted row (score 8, row 1) beats every canonical one."""
+    ff = run_dir / "experiment_data" / "alpha" / "experiment_data"
     ff.mkdir(parents=True)
     (ff / "domain.json").write_text('{"input_space": {"x": {}}}')
     (ff / "input.csv").write_text(",x\n0,1\n1,2\n2,3\n")
     (ff / "output.csv").write_text(
-        ",sigma,feasible,note,_delegation_id,_ts\n"
+        ",score,feasible,note,_delegation_id,_ts\n"
         "0,3,1,a,D001,2026-09-17T12:20:00+00:00\n"
         "1,8,1,b,D002,2026-09-17T12:30:00+00:00\n"
         "2,9,0,c,D002,2026-09-17T12:40:00+00:00\n")
@@ -251,23 +251,23 @@ def test_the_best_row_and_chart_span_every_store_and_name_the_namespace(tmp_path
         page.goto(f"{srv.url}/ui?run={RUN}&view=data")
         page.wait_for_selector("svg.cht")
         best = page.locator("#title button.vital.link")
-        assert "4 x ref" in best.inner_text() and "freeform row 1" in best.inner_text()
+        assert "4 x unit" in best.inner_text() and "alpha row 1" in best.inner_text()
         # the canonical store (3 counted) and the namespace (2 counted) both draw dots
         assert page.locator(".cht .dot.f[data-ns='']").count() == 3
-        assert page.locator(".cht .dot.f[data-ns='freeform']").count() == 2
-        page.click("[data-hide='freeform']")
-        assert page.locator(".cht .dot[data-ns='freeform']").count() == 0
+        assert page.locator(".cht .dot.f[data-ns='alpha']").count() == 2
+        page.click("[data-hide='alpha']")
+        assert page.locator(".cht .dot[data-ns='alpha']").count() == 0
         assert page.locator(".cht .step").get_attribute("d")        # the line still spans every store
         best.click()
         page.wait_for_selector(".ih")
-        assert "sel=row%3Afreeform%3A1" in page.url
-        assert "freeform" in page.locator(".ih").inner_text()
+        assert "sel=row%3Aalpha%3A1" in page.url
+        assert "alpha" in page.locator(".ih").inner_text()
 
 
 def test_a_store_without_the_declared_columns_is_named_not_scored(tmp_path, page):
     study, run_dir = _study(tmp_path)
     _with_store(run_dir)
-    lg = run_dir / "experiment_data" / "legacy" / "experiment_data"
+    lg = run_dir / "experiment_data" / "beta" / "experiment_data"
     lg.mkdir(parents=True)
     (lg / "output.csv").write_text(",energy,_delegation_id,_ts\n0,1,D001,2026-09-17T12:20:00+00:00\n")
     (lg / "input.csv").write_text(",x\n0,1\n")
@@ -275,4 +275,4 @@ def test_a_store_without_the_declared_columns_is_named_not_scored(tmp_path, page
     with _LiveServer(create_app(study)) as srv:
         page.goto(f"{srv.url}/ui?run={RUN}&view=data")
         page.wait_for_selector("svg.cht")
-        assert "not scored: legacy (missing sigma, feasible)" in page.locator(".dcap", has_text="not scored").inner_text()
+        assert "not scored: beta (missing score, feasible)" in page.locator(".dcap", has_text="not scored").inner_text()

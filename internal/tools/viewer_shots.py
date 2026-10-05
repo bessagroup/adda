@@ -46,20 +46,16 @@ def question_fixture(study: Path) -> Path:
     return root
 
 
-def data_fixture(study: Path) -> Path:
-    """A copy of `study` whose newest run declares an objective, so the Data
-    view has something to draw. The study's own config is untouched."""
+def data_fixture(study: Path, declaration: dict) -> Path:
+    """A copy of `study` whose newest run records `declaration` (a study's
+    ``objective:`` block, read from a JSON file), so a run that predates the
+    declaration can be shot with it. The study's own config is untouched."""
     root = Path(tempfile.mkdtemp(prefix="adda_data_")) / study.name
     shutil.copytree(study, root)
     run_dir = sorted((root / "runs").iterdir())[-1]
     cfg_path = run_dir / "debug" / "run_config.json"
     cfg = json.loads(cfg_path.read_text())
-    cfg["objective"] = {
-        "column": "sigma_peak", "direction": "max", "feasible": "feasible",
-        "lines": [{"value": 0.1122, "label": "1x pass bar"},
-                  {"value": 1.122, "label": "10x target"}],
-        "unit_label": {"divide_by": 0.1122, "label": "x Bessa"},
-    }
+    cfg["objective"] = declaration
     cfg_path.write_text(json.dumps(cfg))
     return root
 
@@ -138,8 +134,9 @@ def main() -> int:
     ap.add_argument("--run")
     ap.add_argument("--sel", help="selection for the timeline shot")
     ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--data", action="store_true",
-                    help="shoot the Data view on a copy whose run declares an objective")
+    ap.add_argument("--data", action="store_true", help="shoot the Data view")
+    ap.add_argument("--objective", metavar="JSON",
+                    help="objective declaration (JSON file) to record on a copy of the run")
     ap.add_argument("--banner", action="store_true",
                     help="shoot the question banner on a fixture with a pending question")
     a = ap.parse_args()
@@ -147,7 +144,8 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
 
     study = (question_fixture(Path(a.study)) if a.banner
-             else data_fixture(Path(a.study)) if a.data else Path(a.study))
+             else data_fixture(Path(a.study), json.loads(Path(a.objective).read_text()))
+             if a.objective else Path(a.study))
     cfg = uvicorn.Config(create_app(study), host="127.0.0.1",
                          port=a.port, log_level="error")
     server = uvicorn.Server(cfg)
