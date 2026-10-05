@@ -127,7 +127,7 @@ def test_phone_controls_are_finger_sized_and_the_start_action_stays_in_view(tmp_
                 ".map(e=>(e.id||e.className)+' '+e.textContent.trim().slice(0,12))")
             assert small == [], f"{view}: controls under 40 px tall: {small}"
         page.click("#openstart")
-        page.wait_for_selector("#sheet:not([hidden]) #dostart")
+        page.wait_for_selector("#sheet:not([hidden]) .checks")   # the pre-flight has landed; the sheet is repainted once more after it
         box = page.locator("#dostart").bounding_box()
         assert box["y"] + box["height"] <= 700
 
