@@ -1329,6 +1329,13 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   Timeout is the gate's rule (a tenth of the wall budget, at least 180 s). One replay per study
   at a time (409), write token required, 409 when the run has no notebook or no ledger. Audited
   as `reexecute` rows (exact command before, outcome after).
+  **Transcript events (spec 14 Phase 2):** `GET /api/runs/<id>/transcript/<key>/events?after=N&limit=M`
+  (`viewer/transcript_events.py`) returns `{events, next_cursor, total}`: both backends' transcripts
+  normalised server-side to `{ts, kind: user|assistant|tool_use|tool_result|thinking|system, role,
+  text, tool?, result?, notices?, pending?}`, so a front end renders events and never parses a
+  backend format. `after` and `next_cursor` count RAW records (most are streaming partials that emit
+  nothing); `limit` caps emitted events (default 200, max 1000). `next_cursor` is always an int, so a
+  live transcript is polled from it. Tool names and `pending` calls resolve against the whole file.
   The viewer binds loopback only: any other `--host` needs `--allow-network` and prints a warning.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);

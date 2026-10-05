@@ -32,6 +32,16 @@ from starlette.templating import Jinja2Templates
 from ..infra import operator_channel, stop_request
 from ..nodes.notices import split_notices
 from . import notebook_replay, readers, run_control
+from .transcript_events import (  # noqa: F401 — re-exported for the renderers below
+    _ASSISTANT_TYPES,
+    _HUMAN_TYPES,
+    _RESULT_TYPES,
+    _compaction_facts,
+    _result_event_kind,
+    _result_text,
+    _tool_input,
+    normalise_events,
+)
 
 __all__ = ["create_app", "run_viewer"]
 
@@ -154,29 +164,6 @@ def _tool_headline(inp: dict) -> str:
     return ""
 
 
-def _result_text(content) -> str:
-    """Flatten a tool result into the text a human would read.
-
-    Results arrive as a list of content blocks ({"type": "text", "text":
-    ...}), which the previous renderer json.dumps()ed — so the reader was
-    shown a JSON envelope of the thing they wanted, and only after
-    expanding it.
-    """
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, dict):
-                parts.append(block.get("text") or block.get("content") or "")
-            elif isinstance(block, str):
-                parts.append(block)
-        return "\n".join(p for p in parts if p)
-    if content is None:
-        return ""
-    return json.dumps(content, indent=2)
-
-
 # Measured against a real run rather than guessed. Across the 78 tool
 # results of one delegation (supercompressible-material 20260907T024929,
 # D018) the median result is 15 lines and the 90th percentile is 146, so a
@@ -257,20 +244,6 @@ def _notice_html(text: str) -> str:
     )
 
 
-_VERDICT_RE = re.compile(
-    r"###\s*Verdict\b[\s:>*_`\"'\-]*(PASS|REVISE|REJECT)\b", re.IGNORECASE)
-
-
-def _result_event_kind(text: str) -> str:
-    """A result that is itself a critic verdict or a review approval."""
-    m = _VERDICT_RE.search(text or "")
-    if m:
-        return f"verdict-{m.group(1).lower()}"
-    if (text or "").lstrip().startswith("Approved."):
-        return "review"
-    return ""
-
-
 # Two backends write transcripts in two shapes. The Claude backend records
 # type "assistant" with a `tools` list of {name, input}; the
 # OpenAI-compatible one (used when a node points at a local Ollama/vLLM
@@ -282,65 +255,6 @@ def _result_event_kind(text: str) -> str:
 # rather than trusted, since one arrives from a request body and becomes a
 # routing key on the run side.
 _DELEGATION_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
-
-_ASSISTANT_TYPES = {"assistant", "aimessage", "aimessagechunk"}
-_RESULT_TYPES = {"toolmessage", "functionmessage"}
-# The agent's inbox side of the conversation. Both backends write it: the
-# Claude backend as "user", the OpenAI-compatible one as the LangChain class
-# name. adda's own in-band injections arrive on this role too, marked.
-_HUMAN_TYPES = {"user", "human", "humanmessage"}
-
-
-def _tool_input(tool: dict) -> dict:
-    """A tool call's arguments, under whichever key the backend used."""
-    for key in ("input", "args", "arguments"):
-        val = tool.get(key)
-        if isinstance(val, dict):
-            return val
-    return {}
-
-
-def _compaction_facts(event: dict) -> dict | None:
-    """Normalise both backends' compaction record to one shape, or ``None``.
-
-    Claude: ``{"type":"system","subtype":"compact_boundary","data":{...}}``,
-    where the SDK's own metadata names the token counts (``preTokens`` /
-    ``postTokens``, sometimes under ``compact_metadata``, in either case
-    convention). Local: ``{"type":"ContextCompaction","policy":...,
-    "trim":{tokens_before,...},"summary":...}``.
-    """
-    etype = str(event.get("type") or "").lower()
-    if etype == "contextcompaction":
-        trim = event.get("trim") or {}
-        return {
-            "policy": event.get("policy") or "",
-            "before": trim.get("tokens_before"),
-            "after": trim.get("tokens_after"),
-            "dropped": trim.get("dropped"),
-            "detail": event.get("text") or "",
-            "summary": event.get("summary") or "",
-        }
-    if etype == "system" and event.get("subtype") == "compact_boundary":
-        data = event.get("data") or {}
-        meta = data.get("compact_metadata") or data.get("compactMetadata") or {}
-
-        def pick(*keys):
-            for src in (data, meta):
-                for k in keys:
-                    if src.get(k) is not None:
-                        return src[k]
-            return None
-
-        return {
-            "policy": pick("trigger") or "sdk",
-            "before": pick("preTokens", "pre_tokens"),
-            "after": pick("postTokens", "post_tokens"),
-            "dropped": None,
-            "detail": "",
-            "summary": pick("summary") or "",
-        }
-    return None
-
 
 def _compaction_html(facts: dict) -> str:
     """An inline marker at the point the context was compacted."""
@@ -989,6 +903,28 @@ def create_app(
             return _not_found(f"no such transcript {key!r}")
         return JSONResponse(events)
 
+    async def get_transcript_events(request):
+        run_id = request.path_params["run_id"]
+        key = request.path_params["key"]
+        try:
+            after = max(0, int(request.query_params.get("after", 0)))
+            limit = min(1000, max(1, int(request.query_params.get("limit", 200))))
+        except (TypeError, ValueError):
+            return JSONResponse(
+                {"error": "after and limit must be integers"}, status_code=400)
+        run_dir = _run_dir(study_dir, run_id)
+        if run_dir is None:
+            return _not_found(f"no such run {run_id!r}")
+        raw = readers.read_transcript(run_dir, key)
+        if raw is None:
+            return _not_found(
+                "transcripts not recorded for this run (debug flag was off)")
+        if not raw:
+            return _not_found(f"no such transcript {key!r}")
+        events, cursor = normalise_events(raw, after, limit)
+        return JSONResponse(
+            {"events": events, "next_cursor": cursor, "total": len(raw)})
+
     async def get_transcript_fragment(request):
         run_id = request.path_params["run_id"]
         key = request.path_params["key"]
@@ -1191,6 +1127,10 @@ def create_app(
               methods=["POST"]),
         Route("/api/runs/{run_id}/problem_statement", get_problem_statement),
         Route("/api/runs/{run_id}/node/{name}/transcripts", get_node_transcripts),
+        Route(
+            "/api/runs/{run_id}/transcript/{key:path}/events",
+            get_transcript_events,
+        ),
         Route(
             "/api/runs/{run_id}/transcript/{key:path}/fragment",
             get_transcript_fragment,
