@@ -1363,6 +1363,13 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   **Strategizer notes (spec 14 2.8):** `GET /api/runs/<id>/notes` returns `{notes}`: every `*.md` in
   `debug/strategizer_notes/` (`strategy_NN_*.md`, `study_summary.md`) as `{name, mtime, text}`, oldest
   first. Any subset, or none, is valid.
+  **Evidence (spec 14 2.6):** `GET /api/runs/<id>/evidence` returns `{index, repo, delegations}`:
+  `debug/evidence_index.md`, and per delegation its `workspace_sha`, `predecessor_sha` (the commit
+  before it in the workspace history) and the `files` that commit touched. `GET
+  /api/runs/<id>/evidence/<delegation_id>` adds `git show --stat` and `git diff --stat` against the
+  predecessor. All git goes through `viewer/safe_git.py`: fixed argv, no shell, commit ids
+  `[0-9a-f]{7,40}` only, explicit `--git-dir` (never discovers a parent repo), scrubbed env, timeout,
+  capped output; it can only read. The same module serves study history (5.10).
   The viewer binds loopback only: any other `--host` needs `--allow-network` and prints a warning.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);

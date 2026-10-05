@@ -920,6 +920,34 @@ def create_app(
             return _not_found(f"no such run {run_id!r}")
         return JSONResponse(readers.read_strategizer_notes(run_dir))
 
+    async def get_evidence(request):
+        """``evidence_index.md`` and every delegation's workspace commit with
+        its changed files (read-only git; ``repo: false`` when the run has no
+        workspace repository)."""
+        run_id = request.path_params["run_id"]
+        run_dir = _run_dir(study_dir, run_id)
+        if run_dir is None:
+            return _not_found(f"no such run {run_id!r}")
+        return JSONResponse(readers.read_evidence(run_dir))
+
+    async def get_evidence_stat(request):
+        """``git show --stat`` of one delegation's commit and ``git diff
+        --stat`` against the commit before it. 404 for an unknown delegation
+        or one with no recorded sha; 502 if git cannot answer."""
+        from . import safe_git
+        run_id = request.path_params["run_id"]
+        run_dir = _run_dir(study_dir, run_id)
+        if run_dir is None:
+            return _not_found(f"no such run {run_id!r}")
+        did = request.path_params["delegation_id"]
+        try:
+            stat = readers.read_evidence_stat(run_dir, did)
+        except safe_git.GitViewError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=502)
+        if stat is None:
+            return _not_found(f"no committed delegation {did!r}")
+        return JSONResponse(stat)
+
     async def get_retrospectives(request):
         """Every retrospective split into CONSISTENCY / DECISION / FRICTION /
         BLOCKED / TIME, plus ``missing``: the runtime's RETROSPECTIVES_MISSING
@@ -1196,6 +1224,8 @@ def create_app(
         Route("/api/runs/{run_id}/problem_statement", get_problem_statement),
         Route("/api/runs/{run_id}/diagnostics", get_diagnostics),
         Route("/api/runs/{run_id}/notes", get_notes),
+        Route("/api/runs/{run_id}/evidence", get_evidence),
+        Route("/api/runs/{run_id}/evidence/{delegation_id}", get_evidence_stat),
         Route("/api/runs/{run_id}/retrospectives", get_retrospectives),
         Route("/api/runs/{run_id}/critic_reviews", get_critic_reviews),
         Route("/api/runs/{run_id}/node/{name}/transcripts", get_node_transcripts),

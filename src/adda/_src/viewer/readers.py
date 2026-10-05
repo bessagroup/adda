@@ -454,6 +454,61 @@ def read_strategizer_notes(run_dir: Path | str) -> dict[str, Any]:
         for f in files]}
 
 
+def read_evidence(run_dir: Path | str) -> dict[str, Any]:
+    """``debug/evidence_index.md`` plus every delegation's workspace commit.
+
+    ``delegations`` carries each row's ``workspace_sha``, its
+    ``predecessor_sha`` (the commit before it in the workspace history, None
+    for the first) and the ``files`` that commit touched, from the read-only
+    git view. ``repo`` is False for a run with no workspace repository, in
+    which case ``files`` are empty rather than an error.
+    """
+    from . import safe_git
+
+    run_dir = Path(run_dir)
+    index_path = run_dir / "debug" / "evidence_index.md"
+    index = (index_path.read_text(encoding="utf-8", errors="replace")
+             if index_path.is_file() else None)
+    workspace = run_dir / "debug" / "delegations"
+    try:
+        history = [c["sha"] for c in safe_git.log(workspace, limit=10_000)]
+        files = safe_git.commit_files(workspace)
+        repo = True
+    except safe_git.GitViewError:
+        history, files, repo = [], {}, False
+    predecessor = dict(zip(history, history[1:], strict=False))
+    rows = []
+    for d in read_delegations(run_dir):
+        sha = d.get("workspace_sha")
+        rows.append({
+            "id": d.get("id"), "to_node": d.get("to_node"),
+            "status": d.get("status"), "workspace_sha": sha,
+            "predecessor_sha": predecessor.get(sha),
+            "files": files.get(sha, [])})
+    return {"index": index, "repo": repo, "delegations": rows}
+
+
+def read_evidence_stat(run_dir: Path | str, delegation_id: str
+                       ) -> dict[str, Any] | None:
+    """``git show --stat`` of a delegation's commit and ``git diff --stat``
+    against its predecessor; None when the delegation or its sha is unknown.
+    Raises ``safe_git.GitViewError`` if git cannot answer."""
+    from . import safe_git
+
+    ev = read_evidence(run_dir)
+    row = next((r for r in ev["delegations"] if r["id"] == delegation_id), None)
+    if row is None or not row["workspace_sha"]:
+        return None
+    workspace = Path(run_dir) / "debug" / "delegations"
+    pred = row["predecessor_sha"]
+    return {
+        "delegation_id": delegation_id, "workspace_sha": row["workspace_sha"],
+        "predecessor_sha": pred,
+        "show_stat": safe_git.show_stat(workspace, row["workspace_sha"]),
+        "diff_stat": (safe_git.diff_stat(workspace, pred, row["workspace_sha"])
+                      if pred else None)}
+
+
 def read_diagnostics_tail(run_dir: Path | str) -> list[dict[str, Any]]:
     """Every diagnostics.jsonl row seen so far (open vocabulary — no fixed
     schema beyond ``ts``/``node``/``tool``/``error_type``/``fault``/
