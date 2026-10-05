@@ -172,6 +172,55 @@ def deliverable_shots(base: str, out: Path, problems: list[str]) -> None:
         browser.close()
 
 
+def live_fixture(study: Path) -> tuple[Path, Path]:
+    """A copy of `study` whose newest run is open, plus that run's run.log,
+    for a writer thread to append to while the tail is shot."""
+    root = Path(tempfile.mkdtemp(prefix="adda_live_")) / study.name
+    shutil.copytree(study, root)
+    run_dir = sorted(d for d in (root / "runs").iterdir() if (d / "debug" / "run.log").is_file())[-1]
+    (run_dir / "debug" / "run_status.json").unlink(missing_ok=True)
+    (run_dir / "run_status.json").unlink(missing_ok=True)
+    return root, run_dir / "debug" / "run.log"
+
+
+def logs_shots(base: str, out: Path, problems: list[str], live_log: Path | None = None) -> None:
+    from playwright.sync_api import sync_playwright
+
+    stop = threading.Event()
+
+    def writer() -> None:
+        n = 0
+        while not stop.is_set() and live_log is not None:
+            n += 1
+            with open(live_log, "a", encoding="utf-8") as fh:
+                fh.write(f"[{time.strftime('%H:%M:%S')}] {'WARNING' if n % 4 == 0 else 'INFO'} live line {n}\n")
+            time.sleep(0.5)
+
+    if live_log is not None:
+        threading.Thread(target=writer, daemon=True).start()
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        for wname, (w, h) in WIDTHS.items():
+            for theme in THEMES:
+                ctx = browser.new_context(viewport={"width": w, "height": h}, color_scheme=theme)
+                pg = ctx.new_page()
+                pg.on("pageerror", lambda e: problems.append(f"JS error: {e}"))
+                pg.goto(f"{base}/ui?view=logs")
+                pg.wait_for_selector(".logbody", timeout=8000)
+                pg.wait_for_timeout(4500 if live_log else 600)
+                pg.screenshot(path=str(out / f"logs-{wname}-{theme}.png"))
+                sw = pg.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
+                if w <= 400 and sw > 0:
+                    problems.append(f"logs-{wname}-{theme}: horizontal scroll by {sw}px")
+                if theme == "light" and wname == "1600":
+                    pg.locator('[data-logsrc=diagnostics]').click()
+                    pg.wait_for_timeout(800)
+                    pg.screenshot(path=str(out / f"logs-monitor-{wname}-{theme}.png"))
+                ctx.close()
+        browser.close()
+    stop.set()
+
+
 def banner_shots(base: str, out: Path, problems: list[str]) -> None:
     from playwright.sync_api import sync_playwright
 
@@ -209,12 +258,18 @@ def main() -> int:
                     help="objective declaration (JSON file) to record on a copy of the run")
     ap.add_argument("--hypotheses", action="store_true", help="shoot the Hypotheses view")
     ap.add_argument("--deliverable", action="store_true", help="shoot the Deliverable view")
+    ap.add_argument("--logs", action="store_true", help="shoot the Logs view")
+    ap.add_argument("--live", action="store_true", help="with --logs: append lines to run.log while shooting")
     ap.add_argument("--banner", action="store_true",
                     help="shoot the question banner on a fixture with a pending question")
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
 
+    live_log = None
+    if a.logs and a.live:
+        _root, live_log = live_fixture(Path(a.study))
+        a.study = str(_root)
     study = (question_fixture(Path(a.study)) if a.banner
              else data_fixture(Path(a.study), json.loads(Path(a.objective).read_text()))
              if a.objective else Path(a.study))
@@ -233,9 +288,12 @@ def main() -> int:
     from playwright.sync_api import sync_playwright
 
     problems: list[str] = []
-    if a.banner or a.data or a.hypotheses or a.deliverable:
-        (banner_shots if a.banner else hypothesis_shots if a.hypotheses
-         else deliverable_shots if a.deliverable else data_shots)(base, out, problems)
+    if a.banner or a.data or a.hypotheses or a.deliverable or a.logs:
+        if a.logs:
+            logs_shots(base, out, problems, live_log)
+        else:
+            (banner_shots if a.banner else hypothesis_shots if a.hypotheses
+             else deliverable_shots if a.deliverable else data_shots)(base, out, problems)
         server.should_exit = True
         for p in problems:
             print("PROBLEM:", p)

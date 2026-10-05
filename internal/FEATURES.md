@@ -1443,6 +1443,16 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   `POST /api/runs/{run}/notebook/reexecute/stream` (NDJSON: `started`, `phase`, `cell` progress events from
   `notebook_replay`, then a final `result`), which fills a log drawer and ends with a pass or fail mark and the
   re-executed value next to the stored one. The earlier non-streaming endpoint is unchanged.
+  **Saved re-executions:** every re-execution writes its executed notebook as a NEW file,
+  `runs/<run>/debug/viewer_reexec/pipeline_<stamp>.ipynb`, with `reexec_<stamp>.json` (pass/fail, time, adda
+  commit, reproduced/claimed values, ledger rows before/after); the run's own `pipeline.ipynb` is never
+  modified. `GET …/notebook?reexec=` serves the latest passing re-execution by default, `stored` the run's own
+  notebook, or a listed id; the view's "Stored · Last re-execution" switch picks between them and the headline
+  strip is read from the notebook shown ("From re-execution at <time>"). Each re-execution is an audit row.
+  **Logs view:** a tail of `GET /api/runs/{id}/log` with a Run log / Monitor source switch (`name=run` is
+  `run.log`, `name=diagnostics` is `diagnostics.jsonl`, one line each), polled every 2 s while the run is open,
+  a Pause toggle that resumes without gaps (the byte cursor is kept), ids linked, stuck to the bottom unless
+  scrolled up. `viewer_shots.py --logs [--live]` shoots it; `--live` appends to a copy's run.log meanwhile.
   `viewer_shots.py --deliverable` shoots it, including a Re-execute.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);

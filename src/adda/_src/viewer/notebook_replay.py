@@ -9,6 +9,7 @@ a multi-threaded server would leak into every other request.
 """
 from __future__ import annotations
 
+import datetime
 import json
 import shlex
 import subprocess
@@ -21,7 +22,10 @@ from typing import Any
 import psutil
 import yaml
 
-__all__ = ["ReplayError", "replay_notebook"]
+__all__ = ["REEXEC_DIR", "ReplayError", "replay_notebook"]
+
+# Beside the run's own records; the run's pipeline.ipynb is never written.
+REEXEC_DIR = ("debug", "viewer_reexec")
 
 _RESULT_MARK = "ADDA_REPLAY_RESULT "
 _EVENT_MARK = "ADDA_REPLAY_EVENT "
@@ -91,7 +95,9 @@ def replay_notebook(
         raise ReplayError("a re-execution is already running for this study")
     try:
         timeout = _timeout_s(study_dir)
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         args = {"notebook": str(notebook), "store_dir": str(store_dir),
+                "save_dir": str(run_dir.joinpath(*REEXEC_DIR)), "stamp": stamp,
                 "run_config": str(run_dir / "debug" / "run_config.json"),
                 "study_root": str(study_dir), "timeout": timeout}
         cmd = [sys.executable, "-m", __name__, json.dumps(args)]
@@ -141,9 +147,12 @@ def replay_notebook(
                             proc.returncode)
         result.update(run_id=run_id, notebook=notebook.name,
                       duration_s=round(time.time() - t0, 1))
+        if result.get("saved"):
+            result["reexec_id"] = stamp
         if audit:
             audit("reexecute", run_id=run_id, phase="done",
-                  passed=result["passed"], error=result.get("error"))
+                  passed=result["passed"], error=result.get("error"),
+                  saved=result.get("saved"))
         return result
     finally:
         lock.release()
@@ -161,6 +170,16 @@ def _parse(out: str, err: str, returncode: int) -> dict[str, Any]:
 def _event(event: str, line: str, **fields: Any) -> None:
     print(_EVENT_MARK + json.dumps({"event": event, "line": line, **fields}),
           flush=True)
+
+
+def _adda_commit() -> str | None:
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=Path(__file__).parent,
+            capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout.strip() or None if out.returncode == 0 else None
 
 
 def _worker(args: dict[str, Any]) -> dict[str, Any]:
@@ -186,10 +205,12 @@ def _worker(args: dict[str, Any]) -> dict[str, Any]:
         def _on_cell(done: int, total: int, errored: bool) -> None:
             _event("cell", f"Cell {done} of {total} " + ("raised an error" if errored else "done"),
                    done=done, total=total, errored=errored)
+        save_dir, stamp = Path(args["save_dir"]), args["stamp"]
+        saved_nb = save_dir / f"pipeline_{stamp}.ipynb"
         try:
             proc = run_deliverable(
                 Path(args["notebook"]), cwd=sandbox, env=env,
-                timeout=args["timeout"], on_cell=_on_cell)
+                timeout=args["timeout"], on_cell=_on_cell, save_to=saved_nb)
         except subprocess.TimeoutExpired:
             return {"passed": False, "timed_out": True,
                     "error": f"did not finish within {args['timeout']:.0f}s"}
@@ -198,8 +219,19 @@ def _worker(args: dict[str, Any]) -> dict[str, Any]:
     headline = parse_headline(proc.stdout)
     lazy = after_n == before_n
     unchanged = not (before_hash and after_hash and before_hash != after_hash)
+    passed = proc.returncode == 0 and lazy and unchanged
+    saved = saved_nb.name if saved_nb.exists() else None
+    if saved:
+        (save_dir / f"reexec_{stamp}.json").write_text(json.dumps({
+            "id": stamp, "passed": passed, "notebook": saved,
+            "source": Path(args["notebook"]).name,
+            "finished_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "adda_commit": _adda_commit(),
+            "reproduced": headline["reproduced"], "claimed": headline["claimed"],
+            "rows_before": before_n, "rows_after": after_n,
+        }), encoding="utf-8")
     return {
-        "passed": proc.returncode == 0 and lazy and unchanged,
+        "passed": passed, "saved": saved,
         "timed_out": False, "returncode": proc.returncode,
         "rows_before": before_n, "rows_after": after_n,
         "lazy": lazy, "unchanged": unchanged,

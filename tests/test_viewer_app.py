@@ -795,6 +795,15 @@ def test_log_tail_resets_when_the_file_shrank(tmp_path):
     assert out["reset"] is True and out["text"] == "fresh\n"
 
 
+def test_log_tail_serves_the_monitor_diagnostics_as_a_second_named_source(tmp_path):
+    study = _make_study(tmp_path)
+    run = _make_run(study, "20260904T120000")
+    (run / "debug" / "diagnostics.jsonl").write_text('{"error_type": "ERROR_RETURN"}\n')
+    out = TestClient(create_app(study)).get(
+        "/api/runs/20260904T120000/log", params={"name": "diagnostics"}).json()
+    assert out["exists"] is True and "ERROR_RETURN" in out["text"]
+
+
 def test_log_tail_takes_a_name_never_a_path(tmp_path):
     study = _make_study(tmp_path)
     _make_run(study, "20260904T120000")

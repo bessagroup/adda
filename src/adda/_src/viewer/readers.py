@@ -30,6 +30,7 @@ __all__ = [
     "read_hypotheses",
     "read_milestones",
     "read_notebook",
+    "read_reexecutions",
     "read_vitals",
     "read_oracle",
     "read_artifacts",
@@ -1392,12 +1393,47 @@ def notebook_path(study_dir: Path | str, run_id: str) -> Path | None:
     return path
 
 
+def read_reexecutions(study_dir: Path | str, run_id: str) -> list[dict[str, Any]]:
+    """The viewer's re-executions of this run, newest first: each is the small
+    JSON the replay wrote beside the run's records (``debug/viewer_reexec/``),
+    kept only while its executed notebook is still there."""
+    from .notebook_replay import REEXEC_DIR
+
+    run_dir = Path(study_dir) / "runs" / run_id
+    folder = run_dir.joinpath(*REEXEC_DIR)
+    rows = []
+    for f in sorted(folder.glob("reexec_*.json"), reverse=True):
+        try:
+            row = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(row, dict) and (folder / str(row.get("notebook", ""))).is_file() \
+                and row.get("id") == f.stem[len("reexec_"):]:
+            rows.append(row)
+    return rows
+
+
 def read_notebook(
-    study_dir: Path | str, run_id: str,
+    study_dir: Path | str, run_id: str, reexec: str | None = None,
 ) -> dict[str, Any] | None:
     """The deliverable notebook belonging to *run_id* as cells, or ``None``
-    (see :func:`notebook_path` for which file that is)."""
-    path = notebook_path(study_dir, run_id)
+    (see :func:`notebook_path` for which file that is). With ``reexec`` (the id
+    of one of :func:`read_reexecutions`) the cells are that re-execution's
+    executed copy; ``"stored"`` asks for the run's own notebook; ``None`` takes
+    the latest PASSING re-execution when there is one, else the stored
+    notebook. The run's own notebook is read-only here either way."""
+    from .notebook_replay import REEXEC_DIR
+
+    reruns = read_reexecutions(study_dir, run_id)
+    if reexec is None:
+        chosen = next((r for r in reruns if r.get("passed")), None)
+    else:
+        chosen = next((r for r in reruns if r["id"] == reexec), None)
+    stored = notebook_path(study_dir, run_id)
+    if chosen is not None:
+        path = Path(study_dir) / "runs" / run_id / Path(*REEXEC_DIR) / chosen["notebook"]
+    else:
+        path = stored
     if path is None:
         return None
 
@@ -1428,13 +1464,16 @@ def read_notebook(
                      for o in c["outputs"]
                      if o["kind"] == "stream" and o.get("name") == "stdout")
     return {"cells": cells, "path": str(path),
+            "source": chosen["id"] if chosen is not None else "stored",
+            "reexecutions": [{k: r.get(k) for k in ("id", "passed", "finished_at", "adda_commit", "reproduced")}
+                             for r in reruns],
             "live": path == Path(study_dir) / "pipeline.ipynb", "error": None,
             "headline": parse_headline(stdout)}
 
 
 # Logs a client may ask for, by name. A name, never a path: the file is
 # looked up here, so nothing the client sends reaches the filesystem.
-_LOG_FILES = {"run": "run.log"}
+_LOG_FILES = {"run": "run.log", "diagnostics": "diagnostics.jsonl"}
 _LOG_DEFAULT_BYTES = 64 * 1024
 _LOG_MAX_BYTES = 1024 * 1024
 

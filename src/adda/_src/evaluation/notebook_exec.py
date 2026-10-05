@@ -206,13 +206,15 @@ def parse_headline(stdout: str) -> dict[str, str | None]:
 
 
 def _execute_notebook(path: Path, cwd: Path, env: dict, timeout: float,
-                      on_cell=None):
+                      on_cell=None, save_to: Path | None = None):
     """Execute a notebook in THIS interpreter's env (so f3dasm/get_evaluator
     import) and return a CompletedProcess-shaped result. Raises
     subprocess.TimeoutExpired on timeout (mirrors the .py path).
 
     ``on_cell(done, total, errored)``, if given, is called after each code cell
-    finishes, so a caller can show progress while the kernel runs."""
+    finishes, so a caller can show progress while the kernel runs. ``save_to``,
+    if given, receives the EXECUTED notebook (outputs included); ``path`` is
+    never written."""
     import nbformat
     from jupyter_client.manager import KernelManager
     from nbclient import NotebookClient
@@ -247,6 +249,9 @@ def _execute_notebook(path: Path, cwd: Path, env: dict, timeout: float,
             client.execute()
         except (CellTimeoutError, DeadKernelError) as exc:
             raise subprocess.TimeoutExpired(cmd=str(path), timeout=timeout) from exc
+    if save_to is not None:
+        Path(save_to).parent.mkdir(parents=True, exist_ok=True)
+        nbformat.write(nb, str(save_to))
 
     out_parts, err_parts, errored = [], [], False
     for cell in nb.cells:
@@ -349,13 +354,13 @@ def replay_sandbox(store_dir: Path, run_config: Path, study_root):
 
 
 def run_deliverable(path: Path, *, cwd: Path, env: dict, timeout: float,
-                    on_cell=None):
+                    on_cell=None, save_to: Path | None = None):
     """Run the deliverable; return a subprocess.CompletedProcess. `.ipynb` →
     nbclient (in-env kernel); anything else → `python <file>` subprocess.
     Raises subprocess.TimeoutExpired on timeout in BOTH paths."""
     path = Path(path)
     if path.suffix == ".ipynb" and notebook_available():
-        return _execute_notebook(path, Path(cwd), env, timeout, on_cell)
+        return _execute_notebook(path, Path(cwd), env, timeout, on_cell, save_to)
     return subprocess.run(
         [sys.executable, str(path)],
         cwd=str(cwd), env=env, capture_output=True, text=True, timeout=timeout,

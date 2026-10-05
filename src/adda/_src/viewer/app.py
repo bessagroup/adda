@@ -607,7 +607,8 @@ def create_app(
         run_id = request.path_params["run_id"]
         if _run_dir(study_dir, run_id) is None:
             return _not_found(f"no such run {run_id!r}")
-        nb = readers.read_notebook(study_dir, run_id)
+        nb = readers.read_notebook(
+            study_dir, run_id, reexec=request.query_params.get("reexec") or None)
         if nb is None:
             return JSONResponse({"cells": [], "missing": True})
         return JSONResponse(nb)

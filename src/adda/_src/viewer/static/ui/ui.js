@@ -9,7 +9,6 @@ const VIEWS = [
   ["deliverable", "Deliverable"], ["logs", "Logs"], ["setup", "Setup"],
 ];
 const UNBUILT = {
-  logs: ["Logs", "This view isn't available in this version of the viewer yet."],
   setup: ["Setup", "This view isn't available in this version of the viewer yet."],
 };
 const HOUR_PX = 96, MIN_CARD = 26, POLL_MS = 5000;
@@ -21,7 +20,8 @@ const S = {
   reviews: [], evidence: {}, follow: false, timer: null, sig: "", loaded: false,
   error: null, questions: [], drafts: {}, errs: {}, holding: {}, toast: null, qsig: "",
   data: null, dsig: "", ns: undefined, sort: null, cols: null, tscroll: 0,
-  nb: null, nbsig: "", nbrun: null, codeOpen: false, hopen: {},
+  nb: null, nbsig: "", nbrun: null, nbpick: null, codeOpen: false, hopen: {},
+  log: { run: null, src: "run", paused: false, err: null, bufs: {} },
   rx: { state: "idle", run: null, lines: [], result: null, open: false },
 };
 
@@ -185,7 +185,7 @@ async function get(path) {
 function resetRun() {
   lastRun = S.run;
   S.vitals = null; S.dels = []; S.ledger = { hypotheses: [], milestones: [] };
-  S.nb = null; S.nbsig = ""; S.nbrun = null;
+  S.nb = null; S.nbsig = ""; S.nbrun = null; S.nbpick = null; S.log = { run: null, src: S.log.src, paused: S.log.paused, err: null, bufs: {} };
   S.fom = null; S.data = null; S.dsig = ""; S.ns = undefined; S.xmode = "eval"; S.logy = false; S.sort = null; S.tscroll = 0;
   S.reviews = []; S.evidence = {}; S.sig = ""; S.loaded = false; S.error = null; S.questions = []; S.qsig = "";
   clearTimeout(S.timer);
@@ -386,6 +386,7 @@ function paintWork() {
   if (S.view === "data") { paintData(w); return; }
   if (S.view === "hypotheses") { w.innerHTML = hypothesesHtml(); markClamps(w); return; }
   if (S.view === "deliverable") { paintDeliverable(w, top); return; }
+  if (S.view === "logs") { paintLogs(w, !!$("logbody")); loadLogs(); return; }
   if (S.view !== "timeline") {
     const [t, d] = UNBUILT[S.view];
     w.innerHTML = `<div class="empty"><h3>${t}</h3><p>${d}</p></div>`; return;
@@ -660,29 +661,36 @@ function nbCell(c) {
 const sameNum = (a, b) => { const x = parseFloat(a), y = parseFloat(b); return isFinite(x) && isFinite(y) && Math.abs(x - y) <= 1e-9 + 1e-3 * Math.abs(y); };
 /* The run's own headline: what the notebook prints, never the store's best row (spec 15 Q1). */
 function headlineHtml(nb) {
-  const h = nb.headline || {}, rx = S.rx.run === S.run && S.rx.result ? S.rx.result : null;
+  const h = nb.headline || {}, src = nb.source && nb.source !== "stored" ? (nb.reexecutions || []).find((x) => x.id === nb.source) : null;
+  const rx = S.rx.run === S.run && S.rx.state === "failed" && S.rx.result && S.rx.result.reproduced != null ? S.rx.result : null;
   const notes = [];
   let value;
   if (h.reproduced != null) {
     value = `<span class="mono">${esc(h.reproduced)}</span>`;
-    notes.push("Printed by the notebook as <code>REPRODUCED</code>, as written, with no unit conversion. This is the run’s own answer; the best row in the Data view is a different number, taken from the store.");
+    if (src) notes.push(`From re-execution at ${esc(fmtStamp(src.finished_at))}. The notebook printed it as <code>REPRODUCED</code>, as written, with no unit conversion.`);
+    else notes.push("Printed by the notebook as <code>REPRODUCED</code>, as written, with no unit conversion.");
+    notes.push("This is the run’s own answer; the best row in the Data view is a different number, taken from the store.");
     if (h.claimed != null) notes.push(sameNum(h.claimed, h.reproduced)
       ? "The write-up states the same value."
       : `<span class="st warn">differs</span> The write-up states <span class="mono">${esc(h.claimed)}</span> (<code>CLAIMED_HEADLINE</code>).`);
   } else {
-    const kept = nb.cells.some((c) => (c.outputs || []).length);
-    value = rx && rx.passed && rx.reproduced != null ? `<span class="mono">${esc(rx.reproduced)}</span>` : dash("No REPRODUCED line in the notebook");
-    notes.push((kept ? "The stored outputs hold no <code>REPRODUCED</code> line." : "The stored notebook carries no outputs, so no <code>REPRODUCED</code> line.") +
-      " Re-execute prints the headline if the notebook computes one. Nothing is substituted from the store.");
+    const kept = nb.cells.some((c) => (c.outputs || []).length), ran = (nb.reexecutions || []).length > 0;
+    value = dash("No REPRODUCED line in the notebook");
+    notes.push((kept ? "The displayed outputs hold no <code>REPRODUCED</code> line."
+      : ran ? "The stored notebook carries no outputs, and no re-execution has printed a <code>REPRODUCED</code> line."
+      : "The stored notebook carries no outputs, so no <code>REPRODUCED</code> line.") +
+      (ran ? "" : " Re-execute prints the headline if the notebook computes one.") + " Nothing is substituted from the store.");
   }
-  if (rx && rx.reproduced != null) {
-    const v = `<span class="mono">${esc(rx.reproduced)}</span>`;
-    notes.push(!rx.passed ? `<span class="st bad">failed</span> Re-execution failed after printing ${v}; it is a partial result.`
-      : h.reproduced == null ? `<span class="st ok">passed</span> Re-execution printed ${v}.`
-      : sameNum(rx.reproduced, h.reproduced) ? `<span class="st ok">matches</span> Re-execution printed ${v}.`
-      : `<span class="st warn">differs</span> Re-execution printed ${v}.`);
-  }
+  if (rx) notes.push(`<span class="st bad">failed</span> The latest re-execution failed after printing <span class="mono">${esc(rx.reproduced)}</span>; it is a partial result and is not shown as the headline.`);
   return `<div class="nbhead"><div><div class="lbl">Notebook headline</div><div class="hv">${value}</div></div><div class="nhn">${notes.map((x) => `<p>${x}</p>`).join("")}</div></div>`;
+}
+function fmtStamp(t) { const d = new Date(t); return isNaN(d) ? String(t || "") : d.toLocaleString(); }
+function nbSwitch(nb) {
+  const all = nb.reexecutions || [];
+  if (!all.length) return "";
+  const last = all.find((x) => x.passed) || all[0], cur = nb.source || "stored";
+  const b = (id, label, on) => `<button type="button" data-pick="${esc(id)}" aria-pressed="${on}">${label}</button>`;
+  return `<span class="seg" role="group" aria-label="Which notebook is shown">${b("stored", "Stored", cur === "stored")}${b(last.id, `Last re-execution (${esc(fmtStamp(last.finished_at))})${last.passed ? "" : " · failed"}`, cur === last.id)}</span>`;
 }
 function rxMark() {
   if (S.rx.run !== S.run) return "";
@@ -698,22 +706,92 @@ function paintDeliverable(w, top) {
   const name = String(nb.path || "").split("/").pop();
   const running = S.rx.state === "running" && S.rx.run === S.run;
   w.innerHTML = `<div class="data nb"><div class="dh"><h3>Deliverable</h3><span class="dcap">${esc(name)} · ${nb.cells.length} cell${nb.cells.length === 1 ? "" : "s"}</span><span class="sp"></span>` +
-    `<label class="toggle"><input type="checkbox" id="nbcode" ${S.codeOpen ? "checked" : ""}> Show code</label>${rxMark()}` +
+    nbSwitch(nb) + `<label class="toggle"><input type="checkbox" id="nbcode" ${S.codeOpen ? "checked" : ""}> Show code</label>${rxMark()}` +
     `<button type="button" class="btn" id="reexec" ${running ? "disabled" : ""} title="Run the notebook again against a copy of this run’s ledger and check that it reproduces.">Re-execute</button></div>` +
     headlineHtml(nb) + nb.cells.map(nbCell).join("") + `</div>`;
   w.scrollTop = top;
 }
+/* ── Logs: a tail of the run's own files, one source at a time ───────────── */
+const LOG_SOURCES = [["run", "Run log"], ["diagnostics", "Monitor"]];
+const LOG_CAP = 5000, LOG_MS = 2000;
+const logBuf = (src) => S.log.bufs[src] || (S.log.bufs[src] = { lines: [], cursor: null, exists: null, partial: "", trimmed: false, n: 0 });
+function logLine(src, raw) {
+  if (src === "diagnostics") {
+    let r; try { r = JSON.parse(raw); } catch (e) { return { t: "", lvl: "", msg: raw }; }
+    const d = new Date(r.ts), t = isNaN(d) ? "" : d.toTimeString().slice(0, 8);
+    return { t, lvl: r.error_type || "", msg: [r.node, r.tool, String(r.message || "").trim().split("\n")[0]].filter(Boolean).join(" · ") };
+  }
+  const m = /^\[(\d\d:\d\d:\d\d)\]\s+([A-Z]+)\s+(.*)$/.exec(raw);
+  return m ? { t: m[1], lvl: m[2], msg: m[3] } : { t: "", lvl: "", msg: raw };
+}
+function lvlClass(l) { return /^(ERROR|CRITICAL|ERROR_RETURN)$/.test(l) ? "bad" : /^(WARN|WARNING)$/.test(l) || /_(WARN|FLAG|NUDGE)$/.test(l) ? "warn" : "dim"; }
+let logBusy = false;
+async function loadLogs() {
+  const run = S.run, src = S.log.src; if (!run || logBusy) return;
+  const b = logBuf(src);
+  if (S.log.run !== run) { S.log.run = run; }
+  if (b.exists !== null && (S.log.paused || (S.vitals && S.vitals.closed && b.cursor != null && !b.stale))) return;
+  logBusy = true;
+  try {
+    const q = b.cursor == null ? "" : "&after=" + b.cursor + "&limit=1048576";
+    const r = await get("/api/runs/" + encodeURIComponent(run) + "/log?name=" + src + q);
+    if (run !== S.run || S.log.src !== src) return;
+    S.log.err = null; b.stale = false;
+    if (r.reset) { b.lines = []; b.partial = ""; b.n = 0; }
+    const first = b.cursor == null || r.reset;
+    const had = b.exists === null || r.text.length > 0 || r.reset;
+    b.exists = r.exists;
+    if (r.text || r.reset) {
+      const parts = (b.partial + r.text).split("\n");
+      b.partial = parts.pop();
+      if (first && r.next_cursor - new TextEncoder().encode(r.text).length > 0) { parts.shift(); b.trimmed = true; }
+      parts.filter((x) => x.length).forEach((x) => b.lines.push(logLine(src, x)));
+      if (b.lines.length > LOG_CAP) { b.lines.splice(0, b.lines.length - LOG_CAP); b.trimmed = true; }
+      b.n = b.lines.length;
+    }
+    b.cursor = r.next_cursor;
+    if (had) paintLogs($("work"), true);
+  } catch (e) { S.log.err = String(e.message || e); paintLogs($("work"), true); } finally { logBusy = false; }
+}
+function logRows(b) {
+  return b.lines.map((l) => `<div class="ll"><span class="lt mono">${esc(l.t)}</span>` +
+    `<span class="lv ${lvlClass(l.lvl)}">${esc(l.lvl)}</span><span class="lm">${linkify(esc(l.msg))}</span></div>`).join("");
+}
+function paintLogs(w, partial) {
+  if (S.view !== "logs") return;
+  const b = logBuf(S.log.src), live = liveNow();
+  if (partial && !$("logbody")) return;
+  const body = $("logbody"), stick = !body || body.scrollTop + body.clientHeight >= body.scrollHeight - 24;
+  const note = S.log.err ? `<p class="none">Could not read the log (${esc(S.log.err)}).</p>`
+    : b.exists === false ? `<p class="none">This run has not written ${S.log.src === "run" ? "run.log" : "diagnostics.jsonl"} yet.</p>`
+    : b.exists === null ? "" : (b.trimmed ? `<p class="dcap">Showing the latest lines only; earlier ones are on disk.</p>` : "");
+  const rows = b.lines.length ? logRows(b) : (b.exists ? '<p class="none">The file is empty so far.</p>' : "");
+  const state = S.log.paused ? '<span class="st open">paused</span>' : live ? '<span class="st live">live</span>' : '<span class="st open">run closed</span>';
+  if (partial && body && $("logstate")) {
+    $("logstate").innerHTML = state; $("logn").textContent = b.lines.length + " lines"; $("lognote").innerHTML = note;
+    body.innerHTML = rows; if (stick) body.scrollTop = body.scrollHeight;
+    return;
+  }
+  w.innerHTML = `<div class="data logs"><div class="dh"><h3>Logs</h3><span class="seg" role="group" aria-label="Log source">` +
+    LOG_SOURCES.map(([k, t]) => `<button type="button" data-logsrc="${k}" aria-pressed="${S.log.src === k}">${t}<small>${logBuf(k).lines.length || ""}</small></button>`).join("") +
+    `</span><span class="sp"></span><span id="logn" class="dcap">${b.lines.length} lines</span><span id="logstate">${state}</span>` +
+    `<label class="toggle"><input type="checkbox" id="logpause" ${S.log.paused ? "checked" : ""}> Pause</label></div>` +
+    `<div id="lognote">${note}</div><div id="logbody" class="logbody" tabindex="0">${rows}</div></div>`;
+  const nb2 = $("logbody"); if (nb2) nb2.scrollTop = nb2.scrollHeight;
+}
+setInterval(() => { if (S.view === "logs" && visible() && !S.log.paused) { const b = logBuf(S.log.src); if (liveNow()) { b.stale = true; loadLogs(); } } }, LOG_MS);
 let nbBusy = false;
 async function loadNotebook() {
   const run = S.run; if (!run || nbBusy) return;
   if (S.nb && S.nbrun === run && S.vitals && S.vitals.closed) return;
   nbBusy = true;
   try {
-    const r = await fetch("/api/runs/" + encodeURIComponent(run) + "/notebook", { headers: { Accept: "application/json" } });
+    const q = S.nbpick ? "?reexec=" + encodeURIComponent(S.nbpick) : "";
+    const r = await fetch("/api/runs/" + encodeURIComponent(run) + "/notebook" + q, { headers: { Accept: "application/json" } });
     if (!r.ok) throw new Error("notebook → " + r.status);
     const text = await r.text();
     if (run !== S.run) return;
-    const sig = text.length + ":" + run;
+    const sig = text.length + ":" + run + ":" + (S.nbpick || "");
     S.nb = JSON.parse(text); S.nbrun = run;
     if (sig !== S.nbsig) { S.nbsig = sig; paintWork(); loadKatex().then((ok) => { if (ok && S.view === "deliverable") paintWork(); }); }
   } catch (e) {
@@ -723,6 +801,7 @@ async function loadNotebook() {
 function rxLog(text, cls) { S.rx.lines.push([text, cls || ""]); }
 function rxFinish(passed, result) {
   S.rx.state = passed ? "passed" : "failed"; S.rx.result = result; paintWork(); paintDrawer();
+  if (result && result.saved) { S.nbpick = null; S.nbsig = ""; S.nbrun = null; loadNotebook(); }
 }
 function rxFail(msg) { rxLog(msg, "bad"); rxFinish(false, null); }
 function rxEvent(ev) {
@@ -1067,6 +1146,10 @@ document.addEventListener("scroll", (e) => {
   if (e.target && e.target.id === "tbl") { S.tscroll = e.target.scrollTop; paintRows(); }
 }, true);
 document.addEventListener("click", (e) => {
+  const ls = e.target.closest("[data-logsrc]");
+  if (ls) { e.stopImmediatePropagation(); S.log.src = ls.dataset.logsrc; paintLogs($("work")); loadLogs(); return; }
+  const pk = e.target.closest("[data-pick]");
+  if (pk) { e.stopImmediatePropagation(); S.nbpick = pk.dataset.pick; S.nbsig = ""; S.nbrun = null; paintWork(); loadNotebook(); return; }
   const hm = e.target.closest("[data-hmore]");
   if (hm) { e.stopImmediatePropagation(); S.hopen[hm.dataset.hmore] = !S.hopen[hm.dataset.hmore]; paintWork(); return; }
   if (e.target.closest("#reexec")) { reexecute(); return; }
@@ -1132,6 +1215,7 @@ document.addEventListener("click", (e) => {
   if (r) { e.preventDefault(); nav({ run: r.dataset.run, sel: null }); return; }
 });
 document.addEventListener("change", (e) => {
+  if (e.target.id === "logpause") { S.log.paused = e.target.checked; paintLogs($("work")); if (!S.log.paused) { logBuf(S.log.src).stale = true; loadLogs(); } return; }
   if (e.target.id === "nbcode") { S.codeOpen = e.target.checked; paintWork(); return; }
   if (e.target.id === "follow") { S.follow = e.target.checked; paintWork(); }
 });

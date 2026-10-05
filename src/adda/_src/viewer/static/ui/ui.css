@@ -406,7 +406,13 @@ a.idlink:hover{text-decoration:underline}
 .chip.rev{background:transparent;border:1px dashed var(--warn);color:var(--warn);margin-left:var(--s1)}
 
 /* Deliverable (spec 15 4.3): prose at 75ch, figures and tables up to 1000px */
-.nb .md.nbmd{max-width:75ch}
+.nb .md.nbmd{max-width:none}
+.nb .md.nbmd>:not(table){max-width:75ch}
+.nb .md.nbmd table{max-width:1000px;overflow-x:auto}
+.nb .md.nbmd th,.nb .md.nbmd td{overflow-wrap:normal;word-break:keep-all;vertical-align:top}
+.nb .md.nbmd th{white-space:nowrap}
+.nb .md.nbmd td{min-width:12ch}
+.md th{overflow-wrap:normal;word-break:keep-all;white-space:nowrap}
 .nb .nbcell,.nb .nbmd{margin:var(--s3) 0}
 .nb .nbfig{margin:var(--s3) 0;max-width:1000px}
 .nb .nbfig img{display:block;max-width:100%;height:auto;background:white;border-radius:var(--r-ctl)}
@@ -434,3 +440,12 @@ a.idlink:hover{text-decoration:underline}
 .drawer .dlog{flex:1;min-height:0;overflow:auto;padding:var(--s2) var(--s4);font:400 var(--t-meta)/1.5 var(--f-mono);white-space:pre-wrap;overflow-wrap:anywhere}
 .drawer .dlog .ok{color:var(--ok)} .drawer .dlog .bad{color:var(--bad)} .drawer .dlog .dim{color:var(--ink-3)}
 .hrow .hst .chip.retr{display:inline-block;margin:var(--s1) 0 0}
+.logs{display:flex;flex-direction:column;min-height:0}
+.logbody{height:calc(100vh - 14rem);min-height:12rem;overflow:auto;border:1px solid var(--rule);border-radius:var(--r-ctl);background:var(--surface);padding:var(--s2) 0;font:var(--t-data)/1.5 var(--f-mono)}
+.ll{display:grid;grid-template-columns:8ch 26ch minmax(0,1fr);gap:var(--s3);padding:0 var(--s3)}
+.ll:hover{background:var(--surface-2)}
+.lt{color:var(--ink-3)}
+.lv{font-size:var(--t-meta);color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lv.bad{color:var(--bad)} .lv.warn{color:var(--warn)}
+.lm{white-space:pre-wrap;overflow-wrap:anywhere}
+@media (max-width:700px){.logbody{height:60vh}.ll{grid-template-columns:8ch minmax(0,1fr)}.lv{display:none}}

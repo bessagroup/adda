@@ -81,7 +81,7 @@ def test_no_horizontal_scroll_on_a_phone(tmp_path, page):
 def test_unbuilt_views_say_what_will_appear(tmp_path, page):
     study, _ = _study(tmp_path)
     with _LiveServer(create_app(study)) as srv:
-        page.goto(f"{srv.url}/ui?run={RUN}&view=logs")
+        page.goto(f"{srv.url}/ui?run={RUN}&view=setup")
         page.wait_for_selector(".empty")
         assert "isn't available" in page.locator(".empty").inner_text()
 
@@ -537,7 +537,7 @@ def test_the_deliverable_is_prose_at_75ch_with_local_math_and_the_notebook_headl
         page.goto(f"{srv.url}/ui?run={RUN}&view=deliverable")
         page.wait_for_selector(".nbmd .katex", timeout=8000)
         assert page.locator(".nbmd .katex-display").count() == 1
-        width = page.locator(".nbmd").first.evaluate("e => e.getBoundingClientRect().width")
+        width = page.locator(".nbmd p").last.evaluate("e => e.getBoundingClientRect().width")
         ch = page.evaluate("(() => { const s = document.createElement('span'); s.style.cssText = 'font:400 14px Instrument Sans,system-ui,sans-serif;position:absolute;visibility:hidden'; s.textContent = '0'.repeat(75); document.body.appendChild(s); const w = s.getBoundingClientRect().width; s.remove(); return w })()")
         assert width < ch * 1.15 and width < 900
         assert page.locator(".nbhead").inner_text().count("0.25") >= 1
@@ -571,30 +571,76 @@ def test_a_run_without_a_notebook_says_so(tmp_path, page):
         assert "no pipeline notebook" in page.locator(".empty").inner_text()
 
 
-def test_re_execute_streams_into_a_drawer_and_ends_with_a_pass_mark(tmp_path, page, monkeypatch):
-    from adda._src.viewer import notebook_replay
+def _fake_replay(study, reproduced="0.25"):
+    import json
+
+    import nbformat
 
     def fake(study_dir, run_id, *, audit=None, on_event=None):
         on_event({"event": "started", "line": "started"})
         for i in (1, 2):
             on_event({"event": "cell", "line": f"cell {i}/2", "done": i, "total": 2, "errored": False})
-        return {"passed": True, "run_id": run_id, "reproduced": "0.25", "rows_before": 3,
-                "rows_after": 3, "duration_s": 1.5, "stdout_tail": "", "stderr_tail": ""}
+        folder = Path(study_dir) / "runs" / run_id / "debug" / "viewer_reexec"
+        folder.mkdir(parents=True, exist_ok=True)
+        code = nbformat.v4.new_code_cell("print('x')")
+        code.outputs = [nbformat.v4.new_output("stream", name="stdout", text=f"REPRODUCED: {reproduced}\n")]
+        nbformat.write(nbformat.v4.new_notebook(cells=_nb_cells()[:1] + [code]), str(folder / "pipeline_T1.ipynb"))
+        (folder / "reexec_T1.json").write_text(json.dumps({
+            "id": "T1", "passed": True, "notebook": "pipeline_T1.ipynb", "finished_at": "2026-01-02T03:04:05+00:00",
+            "adda_commit": "abc", "reproduced": reproduced}))
+        return {"passed": True, "run_id": run_id, "reproduced": reproduced, "saved": "pipeline_T1.ipynb",
+                "reexec_id": "T1", "rows_before": 3, "rows_after": 3, "duration_s": 1.5,
+                "stdout_tail": "", "stderr_tail": ""}
 
-    monkeypatch.setattr(notebook_replay, "replay_notebook", fake)
+    return fake
+
+
+def test_re_execute_streams_into_a_drawer_then_the_headline_comes_from_the_re_execution(tmp_path, page, monkeypatch):
+    from adda._src.viewer import notebook_replay
+
     study, _ = _study(tmp_path)
-    _notebook(study, _nb_cells())
+    monkeypatch.setattr(notebook_replay, "replay_notebook", _fake_replay(study))
+    _notebook(study, _nb_cells()[:1])
     with _LiveServer(create_app(study, token="t")) as srv:
         page.set_viewport_size({"width": 1400, "height": 900})
         page.goto(f"{srv.url}/session?token=t&next=/ui?run={RUN}%26view=deliverable")
         page.wait_for_selector("#reexec")
+        assert "no outputs" in page.locator(".nbhead").inner_text()
+        assert page.locator("[data-pick]").count() == 0
         page.click("#reexec")
         page.wait_for_selector("#drawer:not([hidden]) .st.ok", timeout=8000)
         text = page.locator("#drawer").inner_text()
         assert "cell 2/2" in text and "PASSED" in text
-        assert "matches" in page.locator(".nbhead").inner_text()
+        page.wait_for_selector("[data-pick]", timeout=8000)
+        head = page.locator(".nbhead").inner_text()
+        assert "0.25" in head and "From re-execution at" in head
+        assert page.locator("[data-pick][aria-pressed=true]").inner_text().startswith("Last re-execution")
+        page.locator("[data-pick=stored]").click()
+        page.wait_for_function("(document.querySelector('.nbhead')||{innerText:''}).innerText.includes('no outputs')")
+        assert page.locator("[data-pick=stored][aria-pressed=true]").count() == 1
         page.locator("[data-drawer-close]").click()
         assert page.locator("#drawer").is_hidden()
+    assert (study / "pipeline.ipynb").read_bytes() and "REPRODUCED" not in (study / "pipeline.ipynb").read_text()
+
+
+def test_notebook_tables_get_their_own_wider_measure_and_headers_never_break_inside_a_word(tmp_path, page):
+    import nbformat
+
+    study, _ = _study(tmp_path)
+    rows = "".join(f"| H{i} | {'a long cell of prose about the claim ' * 3} | OPEN | 0.5 |\n" for i in range(4))
+    md = "Intro.\n\n| Hypothesis | Statement | Status | Posterior |\n|---|---|---|---|\n" + rows
+    _notebook(study, [nbformat.v4.new_markdown_cell(md)])
+    with _LiveServer(create_app(study)) as srv:
+        page.set_viewport_size({"width": 1400, "height": 900})
+        page.goto(f"{srv.url}/ui?run={RUN}&view=deliverable")
+        page.wait_for_selector(".nbmd table")
+        tw = page.locator(".nbmd table").evaluate("e => e.getBoundingClientRect().width")
+        pw = page.locator(".nbmd p").first.evaluate("e => e.getBoundingClientRect().width")
+        assert tw > pw * 1.3 and tw <= 1001
+        heights = page.locator(".nbmd th").evaluate_all("els => els.map(e => e.getBoundingClientRect().height)")
+        assert max(heights) < 40, heights
+        page.set_viewport_size({"width": 500, "height": 900})
+        assert page.locator(".nbmd table").evaluate("e => e.scrollWidth > e.clientWidth || e.getBoundingClientRect().width <= e.parentElement.clientWidth")
 
 
 def test_re_execute_without_the_write_token_says_the_page_is_read_only(tmp_path, page):
@@ -606,3 +652,34 @@ def test_re_execute_without_the_write_token_says_the_page_is_read_only(tmp_path,
         page.click("#reexec")
         page.wait_for_selector("#drawer:not([hidden]) .st.bad", timeout=8000)
         assert "read-only" in page.locator("#drawer").inner_text()
+
+
+def test_logs_tail_a_live_file_link_ids_pause_and_switch_source(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    (run_dir / "debug" / "run_status.json").unlink(missing_ok=True)
+    log = run_dir / "debug" / "run.log"
+    log.write_text("[10:00:00] INFO Run starting\n[10:00:01] WARNING D001 is slow\n", encoding="utf-8")
+    (run_dir / "debug" / "diagnostics.jsonl").write_text(json.dumps(
+        {"ts": "2026-09-17T12:00:00+00:00", "node": "implementer", "tool": "QueryStore",
+         "error_type": "ERROR_RETURN", "message": "ERROR: no such column\nsecond line"}) + "\n", encoding="utf-8")
+    with _LiveServer(create_app(study)) as srv:
+        page.set_viewport_size({"width": 1400, "height": 900})
+        page.goto(f"{srv.url}/ui?run={RUN}&view=logs")
+        page.wait_for_selector(".ll")
+        assert page.locator(".ll").count() == 2
+        assert page.locator(".ll .lm a").first.inner_text() == "D001"
+        assert page.locator(".ll .lv.warn").count() == 1
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write("[10:00:02] INFO appended while open\n")
+        page.wait_for_function("document.querySelectorAll('.ll').length === 3", timeout=8000)
+        page.locator("#logpause").check()
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write("[10:00:03] INFO written while paused\n")
+        page.wait_for_timeout(2600)
+        assert page.locator(".ll").count() == 3 and "paused" in page.locator("#logstate").inner_text()
+        page.locator("#logpause").uncheck()
+        page.wait_for_function("document.querySelectorAll('.ll').length === 4", timeout=8000)
+        page.locator("[data-logsrc=diagnostics]").click()
+        page.wait_for_function("document.querySelectorAll('.ll').length === 1 && document.querySelector('.ll .lv.bad')")
+        text = page.locator(".ll").inner_text()
+        assert "implementer" in text and "no such column" in text and "second line" not in text

@@ -173,3 +173,34 @@ def test_the_stream_needs_the_write_token(study):
     resp = TestClient(create_app(study)).post(
         f"/api/runs/{RUN}/notebook/reexecute/stream", json={})
     assert resp.status_code == 403
+
+
+def test_a_re_execution_is_saved_beside_the_run_and_served_without_touching_the_stored_notebook(study):
+    before = _notebook(study, _LAZY)
+    body = _writer(study).post(f"/api/runs/{RUN}/notebook/reexecute", json={}).json()
+    assert body["passed"] and body["reexec_id"] and body["saved"]
+    folder = study / "runs" / RUN / "debug" / "viewer_reexec"
+    meta = json.loads((folder / f"reexec_{body['reexec_id']}.json").read_text())
+    assert meta["passed"] is True and meta["reproduced"] == "2.0" and meta["notebook"] == body["saved"]
+    assert "finished_at" in meta and "adda_commit" in meta
+    assert (study / f"pipeline_{RUN}.ipynb").read_bytes() == before
+
+    client = TestClient(create_app(study))
+    stored = client.get(f"/api/runs/{RUN}/notebook?reexec=stored").json()
+    assert stored["source"] == "stored" and stored["headline"]["reproduced"] is None
+    assert [r["id"] for r in stored["reexecutions"]] == [body["reexec_id"]]
+    rerun = client.get(f"/api/runs/{RUN}/notebook").json()      # the default
+    assert rerun["source"] == body["reexec_id"] and rerun["headline"]["reproduced"] == "2.0"
+    # an id that is not a listed re-execution never reaches the filesystem
+    odd = client.get(f"/api/runs/{RUN}/notebook?reexec=../../../etc/passwd").json()
+    assert odd["source"] == "stored"
+    assert any(r.get("saved") for r in _audit_rows(study) if r.get("phase") == "done")
+
+
+def test_a_failed_re_execution_is_saved_and_marked_failed(study):
+    _notebook(study, "raise ValueError('boom')\n")
+    body = _writer(study).post(f"/api/runs/{RUN}/notebook/reexecute", json={}).json()
+    assert body["passed"] is False and body["reexec_id"]
+    nb = TestClient(create_app(study)).get(f"/api/runs/{RUN}/notebook").json()
+    assert nb["reexecutions"][0]["passed"] is False
+    assert nb["source"] == "stored"                    # a failed one is never the default
