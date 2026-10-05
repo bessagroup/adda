@@ -600,6 +600,26 @@ def test_on_a_phone_the_inputs_precede_the_outputs_and_bookkeeping_is_behind_col
         assert "Delegation" not in labels and "When" not in labels
 
 
+def test_columns_constant_over_the_store_are_left_out_of_the_default_set_and_counted(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _with_store(run_dir)
+    data = run_dir / "experiment_data" / "experiment_data"
+    (data / "domain.json").write_text('{"input_space": {"x": {}, "k": {}}}')
+    (data / "input.csv").write_text(",x,k\n" + "".join(f"{i},{i * 0.5},10\n" for i in range(6)))
+    rows = (data / "output.csv").read_text().splitlines()
+    (data / "output.csv").write_text("\n".join(
+        [rows[0].replace("note", "note,aux")] + [r.replace(f",n{i},", f",n{i},7,") for i, r in enumerate(rows[1:])]) + "\n")
+    with _LiveServer(create_app(study)) as srv:
+        page.set_viewport_size({"width": 1600, "height": 1000})
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector("#tbl .thead")
+        labels = [t.strip().rstrip("↑↓").strip() for t in page.locator("#tbl .thead > *").all_inner_texts()]
+        assert "k" not in labels and "aux" not in labels and "x" in labels, labels
+        assert page.locator(".tbar summary").inner_text().strip() == f"Columns · {len(labels)} of {len(labels) + 2} · 2 constant hidden"
+        page.locator(".tbar summary").click()
+        assert page.locator("input[data-col='in:k']").count() == 1   # still selectable behind "Columns"
+
+
 def test_the_store_table_takes_the_remaining_height_of_the_pane(tmp_path, page):
     study, run_dir = _study(tmp_path)
     _with_store(run_dir, n=600, objective=None)

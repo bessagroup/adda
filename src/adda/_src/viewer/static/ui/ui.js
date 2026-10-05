@@ -983,6 +983,13 @@ const declaredFor = (st) => (scoredList().includes(nsOf(st)) ? S.fom : null);
 const MARKS = ["circle", "square", "diamond", "triangle"];
 let DM = new Map();
 
+/* A column that takes one value on every row says nothing about the rows; a one-row store has no "constant". */
+function constantOver(c, n) {
+  if (n < 2) return false;
+  const first = c.get(0);
+  for (let i = 1; i < n; i++) if (c.get(i) !== first) return false;
+  return true;
+}
 function model(st) {
   const cache = S.data.cache, k = nsOf(st) || "";
   if (cache[k]) return cache[k];
@@ -997,6 +1004,7 @@ function model(st) {
   Object.entries(st.text || {}).forEach(([n, v]) => cols.push({ key: "tx:" + n, label: n, group: "Text", get: (i) => v[i] || null, w: n === "note" ? 280 : 112 }));
   cols.push({ key: "delegation", label: "Delegation", get: (i) => st.delegation[i] || null, w: 156, id: true });
   cols.push({ key: "when", label: "When", get: (i) => { const t = parseT(st.ts[i]); return t == null || t0 == null ? null : t - t0; }, fmt: fmtElapsed, w: 96, num: true });
+  cols.forEach((c) => { if (c.group) c.constant = constantOver(c, st.n); });
   const byKey = Object.fromEntries(cols.map((c) => [c.key, c]));
   return (cache[k] = { cols, byKey, t0 });
 }
@@ -1012,7 +1020,7 @@ function defaultCols(st, m) {
   const outOrder = [...new Set([...lead, ...outs])];
   const texts = m.cols.filter((c) => c.group === "Text").map((c) => c.key);
   const pri = ["#", outOrder[0], ins[0], ...ins.slice(1), ...outOrder.slice(1), "tx:status",
-    ...(phone ? [] : ["delegation", "when"]), ...texts].filter((k) => k && m.byKey[k]);
+    ...(phone ? [] : ["delegation", "when"]), ...texts].filter((k) => k && m.byKey[k] && (!m.byKey[k].constant || k === lead[0]));
   const room = Math.max(320, ($("work") ? $("work").clientWidth : 1000) - 2 * 24 - 2);
   const keys = new Set(); let used = 0;
   [...new Set(pri)].forEach((k, n) => {
@@ -1190,13 +1198,14 @@ function colWidth(c, st) {
 function tableHtml(st, m) {
   const cols = visibleCols(st, m), sort = S.sort || { key: "#", dir: "desc" };
   const ws = cols.map((c) => colWidth(c, st)), W = ws.reduce((a, b) => a + b, 0), tpl = ws.map((w) => w + "px").join(" ");
+  const hidConst = m.cols.filter((c) => c.constant && !cols.includes(c)).length;
   const groups = ["Inputs", "Outputs", "Text"].map((g) => {
     const cs = m.cols.filter((c) => c.group === g); if (!cs.length) return "";
     return `<div class="pg"><h4>${g}</h4>` + cs.map((c) => `<label><input type="checkbox" data-col="${esc(c.key)}" ${cols.includes(c) ? "checked" : ""}> ${esc(c.label)}</label>`).join("") + `</div>`;
   }).join("");
   const head = cols.map((c) => `<button class="th${c.num ? " num" : ""}" data-sort="${esc(c.key)}" aria-sort="${sort.key === c.key ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}" title="Sort by ${esc(c.label)}">${esc(c.label)}<span>${sort.key === c.key ? (sort.dir === "asc" ? "↑" : "↓") : ""}</span></button>`).join("");
   return `<div class="tbar"><span class="dcap">${st.n} rows · click a header to sort · click a row to inspect it</span><span class="sp"></span>` +
-    `<details class="picker"${S.pickOpen ? " open" : ""}><summary class="btn">Columns · ${cols.length} of ${m.cols.length}</summary><div class="pickmenu">${groups}</div></details></div>` +
+    `<details class="picker"${S.pickOpen ? " open" : ""}><summary class="btn">Columns · ${cols.length} of ${m.cols.length}${hidConst ? ` · ${hidConst} constant hidden` : ""}</summary><div class="pickmenu">${groups}</div></details></div>` +
     `<div class="tbl" id="tbl" tabindex="0" aria-label="Rows of the store"><div class="thead" style="min-width:${W}px;grid-template-columns:${tpl};height:${HEAD_H}px">${head}</div>` +
     `<div class="tbody" id="tbody" style="min-width:${W}px;height:${st.n * ROW_H}px" data-tpl="${tpl}"></div></div>`;
 }
