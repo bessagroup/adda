@@ -1460,6 +1460,24 @@ async function doStart() {
   paintSheet();
 }
 
+/* Ask the docs: the same lookup `adda-docs` runs */
+S.docs = { open: false, q: "", out: null, err: null, busy: false };
+function paintDocs() {
+  const el = $("docs"), s = S.docs;
+  el.hidden = !s.open; if (!s.open) { el.innerHTML = ""; return; }
+  el.innerHTML = `<div class="dhd"><b>Ask the docs</b><span class="sp"></span><button type="button" class="btn ghost" data-docs-close aria-label="Close">Close</button></div><div class="sbody">` +
+    `<form id="docsform"><input type="text" id="docsq" class="mono" style="width:100%;min-height:40px" placeholder="a question, or an exact name such as AgenticRun" aria-label="Question" value="${esc(s.q)}"> ` +
+    `<div class="sfoot"><button type="submit" class="btn primary" ${s.busy ? "disabled" : ""}>${s.busy ? "Looking…" : "Ask"}</button><label class="toggle"><input type="checkbox" id="docssrc"> Source</label></div></form>` +
+    (s.err ? `<p class="st bad">${esc(s.err)}</p>` : "") + (s.out != null ? `<pre class="mono" style="white-space:pre-wrap">${esc(s.out)}</pre>` : "") + `</div>`;
+}
+function openDocs() { S.docs.open = true; paintDocs(); const q = $("docsq"); if (q) q.focus(); }
+async function askDocs() {
+  const s = S.docs, q = $("docsq").value.trim(); if (!q) return;
+  s.q = q; s.busy = true; s.err = null; const src = $("docssrc").checked; paintDocs(); $("docssrc").checked = src;
+  try { s.out = (await get("/api/docs?q=" + encodeURIComponent(q) + (src ? "&source=1" : ""))).text; } catch (e) { s.err = "The docs lookup failed (" + e.message + ")."; }
+  s.busy = false; paintDocs(); $("docssrc").checked = src;
+}
+
 /* Stop popover */
 S.pop = { open: false, confirmKill: false, busy: false, msg: null, bad: false, stopped: {} };
 function openPop(anchor) {
@@ -1515,6 +1533,8 @@ document.addEventListener("click", (e) => {
   const sg = t.closest("[data-su-goto]");
   if (sg) { e.preventDefault(); S.su.file = sg.dataset.suGoto; closeSheet(); nav({ view: "setup", sel: null }); return; }
   if (t.closest("#openstart")) { openSheet(); return; }
+  if (t.closest("#opendocs")) { openDocs(); return; }
+  if (t.closest("[data-docs-close]")) { S.docs.open = false; paintDocs(); return; }
   if (t.closest("[data-sheet-close]")) { closeSheet(); return; }
   if (t.closest("#dostart")) { doStart(); return; }
   const st = t.closest("[data-stop]");
@@ -1545,6 +1565,7 @@ document.addEventListener("change", (e) => {
 let gPending = false;
 document.addEventListener("keydown", (e) => {
   if (e.target.closest("input,textarea,select")) return;
+  if (e.key === "Escape" && S.docs.open) { S.docs.open = false; paintDocs(); return; }
   if (e.key === "Escape" && (S.sheet.open || S.pop.open)) { if (S.pop.open) { S.pop.open = false; paintPop(); paintTitle(); } else closeSheet(); return; }
   if ((e.key === "Enter" || e.key === " ") && e.target.matches("[data-sel][role=button]")) {
     e.preventDefault(); nav({ sel: e.target.dataset.sel }); return;
@@ -1599,6 +1620,7 @@ let lastRun = null;
 function resetRunIfChanged() { if (S.run !== lastRun) { lastRun = S.run; resetRun(); } }
 document.addEventListener("visibilitychange", () => { if (visible()) tick(); else { clearTimeout(S.timer); flushPending(); } });
 window.addEventListener("pagehide", flushPending);
+$("docs").addEventListener("submit", (e) => { e.preventDefault(); askDocs(); });
 $("banner").addEventListener("submit", (e) => {
   e.preventDefault();
   const f = e.target.closest("form"); if (!f) return;

@@ -1481,6 +1481,8 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   **Downloads (spec 14 Phase 5.11):** `GET /api/runs/{id}/download?what=notebook|store|debug` (read-only, no token) returns the run's
   pipeline notebook, a zip of its ledger tables (`input/output/jobs.csv`, `domain.json` per oracle namespace), or a zip of its `debug/`
   folder, i.e. files that already exist on disk; 404 when the run has none, 400 for an unknown kind. The Deliverable header carries the three links (`viewer/downloads.py`). **Status:** done.
+  **Ask the docs (spec 14 Phase 5.9):** `GET /api/docs?q=<question or exact name>[&source=1]` (read-only) returns `{text}` from the same `adda.explain.explain` that
+  `adda-docs` runs; the nav's `Docs` button opens a sheet with the box and a Source toggle. **Status:** done.
   **Timeline (spec 15):** any span over 30 min with no delegation running (and no gate) is drawn as a 24 px break
   band labelled "<duration> with no delegation running"; hour ticks inside it are skipped, the ruler resumes after
   it and the now line stays at the true end. Gate chips are laid out right to left so none overlap, each on its own

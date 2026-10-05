@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import anyio
 from starlette.applications import Starlette
 from starlette.responses import (
     FileResponse,
@@ -612,6 +613,18 @@ def create_app(
         if nb is None:
             return JSONResponse({"cells": [], "missing": True})
         return JSONResponse(nb)
+
+    async def get_docs(request):
+        q = request.query_params.get("q", "").strip()
+        if not q:
+            return JSONResponse({"error": "q is required"}, status_code=400)
+        from adda.explain import explain
+        try:
+            text = await anyio.to_thread.run_sync(
+                lambda: explain(q, source=request.query_params.get("source") == "1"))
+        except Exception as exc:  # noqa: BLE001 - the lookup is best-effort
+            return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=500)
+        return JSONResponse({"text": text})
 
     async def get_download(request):
         run_id = request.path_params["run_id"]
@@ -1430,6 +1443,7 @@ def create_app(
         Route("/api/runs/{run_id}/funnel", get_funnel),
         Route("/api/runs/{run_id}/figure_of_merit", get_figure_of_merit),
         Route("/api/runs/{run_id}/monitor", get_monitor),
+        Route("/api/docs", get_docs),
         Route("/api/runs/{run_id}/download", get_download),
         Route("/api/runs/{run_id}/artifacts", get_artifacts),
         Route("/api/runs/{run_id}/artifact", get_artifact),

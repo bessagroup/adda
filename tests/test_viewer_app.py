@@ -1544,3 +1544,13 @@ def test_download_notebook_serves_the_runs_file(tmp_path):
     client = TestClient(create_app(study))
     r = client.get("/api/runs/R1/download?what=notebook")
     assert r.status_code == 200 and r.content == b'{"cells": []}'
+
+
+def test_docs_endpoint_runs_the_same_lookup_as_adda_docs(tmp_path):
+    from adda.explain import explain
+
+    client = TestClient(create_app(_make_study(tmp_path)))
+    r = client.get("/api/docs", params={"q": "AgenticRun"})
+    assert r.status_code == 200
+    assert r.json()["text"] == explain("AgenticRun")
+    assert client.get("/api/docs", params={"q": " "}).status_code == 400

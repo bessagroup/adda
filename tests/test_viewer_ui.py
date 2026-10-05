@@ -132,6 +132,19 @@ def test_phone_controls_are_finger_sized_and_the_start_action_stays_in_view(tmp_
         assert box["y"] + box["height"] <= 700
 
 
+def test_ask_docs_box_shows_the_lookup_and_closes_on_escape(tmp_path, page):
+    study, _run_dir = _study(tmp_path)
+    with _LiveServer(create_app(study, token="t")) as srv:
+        page.goto(f"{srv.url}/session?token=t&next=/ui?run={RUN}")
+        page.click("#opendocs")
+        page.fill("#docsq", "AgenticRun")
+        page.keyboard.press("Enter")
+        page.wait_for_selector("#docs pre")
+        assert "AgenticRun" in page.inner_text("#docs pre")
+        page.keyboard.press("Escape")
+        assert page.is_hidden("#docs")
+
+
 def _git_study(study, monkeypatch):
     import subprocess
     cfg = study.parent / "gitconfig"
