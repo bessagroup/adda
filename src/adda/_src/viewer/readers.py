@@ -890,33 +890,45 @@ _FUNNEL_DEFAULT_ORDER = ("coil", "prefilter", "ran|solved", "^converged$", "feas
 
 def read_figure_of_merit(run_dir: Path | str) -> dict[str, Any]:
     """The run's best row under the study's DECLARED objective (config.yaml
-    ``objective:``, recorded in run_config.json), canonical store only.
+    ``objective:``, recorded in run_config.json), over EVERY store that records
+    the declared columns: the canonical store and each namespace.
+
+    A run's result may live in a namespace (a zero-shot run's does), and the
+    reporting contract is that every oracle reports the declared columns so
+    families compare. A store lacking one is listed in ``not_scored`` with the
+    missing column names, never silently dropped. ``namespace`` and ``row``
+    locate the best row (``row`` indexes that store's output.csv).
 
     Nothing is inferred: with no declaration the answer is ``declared: False``
     and no row is ranked. A row counts only if its objective is finite and,
     when ``feasible`` is declared, that column is 1, the same rule the run
-    ledger applies. This is the store's best row, not the run's own headline.
+    ledger applies. This is the stores' best row, not the run's own headline.
     """
-    from ..evaluation.objective import objective_values
+    from ..evaluation.objective import score_stores
     cfg, _, found = _oracle_stores(Path(run_dir))
     objective = cfg.get("objective") or None
     if not objective:
         return {"declared": False}
-    out: dict[str, Any] = {"declared": True, **objective, "n": 0,
-                           "n_counted": 0, "row": None, "value": None}
-    canon = next((p for name, p in found if name is None), None)
-    if canon is None:
-        return out
-    head, rows = _read_csv_rows(canon / _DATA_DIR / "output.csv")
-    named = [dict(zip(head, r, strict=False)) for r in rows]
-    vals = objective_values(named, objective, objective["column"])
-    counted = [(v, i) for i, v in enumerate(vals) if v is not None]
-    out["n"] = len(rows)
-    out["n_counted"] = len(counted)
-    if counted:
-        v, i = (max if objective["direction"] == "max" else min)(
-            counted, key=lambda t: t[0])
-        out["value"], out["row"] = v, i
+    loaded = []
+    for name, path in found:
+        head, rows = _read_csv_rows(path / _DATA_DIR / "output.csv")
+        loaded.append((name, head, [dict(zip(head, r, strict=False)) for r in rows]))
+    scored, not_scored = score_stores(loaded, objective)
+    out: dict[str, Any] = {
+        "declared": True, **objective, "n": 0, "n_counted": 0, "row": None,
+        "value": None, "namespace": None,
+        "scored": [], "not_scored": not_scored}
+    pick = max if objective["direction"] == "max" else min
+    for st in scored:
+        counted = [(v, i) for i, v in enumerate(st["values"]) if v is not None]
+        out["scored"].append({"namespace": st["namespace"], "n": st["n"],
+                              "n_counted": len(counted)})
+        out["n"] += st["n"]
+        out["n_counted"] += len(counted)
+        if counted:
+            v, i = pick(counted, key=lambda t: t[0])
+            if out["value"] is None or pick(out["value"], v) != out["value"]:
+                out["value"], out["row"], out["namespace"] = v, i, st["namespace"]
     return out
 
 

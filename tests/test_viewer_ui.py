@@ -227,3 +227,52 @@ def test_the_wall_clock_fill_warns_past_one_and_a_half_and_fails_past_two(tmp_pa
             page.goto(f"{srv.url}/ui?run={RUN}")
             page.wait_for_selector(".clock b")
             assert (page.locator(".clock b").get_attribute("class") or "") == tone, hours
+
+
+def _with_namespace(run_dir):
+    """A 'freeform' store whose best counted row (sigma 8, row 1) beats every canonical one."""
+    ff = run_dir / "experiment_data" / "freeform" / "experiment_data"
+    ff.mkdir(parents=True)
+    (ff / "domain.json").write_text('{"input_space": {"x": {}}}')
+    (ff / "input.csv").write_text(",x\n0,1\n1,2\n2,3\n")
+    (ff / "output.csv").write_text(
+        ",sigma,feasible,note,_delegation_id,_ts\n"
+        "0,3,1,a,D001,2026-09-17T12:20:00+00:00\n"
+        "1,8,1,b,D002,2026-09-17T12:30:00+00:00\n"
+        "2,9,0,c,D002,2026-09-17T12:40:00+00:00\n")
+    (ff / "jobs.csv").write_text(",0\n0,FINISHED\n1,FINISHED\n2,FINISHED\n")
+
+
+def test_the_best_row_and_chart_span_every_store_and_name_the_namespace(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _with_store(run_dir)
+    _with_namespace(run_dir)
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector("svg.cht")
+        best = page.locator("#title button.vital.link")
+        assert "4 x ref" in best.inner_text() and "freeform row 1" in best.inner_text()
+        # the canonical store (3 counted) and the namespace (2 counted) both draw dots
+        assert page.locator(".cht .dot.f[data-ns='']").count() == 3
+        assert page.locator(".cht .dot.f[data-ns='freeform']").count() == 2
+        page.click("[data-hide='freeform']")
+        assert page.locator(".cht .dot[data-ns='freeform']").count() == 0
+        assert page.locator(".cht .step").get_attribute("d")        # the line still spans every store
+        best.click()
+        page.wait_for_selector(".ih")
+        assert "sel=row%3Afreeform%3A1" in page.url
+        assert "freeform" in page.locator(".ih").inner_text()
+
+
+def test_a_store_without_the_declared_columns_is_named_not_scored(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _with_store(run_dir)
+    lg = run_dir / "experiment_data" / "legacy" / "experiment_data"
+    lg.mkdir(parents=True)
+    (lg / "output.csv").write_text(",energy,_delegation_id,_ts\n0,1,D001,2026-09-17T12:20:00+00:00\n")
+    (lg / "input.csv").write_text(",x\n0,1\n")
+    (lg / "jobs.csv").write_text(",0\n0,FINISHED\n")
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector("svg.cht")
+        assert "not scored: legacy (missing sigma, feasible)" in page.locator(".dcap", has_text="not scored").inner_text()

@@ -864,7 +864,7 @@ against the SDK's cost on calls it did price.
   `objective_values` / `best_so_far` are the one definition of "a row counts"
   (finite, below the sentinel magnitude, and `feasible == 1` when declared):
   `viewer/readers.py::read_figure_of_merit` (`GET /api/runs/{id}/figure_of_merit`,
-  the store's best counted row; `declared: false` when absent) and the run
+  the best counted row over EVERY store that records the declared columns — canonical and each namespace — with its `namespace`, `scored`, and `not_scored` (store + missing columns); `declared: false` when absent) and the run
   ledger both use it. Absent block = undeclared: finite rule, running min AND
   max, nothing ranked. A study whose oracle is authored mid-run (no output names
   at start) skips the start check; each later oracle registration
@@ -878,9 +878,10 @@ against the SDK's cost on calls it did price.
 `studies/run_ledger.py` adds `error_returns` (ERROR_RETURN count, target 0),
 `objective` (`column:direction[:feasible=col]` or `undeclared`),
 `first_feasible_eval` / `first_feasible_s` (position and seconds since
-`debug/run_started_at` of the first canonical-store row that counts under the
+`debug/run_started_at` of the first row, over every scored store (canonical + namespaces,
+`evaluation/objective.py::score_stores`), that counts under the
 declared objective; blank = never) and `best_trace` (JSON, <=20 evenly spaced
-eval counts: `best` when declared, `min` and `max` when not). Gate attempts
+eval counts: `best` when declared plus `stores` {scored, not_scored}, `min` and `max` when not). Gate attempts
 remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
 `tests/test_run_ledger_kpis.py`.
 
@@ -1397,8 +1398,9 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   tab on an open run, never by a hidden tab or a closed run. Send shows "Answered, undo for 10 s" and
   posts when the window ends (or at once if the tab is hidden or closed); Undo restores the text.
   `viewer_shots.py --banner` builds a pending-question fixture and shoots it.
-  **Build step 3, Data view (spec 15 4.3):** best-so-far over elapsed time from the declared objective
-  (`/figure_of_merit` + `/trajectory`), reference lines only from `objective.lines`, display scaling only
+  **Build step 3, Data view (spec 15 4.3):** best-so-far over elapsed time from the declared objective, one
+  step line across every scored store (dots marked per namespace; the legend filters dots; the title's best
+  row names its store and selects it) (`/figure_of_merit` + `/trajectory`), reference lines only from `objective.lines`, display scaling only
   from `objective.unit_label` (one function, `disp`); feasible dots filled in the producing role's colour,
   infeasible hollow, click selects `sel=row:N`. The funnel (`/funnel`) shows each stage's cumulative and
   "alone" counts. The store table is virtualised, sortable, with a column picker remembered per viewer

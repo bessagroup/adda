@@ -93,6 +93,11 @@ def data_shots(base: str, out: Path, problems: list[str]) -> None:
                     pg.locator(".seg button").nth(1).click()
                     pg.wait_for_timeout(300)
                     pg.screenshot(path=str(out / f"data-ns2-{wname}-{theme}.png"))
+                if w > 400:
+                    gap = pg.evaluate("(()=>{const t=document.getElementById('tbl'),h=t&&t.querySelector('.thead');"
+                                      "return t&&h?t.clientWidth-h.getBoundingClientRect().width:0})()")
+                    if gap > 1:
+                        problems.append(f"data-{wname}-{theme}: table stops {gap:.0f}px short of its panel")
                 sw = pg.evaluate("document.documentElement.scrollWidth - "
                                  "document.documentElement.clientWidth")
                 if w <= 400 and sw > 0:

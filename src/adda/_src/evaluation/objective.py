@@ -178,3 +178,31 @@ def best_so_far(
     if objective:
         return {"best": run(max if objective["direction"] == "max" else min)}
     return {"min": run(min), "max": run(max)}
+
+
+def score_stores(
+    stores: Iterable[tuple[str | None, list[str], list[Mapping[str, Any]]]],
+    objective: Mapping[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Score EVERY store that records the declared columns, so results are
+    comparable across oracle families (canonical and each namespace).
+
+    ``stores`` is ``(namespace, header, rows)`` per store, namespace ``None``
+    for the canonical one. Returns ``(scored, not_scored)``: ``scored`` holds
+    ``{namespace, n, rows, values}`` (``values`` as ``objective_values``, aligned
+    with ``rows``), ``not_scored`` holds ``{namespace, n, missing}`` for a store
+    lacking a declared column. A store with no header has recorded nothing yet
+    and is in neither.
+    """
+    scored: list[dict[str, Any]] = []
+    not_scored: list[dict[str, Any]] = []
+    for ns, head, rows in stores:
+        if not head:
+            continue
+        miss = [c for _, c in missing_columns(objective, head)]
+        if miss:
+            not_scored.append({"namespace": ns, "n": len(rows), "missing": miss})
+            continue
+        scored.append({"namespace": ns, "n": len(rows), "rows": rows,
+                       "values": objective_values(rows, objective, objective["column"])})
+    return scored, not_scored

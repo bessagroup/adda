@@ -209,6 +209,10 @@ agent and recorded as an `OBJECTIVE_COLUMN_MISSING` diagnostics event.
 and no line is drawn unless you declare it. `unit_label` only changes how the
 viewer displays the axis, lines and values (raw value divided by `divide_by`,
 shown with `label`); the store and the ledger stay in raw units.
+The objective is scored on every store that records both declared columns: the
+canonical store and each namespace. Results are therefore comparable across
+oracle families, and the best row names the store it came from. A store missing
+a declared column is listed as "not scored" rather than dropped.
 Without the block the ledger records `objective: undeclared`, judges rows by
 the finite rule alone, and reports the running min and max instead of a best.
 

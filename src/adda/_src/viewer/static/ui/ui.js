@@ -183,7 +183,7 @@ async function get(path) {
 function resetRun() {
   lastRun = S.run;
   S.vitals = null; S.dels = []; S.ledger = { hypotheses: [], milestones: [] };
-  S.fom = null; S.data = null; S.dsig = ""; S.ns = null; S.sort = null; S.tscroll = 0;
+  S.fom = null; S.data = null; S.dsig = ""; S.ns = null; S.hide = {}; S.sort = null; S.tscroll = 0;
   S.reviews = []; S.evidence = {}; S.sig = ""; S.loaded = false; S.error = null; S.questions = []; S.qsig = "";
   clearTimeout(S.timer);
   tick();
@@ -290,7 +290,7 @@ function paintTitle() {
     `<div><div class="lbl">Delegations</div><div class="vital">${S.dels.filter((d) => !isGate(d) && !isFB(d)).length}` +
     `<small>${running ? done + " done · " + running + " running" : "all done"}</small></div></div>` +
     `<div><div class="lbl">Best row · ${fom ? esc(fom.column) : "objective"}</div>` +
-    (fom ? `<button class="vital link" data-sel="row:${fom.row}" title="The store's best row by the declared objective (${esc(fom.direction)}). It is not the run's headline claim.">${esc(fmtVal(fom.value))}</button>`
+    (fom ? `<button class="vital link" data-sel="row:${fom.namespace ? fom.namespace + ":" : ""}${fom.row}" title="The best counted row by the declared objective (${esc(fom.direction)}), over every store that records it. It is not the run's headline claim.">${esc(fmtVal(fom.value))}<small>${esc(fom.namespace || "canonical")} row ${fom.row}</small></button>`
       : `<div class="vital">${dash(!S.fom || !S.fom.declared ? "No objective declared for this study" : S.oracle && S.oracle.registered === false ? "No oracle registered for this run" : "No counted rows in the store yet")}</div>`) + `</div>` +
     `<div>${actionsHtml(v.closed)}</div>`;
 }
@@ -528,7 +528,7 @@ function hypothesisHtml(h) {
 }
 
 /* ── Data view (spec 15 4.3) ─────────────────────────────────────────────── */
-const SENTINEL = 1e8, ROW_H = 28, TBL_H = 420, HEAD_H = 32;
+const SENTINEL = 1e8, ROW_H = 28, TBL_H = 420, HEAD_H = 44;
 const unitOf = () => { const u = S.fom && S.fom.declared && S.fom.unit_label; return u && u.divide_by > 0 ? u : null; };
 /* The ONE place a raw objective value becomes a display value: the chart axis,
    its reference lines, the tooltip, the table cell and the title all go through
@@ -544,7 +544,10 @@ function curStore() {
 }
 const rowKey = (st, i) => "row:" + (nsOf(st) ? nsOf(st) + ":" : "") + i;
 const ROW_RE = /^row:(?:([^:]+):)?(\d+)$/;
-const declaredFor = (st) => (S.fom && S.fom.declared && nsOf(st) === null ? S.fom : null);
+/* The objective is scored on every store that records its declared columns, not only the canonical one. */
+const scoredList = () => (S.fom && S.fom.declared ? (S.fom.scored || []).map((x) => x.namespace || null) : []);
+const declaredFor = (st) => (scoredList().includes(nsOf(st)) ? S.fom : null);
+const MARKS = ["circle", "square", "diamond", "triangle"];
 let DM = new Map();
 
 function model(st) {
@@ -607,19 +610,29 @@ function niceTicks(lo, hi, n) {
 }
 const note = (t) => `<p class="dnote">${t}</p>`;
 
-function chartHtml(st, W) {
+function markPath(kind, x, y) {
+  const r = 5;
+  if (kind === "square") return `M${x - r + 0.5} ${y - r + 0.5}h${2 * r - 1}v${2 * r - 1}h${-(2 * r - 1)}z`;
+  if (kind === "diamond") return `M${x} ${y - r - 1}L${x + r + 1} ${y}L${x} ${y + r + 1}L${x - r - 1} ${y}z`;
+  if (kind === "triangle") return `M${x} ${y - r - 1}L${x + r + 1} ${y + r}L${x - r - 1} ${y + r}z`;
+  return `M${x - r + 1} ${y}a${r - 1} ${r - 1} 0 1 0 ${2 * (r - 1)} 0a${r - 1} ${r - 1} 0 1 0 ${-2 * (r - 1)} 0z`;
+}
+function chartHtml(W) {
   const f = S.fom;
   if (!f || !f.declared) return note("The study declares no objective, so there is no best-so-far to draw. Declare one in an <code>objective:</code> block of config.yaml.");
-  if (nsOf(st) !== null) return note(`The declared objective <b>${esc(f.column)}</b> is scored on the canonical store. Switch to it to see the chart.`);
-  const col = st.columns[f.column];
-  if (!col) return note(`<b>${esc(f.column)}</b> is not among this store’s recorded outputs yet.`);
-  const fe = f.feasible && st.columns[f.feasible] ? st.columns[f.feasible].values : null;
-  const t0 = runT0(), pts = []; let undrawn = 0;
-  for (let i = 0; i < st.n; i++) {
-    const y = col.values[i], t = parseT(st.ts[i]);
-    if (y == null || Math.abs(y) >= SENTINEL || t == null || t0 == null) { undrawn++; continue; }
-    pts.push({ i, x: (t - t0) / 3600, y: disp(y), ok: fe ? fe[i] === 1 : !f.feasible });
-  }
+  const names = scoredList(), all = stores().filter((x) => names.includes(nsOf(x)));
+  const notScored = (f.not_scored || []).map((x) => `${esc(x.namespace || "canonical")} (missing ${x.missing.map(esc).join(", ")})`);
+  if (!all.length) return note(`No store records the declared objective <b>${esc(f.column)}</b> yet.` + (notScored.length ? ` Not scored: ${notScored.join("; ")}.` : ""));
+  const t0 = runT0(), pts = []; let undrawn = 0, total = 0;
+  all.forEach((st, si) => {
+    const col = st.columns[f.column], fe = f.feasible && st.columns[f.feasible] ? st.columns[f.feasible].values : null;
+    total += st.n;
+    for (let i = 0; i < st.n; i++) {
+      const y = col ? col.values[i] : null, t = parseT(st.ts[i]);
+      if (y == null || Math.abs(y) >= SENTINEL || t == null || t0 == null) { undrawn++; continue; }
+      pts.push({ st, si, i, x: (t - t0) / 3600, y: disp(y), ok: fe ? fe[i] === 1 : !f.feasible });
+    }
+  });
   const lines = (f.lines || []).map((l) => ({ y: disp(l.value), label: l.label }));
   const counted = pts.filter((p) => p.ok);
   const basis = counted.length || lines.length ? [...counted.map((p) => p.y), ...lines.map((l) => l.y)] : pts.map((p) => p.y);
@@ -627,7 +640,8 @@ function chartHtml(st, W) {
   let lo = Math.min(...basis), hi = Math.max(...basis);
   if (lo === hi) { lo -= 1; hi += 1; }
   const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
-  const shown = pts.filter((p) => p.y >= lo && p.y <= hi), clipped = pts.length - shown.length;
+  const hidden = S.hide || {}, vis = pts.filter((p) => !hidden[nsOf(p.st) || ""]);
+  const shown = vis.filter((p) => p.y >= lo && p.y <= hi), clipped = vis.length - shown.length;
   const xEnd = Math.max(...pts.map((p) => p.x), (elapsedNow() || 0) / 3600, 0.1) * 1.02;
   const H = 300, L = 56, R = 16, T = 28, B = 32;
   const sx = (x) => L + (x / xEnd) * (W - L - R), sy = (y) => T + (1 - (y - lo) / (hi - lo)) * (H - T - B);
@@ -642,17 +656,18 @@ function chartHtml(st, W) {
   });
   if (d) d += `H${sx(xEnd)}`;
   const dot = (p) => {
-    const dm = DM.get(st.delegation[p.i]);
-    return `<circle class="dot ${p.ok ? "f" : "i"}${S.sel === rowKey(st, p.i) ? " sel" : ""}" cx="${sx(p.x).toFixed(1)}" cy="${sy(p.y).toFixed(1)}" r="4" data-sel="${rowKey(st, p.i)}" data-row="${p.i}"` +
+    const dm = DM.get(p.st.delegation[p.i]), key = rowKey(p.st, p.i);
+    return `<path class="dot ${p.ok ? "f" : "i"}${S.sel === key ? " sel" : ""}" d="${markPath(MARKS[p.si % MARKS.length], sx(p.x), sy(p.y))}" data-sel="${key}" data-row="${p.i}" data-ns="${esc(nsOf(p.st) || "")}"` +
       (p.ok ? ` style="--role:var(${dm ? "--r-" + esc(dm) : "--ink-2"})"` : "") + `/>`;
   };
-  const roles = [...new Set(counted.map((p) => DM.get(st.delegation[p.i])).filter(Boolean))];
+  const roles = [...new Set(counted.map((p) => DM.get(p.st.delegation[p.i])).filter(Boolean))];
   const unit = unitOf() ? unitOf().label : f.column;
-  const cap = `${counted.length} counted of ${st.n} rows` + (undrawn ? ` · ${undrawn} with no finite value or time are not drawn` : "") + (clipped ? ` · ${clipped} outside the axis` : "");
+  const nsKey = all.map((st, si) => `<button class="nskey" data-hide="${esc(nsOf(st) || "")}" aria-pressed="${!hidden[nsOf(st) || ""]}" title="Show or hide this store’s dots. The best-so-far line always spans every scored store."><svg width="14" height="14" viewBox="-7 -7 14 14"><path class="dot f" style="--role:var(--ink-2)" d="${markPath(MARKS[si % MARKS.length], 0, 0)}"/></svg>${esc(nsOf(st) || "canonical")}<small>${st.n}</small></button>`).join("");
+  const cap = `${counted.length} counted of ${total} rows` + (all.length > 1 ? ` across ${all.length} stores` : "") + (undrawn ? ` · ${undrawn} with no finite value or time are not drawn` : "") + (clipped ? ` · ${clipped} outside the axis` : "") + (notScored.length ? ` · not scored: ${notScored.join("; ")}` : "");
   return `<div class="chartwrap"><svg class="cht" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Best ${esc(f.column)} so far over elapsed time">` +
     `<text class="ylab" x="${L - 8}" y="${T - 12}" text-anchor="start">${esc(unit)}</text>${grid}${refs}` +
     `<path class="step" d="${d}"/>${shown.filter((p) => !p.ok).map(dot).join("")}${shown.filter((p) => p.ok).map(dot).join("")}</svg><div class="tip" id="tip" hidden></div></div>` +
-    `<div class="legend"><span><i class="dot f" style="--role:var(--ink-2)"></i>feasible, in its role’s colour</span><span><i class="dot i"></i>infeasible</span>` +
+    `<div class="legend">${all.length > 1 ? nsKey : ""}<span><i class="dot f" style="--role:var(--ink-2)"></i>feasible, in its role’s colour</span><span><i class="dot i"></i>infeasible</span>` +
     roles.map((r) => `<span><i class="sw" style="--role:var(--r-${esc(r)})"></i>${esc(shortRole(r))}</span>`).join("") + `<span><i class="stepkey"></i>best so far (${esc(f.direction)})</span></div>` +
     `<div class="dcap">${cap}</div>`;
 }
@@ -668,7 +683,7 @@ function funnelHtml(st) {
 }
 function tableHtml(st, m) {
   const cols = visibleCols(st, m), sort = S.sort || { key: "#", dir: "desc" };
-  const W = cols.reduce((a, c) => a + c.w, 0), tpl = cols.map((c) => c.w + "px").join(" ");
+  const W = cols.reduce((a, c) => a + c.w, 0), tpl = cols.map((c) => `minmax(${c.w}px,1fr)`).join(" ");
   const groups = ["Inputs", "Outputs", "Text"].map((g) => {
     const cs = m.cols.filter((c) => c.group === g); if (!cs.length) return "";
     return `<div class="pg"><h4>${g}</h4>` + cs.map((c) => `<label><input type="checkbox" data-col="${esc(c.key)}" ${cols.includes(c) ? "checked" : ""}> ${esc(c.label)}</label>`).join("") + `</div>`;
@@ -676,8 +691,8 @@ function tableHtml(st, m) {
   const head = cols.map((c) => `<button class="th${c.num ? " num" : ""}" data-sort="${esc(c.key)}" aria-sort="${sort.key === c.key ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}" title="Sort by ${esc(c.label)}">${esc(c.label)}<span>${sort.key === c.key ? (sort.dir === "asc" ? "↑" : "↓") : ""}</span></button>`).join("");
   return `<div class="tbar"><span class="dcap">${st.n} rows · click a header to sort · click a row to inspect it</span><span class="sp"></span>` +
     `<details class="picker"${S.pickOpen ? " open" : ""}><summary class="btn">Columns · ${cols.length} of ${m.cols.length}</summary><div class="pickmenu">${groups}</div></details></div>` +
-    `<div class="tbl" id="tbl" tabindex="0" aria-label="Rows of the store"><div class="thead" style="width:${W}px;grid-template-columns:${tpl};height:${HEAD_H}px">${head}</div>` +
-    `<div class="tbody" id="tbody" style="width:${W}px;height:${st.n * ROW_H}px" data-tpl="${tpl}"></div></div>`;
+    `<div class="tbl" id="tbl" tabindex="0" aria-label="Rows of the store"><div class="thead" style="min-width:${W}px;grid-template-columns:${tpl};height:${HEAD_H}px">${head}</div>` +
+    `<div class="tbody" id="tbody" style="min-width:${W}px;height:${st.n * ROW_H}px" data-tpl="${tpl}"></div></div>`;
 }
 let TBL = null;
 function paintRows() {
@@ -706,9 +721,9 @@ function paintData(w) {
   const seg = all.length > 1 ? `<div class="seg" role="group" aria-label="Store">` + all.map((x) =>
     `<button data-ns="${esc(nsOf(x) || "")}" aria-pressed="${nsOf(x) === nsOf(st)}">${esc(nsOf(x) || "canonical")}<small>${x.n}</small></button>`).join("") + `</div>` : "";
   const W = Math.max(320, w.clientWidth - 2 * 24);
-  const f = declaredFor(st);
+  const f = S.fom && S.fom.declared ? S.fom : null;
   w.innerHTML = `<div class="data"><div class="dh"><h3>Best so far${f ? ` · ${esc(f.column)}` : ""}</h3>${f ? `<span class="dcap">${f.direction === "max" ? "higher" : "lower"} is better${f.feasible ? ", counting rows where " + esc(f.feasible) + " = 1" : ""}</span>` : ""}<span class="sp"></span>${seg}</div>` +
-    chartHtml(st, W) + `<div class="dh"><h3>Stage funnel</h3></div>` + funnelHtml(st) + `<div class="dh"><h3>Store</h3></div>` + tableHtml(st, m) + `</div>`;
+    chartHtml(W) + `<div class="dh"><h3>Stage funnel</h3></div>` + funnelHtml(st) + `<div class="dh"><h3>Store</h3></div>` + tableHtml(st, m) + `</div>`;
   const cols = visibleCols(st, m);
   TBL = { st, m, cols, order: tableOrder(st, m) };
   const box = $("tbl");
@@ -741,8 +756,8 @@ function rowHtml(id) {
     const col = st.columns[f.column], v = col ? col.values[i] : null;
     const fe = f.feasible && st.columns[f.feasible] ? st.columns[f.feasible].values[i] : null;
     const counts = v != null && Math.abs(v) < SENTINEL && (!f.feasible || fe === 1);
-    why = f.row === i
-      ? `<p>The store’s best row by the declared objective <b>${esc(f.column)}</b> (${esc(f.direction)}): <b>${esc(fmtVal(v))}</b>, row ${i} of ${f.n}.</p>`
+    why = f.row === i && (f.namespace || null) === ns
+      ? `<p>The store’s best row by the declared objective <b>${esc(f.column)}</b> (${esc(f.direction)}): <b>${esc(fmtVal(v))}</b>, row ${i} of ${st.n} in the ${ns ? esc(ns) : "canonical"} store.</p>`
       : `<p><b>${esc(f.column)}</b> = <b>${v == null ? "—" : esc(fmtVal(v))}</b>. ${counts ? "This row counts toward best-so-far." : "This row does not count: " + (v == null || Math.abs(v) >= SENTINEL ? "no finite value" : "it is infeasible") + "."}</p>`;
   }
   return head("row " + i, "", null, "A row of the " + (ns ? "“" + esc(ns) + "”" : "canonical") + " oracle store" + (m.t0 != null && st.ts[i] && parseT(st.ts[i]) != null ? " · evaluated " + fmtElapsed(parseT(st.ts[i]) - m.t0) : "")) +
@@ -756,6 +771,8 @@ document.addEventListener("scroll", (e) => {
 document.addEventListener("click", (e) => {
   const ns = e.target.closest("[data-ns]");
   if (ns) { S.ns = ns.dataset.ns || null; S.tscroll = 0; S.sort = null; paintWork(); return; }
+  const hd = e.target.closest("[data-hide]");
+  if (hd) { S.hide = { ...(S.hide || {}), [hd.dataset.hide]: !(S.hide || {})[hd.dataset.hide] }; paintWork(); return; }
   const so = e.target.closest("[data-sort]");
   if (so) {
     const cur = S.sort || { key: "#", dir: "desc" };
@@ -772,10 +789,10 @@ document.addEventListener("change", (e) => {
 });
 document.addEventListener("toggle", (e) => { if (e.target.classList && e.target.classList.contains("picker")) S.pickOpen = e.target.open; }, true);
 document.addEventListener("pointerover", (e) => {
-  const c = e.target.closest && e.target.closest("circle[data-row]"), tip = $("tip");
+  const c = e.target.closest && e.target.closest(".dot[data-row]"), tip = $("tip");
   if (!tip) return;
   if (!c) { tip.hidden = true; return; }
-  const st = curStore(); if (!st) return;
+  const st = stores().find((x) => nsOf(x) === (c.dataset.ns || null)); if (!st) return;
   tip.innerHTML = tipHtml(st, +c.dataset.row); tip.hidden = false;
   const wrap = tip.parentElement.getBoundingClientRect(), b = c.getBoundingClientRect();
   const x = b.left - wrap.left + b.width / 2, flip = x > wrap.width - 220;

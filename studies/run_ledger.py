@@ -61,15 +61,21 @@ _TRACE_POINTS = 20
 
 
 def _objective_kpis(run_dir: Path) -> dict:
-    """first-feasible position/time and best-so-far trace of the canonical
-    store's objective, in timestamp order, under the study's declared
-    objective (run_config.json["objective"])."""
+    """first-feasible position/time and best-so-far trace under the study's
+    declared objective (run_config.json["objective"]), in timestamp order.
+
+    Declared: over EVERY store that records the declared columns (canonical
+    plus each namespace), because a run's result may live in a namespace; a
+    store lacking one is named under ``stores.not_scored`` in best_trace.
+    Undeclared: the canonical store's first output column, as before."""
     from datetime import datetime
 
+    from adda._src.evaluation.ledger_summary import experiment_stores
     from adda._src.evaluation.objective import (
         best_so_far,
         label,
         objective_values,
+        score_stores,
     )
     try:
         cfg = json.loads((run_dir / "debug" / "run_config.json").read_text())
@@ -77,17 +83,36 @@ def _objective_kpis(run_dir: Path) -> dict:
         cfg = {}
     objective = cfg.get("objective") or None
     out: dict = {"objective": label(objective)}
-    oc = run_dir / "experiment_data" / "experiment_data" / "output.csv"
-    if not oc.exists():
-        return out
+    root = run_dir / "experiment_data"
     try:
-        rows = list(csv.DictReader(oc.open()))
-        cols = [c for c in (rows[0] if rows else {}) if c and not c.startswith("_")]
-        if not cols and not objective:
+        loaded = []
+        for store in experiment_stores(root):
+            oc = store / "experiment_data" / "output.csv"
+            if not oc.exists():
+                continue
+            rows = list(csv.DictReader(oc.open()))
+            head = list(rows[0]) if rows else []
+            loaded.append((None if store == root else store.name, head, rows))
+        if not loaded:
             return out
-        obj = objective["column"] if objective else cols[0]
-        rows.sort(key=lambda r: r.get("_ts") or "")
-        vals = objective_values(rows, objective, obj)
+        stores_info = None
+        if objective:
+            scored, not_scored = score_stores(loaded, objective)
+            obj = objective["column"]
+            pairs = [(r, v) for st in scored
+                     for r, v in zip(st["rows"], st["values"], strict=False)]
+            stores_info = {"scored": [s["namespace"] for s in scored],
+                           "not_scored": {s["namespace"]: s["missing"] for s in not_scored}}
+        else:
+            rows = loaded[0][2] if loaded[0][0] is None else []
+            cols = [c for c in (rows[0] if rows else {}) if c and not c.startswith("_")]
+            if not cols:
+                return out
+            obj = cols[0]
+            pairs = list(zip(rows, objective_values(rows, None, obj), strict=False))
+        pairs.sort(key=lambda p: p[0].get("_ts") or "")
+        rows = [p[0] for p in pairs]
+        vals = [p[1] for p in pairs]
         first = next((i for i, v in enumerate(vals) if v is not None), None)
         if first is not None:
             out["first_feasible_eval"] = first + 1
@@ -104,7 +129,8 @@ def _objective_kpis(run_dir: Path) -> dict:
             series = best_so_far(vals, objective)
             out["best_trace"] = json.dumps({
                 "obj": obj, "n": [i + 1 for i in idx],
-                **{name: [seq[i] for i in idx] for name, seq in series.items()}})
+                **{name: [seq[i] for i in idx] for name, seq in series.items()},
+                **({"stores": stores_info} if stores_info else {})})
         return out
     except Exception:
         return out
@@ -435,7 +461,39 @@ def analysis_brief(run_dir: Path) -> str:
     L.append("")
     L.append("## Headline & hypotheses (Step 5 — the science result)")
     oc = run_dir / "experiment_data" / "experiment_data" / "output.csv"
-    if oc.exists():
+    declared = None
+    try:
+        declared = json.loads((debug / "run_config.json").read_text()).get("objective")
+    except (OSError, ValueError):
+        pass
+    if declared:
+        # The result may live in a namespace: report every store that records
+        # the declared columns, and name the ones that cannot be scored.
+        from adda._src.evaluation.ledger_summary import experiment_stores
+        from adda._src.evaluation.objective import score_stores
+        root = run_dir / "experiment_data"
+        loaded = []
+        for store in experiment_stores(root):
+            f = store / "experiment_data" / "output.csv"
+            if f.exists():
+                rows_ = list(csv.DictReader(f.open()))
+                loaded.append((None if store == root else store.name,
+                               list(rows_[0]) if rows_ else [], rows_))
+        scored, not_scored = score_stores(loaded, declared)
+        pick = max if declared["direction"] == "max" else min
+        for st in scored:
+            cs = [(v, i) for i, v in enumerate(st["values"]) if v is not None]
+            where = st["namespace"] or "canonical"
+            if cs:
+                v, i = pick(cs, key=lambda t: t[0])
+                L.append(f"- {where}: best counted '{declared['column']}' = {v:.4g} "
+                         f"(row {i}; {len(cs)} counted of {st['n']})")
+            else:
+                L.append(f"- {where}: no counted row of {st['n']}")
+        for st in not_scored:
+            L.append(f"- {st['namespace'] or 'canonical'}: not scored, missing "
+                     f"{', '.join(st['missing'])}")
+    elif oc.exists():
         try:
             rws = list(csv.DictReader(oc.open()))
             outcols = [c for c in (rws[0] if rws else {})
