@@ -278,7 +278,14 @@ def test_a_formula_is_not_eaten_as_markdown_emphasis(tmp_path, page):
 
 # --- vertical timeline -------------------------------------------------------
 
-def _timeline(page) -> dict:
+def _timeline(page, cards: int | None = None) -> dict:
+    """The live timeline model. ``cards`` waits for that many cards first: the
+    graph nodes paint before the delegation log has been fetched, so reading
+    the model on that signal alone sees an empty timeline."""
+    if cards is not None:
+        page.wait_for_function(
+            "(n) => Alpine.$data(document.querySelector('[x-data]'))"
+            ".vtl().cards.length === n", arg=cards, timeout=15_000)
     return page.evaluate(
         "() => JSON.parse(JSON.stringify(Alpine.$data(document.querySelector('[x-data]')).vtl()))")
 
@@ -322,10 +329,12 @@ def test_columns_count_true_concurrency_not_drawn_height(tmp_path, page):
     study, run_id = _run_with_delegations(tmp_path, rows)
     with _LiveServer(create_app(study)) as server:
         _open(page, server, run_id)
-        tl = _timeline(page)
+        tl = _timeline(page, cards=4)
         assert tl["cols"] == 1
         assert all(c["compact"] for c in tl["cards"])
-        assert page.locator(".vcard.compact").count() == 4
+        page.wait_for_function(
+            "() => document.querySelectorAll('.vcard.compact').length === 4",
+            timeout=15_000)
 
 
 def test_feedback_audits_are_cards_with_a_feedback_chip_and_gates_stay_readable(tmp_path, page):
