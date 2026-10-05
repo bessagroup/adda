@@ -28,7 +28,11 @@ def _g(repo, *a):
 
 @pytest.fixture
 def study(tmp_path, monkeypatch):
-    for k, v in ENV.items():
+    # The app scrubs GIT_AUTHOR_* from the environment on purpose; the operator's
+    # identity must come from git config, so the test supplies it that way.
+    cfg = tmp_path / "gitconfig"
+    cfg.write_text("[user]\n\tname = Op\n\temail = op@x\n")
+    for k, v in {**ENV, "GIT_CONFIG_GLOBAL": str(cfg)}.items():
         monkeypatch.setenv(k, v)
     repo = tmp_path / "repo"
     s = repo / "studies" / "s1"

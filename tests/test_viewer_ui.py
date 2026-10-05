@@ -79,12 +79,11 @@ def test_no_horizontal_scroll_on_a_phone(tmp_path, page):
 
 
 def _git_study(study, monkeypatch):
-    import os
     import subprocess
-    for k, v in {"GIT_AUTHOR_NAME": "Op", "GIT_AUTHOR_EMAIL": "op@x", "GIT_COMMITTER_NAME": "Op",
-                 "GIT_COMMITTER_EMAIL": "op@x", "GIT_CONFIG_GLOBAL": os.devnull,
-                 "GIT_CONFIG_NOSYSTEM": "1"}.items():
-        monkeypatch.setenv(k, v)
+    cfg = study.parent / "gitconfig"
+    cfg.write_text("[user]\n\tname = Op\n\temail = op@x\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(cfg))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     (study / "PROBLEM_STATEMENT.md").write_text("# minimise y\nline two\n", encoding="utf-8")
     (study / "config.yaml").write_text("model: m1\nbudget: '00:10:00'\n", encoding="utf-8")
     (study / ".gitignore").write_text("runs/\n", encoding="utf-8")
