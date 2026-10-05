@@ -109,6 +109,29 @@ def test_no_horizontal_scroll_on_a_phone(tmp_path, page):
             "document.documentElement.scrollWidth - document.documentElement.clientWidth") <= 0
 
 
+def test_phone_controls_are_finger_sized_and_the_start_action_stays_in_view(tmp_path, page, monkeypatch):
+    study, run_dir = _study(tmp_path)
+    _git_study(study, monkeypatch)
+    (run_dir / "debug" / "run_status.json").write_text('{"status": "GATED"}')
+    with _LiveServer(create_app(study, token="t")) as srv:
+        page.set_viewport_size({"width": 390, "height": 700})
+        page.goto(f"{srv.url}/session?token=t&next=/ui?run={RUN}")
+        page.wait_for_selector("#openstart")
+        for view in ("timeline", "hypotheses", "data", "deliverable", "logs", "setup"):
+            page.goto(f"{srv.url}/ui?run={RUN}&view={view}")
+            page.wait_for_selector(".views [role=tab]")
+            page.wait_for_timeout(300)
+            small = page.evaluate(
+                "[...document.querySelectorAll('button,.seg button,.toggle')]"
+                ".filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height<40})"
+                ".map(e=>(e.id||e.className)+' '+e.textContent.trim().slice(0,12))")
+            assert small == [], f"{view}: controls under 40 px tall: {small}"
+        page.click("#openstart")
+        page.wait_for_selector("#sheet:not([hidden]) #dostart")
+        box = page.locator("#dostart").bounding_box()
+        assert box["y"] + box["height"] <= 700
+
+
 def _git_study(study, monkeypatch):
     import subprocess
     cfg = study.parent / "gitconfig"

@@ -351,6 +351,10 @@ a.idlink:hover{text-decoration:underline}
   .grip{display:none}
   .back{display:inline-flex}
   .ih .x{display:none}
+  .btn,.seg button,.hrowb{min-height:40px;align-items:center}
+  .sheet .sfoot{position:sticky;bottom:calc(-1 * var(--s4));background:var(--surface);padding:var(--s3) 0;border-top:1px solid var(--rule)}
+  .toggle{min-height:40px;margin-left:var(--s2)}
+  .toggle input{width:20px;height:20px}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
