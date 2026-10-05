@@ -73,6 +73,7 @@ Ordered by value, each sourced from a record that already exists:
 5. **Critic gate reviews**: each `critic_reviews/call_NNN.md` rendered, with the verdict and the criterion-5 finding, linked from its gate rule in 1.1.
 6. **Per-delegation evidence**: the files it touched and its report, from the workspace git history and `debug/evidence_index.md` (6f33688). That's the same index the critic gets.
 7. **Slurm jobs per delegation**: job ids, state, wall. Shown only if the study records them; don't scrape squeue from the viewer.
+   **Not built: no structured record exists; study launchers own job records.** The runtime writes no per-delegation Slurm record (`slurm_llm.py` owns only an optional vLLM server; `run_setup.py` only reads SLURM env for the memory cap), so there is nothing to serve.
 8. **Strategizer notes**: `strategizer_notes/strategy_*.md`, rendered with timestamps. In s55r1 these were the only reasoning trace.
 9. **Literature corpus**: papers added (`CorpusAdd`), and source failures (Semantic Scholar 403s, paywalls) as a count per source.
 10. **Retrospectives**, after close, grouped by CONSISTENCY / DECISION / FRICTION / BLOCKED, each linked to its delegation. These are the goldmines; reading them should be one click.
