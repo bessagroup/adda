@@ -270,9 +270,12 @@ def sibling_studies(study_dir: Path | str) -> list[str]:
 
 
 def create_study(study_dir: Path | str, name: str, problem_statement: str,
-                 config: str, message: str | None = None) -> dict[str, Any]:
+                 config: str, message: str) -> dict[str, Any]:
     """``mkdir <studies>/<name>`` beside this study, write the two files and
     commit exactly them. Removes what it made if the commit fails."""
+    message = (message or "").strip()
+    if not message:
+        raise StudyEditError("a commit message is required", 400)
     if not _NAME_RE.fullmatch(name or ""):
         raise StudyEditError(
             "a study name is letters, digits, '_' and '-' (it starts with a "
@@ -293,7 +296,7 @@ def create_study(study_dir: Path | str, name: str, problem_statement: str,
         (new / FILES["problem_statement"]).write_text(problem_statement, encoding="utf-8")
         (new / FILES["config"]).write_text(config, encoding="utf-8")
         _git(root, "add", "--", *rels)
-        _git(root, "commit", "--only", "-m", (message or f"studies: add {name}"), "--", *rels)
+        _git(root, "commit", "--only", "-m", message, "--", *rels)
     except (StudyEditError, OSError):
         try:
             _git(root, "reset", "-q", "--", *rels)

@@ -1144,12 +1144,13 @@ def create_app(
             name = body["name"]
             template = body.get("template")
             ps, cfg = body.get("problem_statement"), body.get("config")
-            if not isinstance(name, str) or any(
+            message = body.get("message", "")
+            if not isinstance(name, str) or not isinstance(message, str) or any(
                     x is not None and not isinstance(x, str) for x in (template, ps, cfg)):
                 raise TypeError
         except Exception:  # noqa: BLE001 — any malformed body
             return JSONResponse(
-                {"error": "malformed body: need {name, template?, problem_statement?, config?}"},
+                {"error": "malformed body: need {name, message, template?, problem_statement?, config?}"},
                 status_code=400)
         if template is not None:
             if template not in await asyncio.to_thread(study_edit.sibling_studies, study_dir):
@@ -1163,10 +1164,10 @@ def create_app(
             ps, cfg = _copy("problem_statement", ps), _copy("config", cfg)
         try:
             done = await asyncio.to_thread(
-                study_edit.create_study, study_dir, name, ps or "", cfg or "")
+                study_edit.create_study, study_dir, name, ps or "", cfg or "", message)
         except study_edit.StudyEditError as exc:
             return _edit_error(exc)
-        _audit(study_dir, "create_study", name=name, template=template, sha=done["sha"],
+        _audit(study_dir, "create_study", name=name, template=template, message=message, sha=done["sha"],
                path=done["path"])
         return JSONResponse({"ok": True, **done})
 

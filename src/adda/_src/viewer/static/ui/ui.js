@@ -1508,7 +1508,7 @@ async function sendNote() {
 }
 
 /* New / duplicate study */
-S.newst = { open: false, list: null, err: null, busy: false, done: null, name: "", tpl: "", ps: "", cfg: "budget: 3600\n" };
+S.newst = { open: false, list: null, err: null, busy: false, done: null, name: "", tpl: "", msg: "", ps: "", cfg: "budget: 3600\n" };
 function paintNew() {
   const el = $("newstudy"), s = S.newst;
   el.hidden = !s.open; if (!s.open) { el.innerHTML = ""; return; }
@@ -1520,6 +1520,7 @@ function paintNew() {
     (s.tpl ? '<p class="dcap">The problem statement and config.yaml are copied as committed to disk; edit them in the new study’s Setup.</p>' :
       `<label class="dcap" for="nsps">Problem statement</label><textarea id="nsps" class="mono" rows="6" style="width:100%">${esc(s.ps)}</textarea>` +
       `<label class="dcap" for="nscfg">config.yaml</label><textarea id="nscfg" class="mono" rows="5" style="width:100%">${esc(s.cfg)}</textarea>`) +
+    `<label class="dcap" for="nsmsg">Commit message (required)</label><input type="text" id="nsmsg" style="width:100%;min-height:40px" placeholder="studies: add ${esc(s.name || "name")}" value="${esc(s.msg)}">` +
     (s.err ? `<p class="st bad">${esc(s.err)}</p>` : "") +
     (s.done ? `<p class="st ok">Created and committed ${esc(s.done.name)} (${esc(s.done.sha.slice(0, 7))}). To view it, run:</p><pre class="mono" style="white-space:pre-wrap">${esc(s.done.open)}</pre>` : "") +
     `<div class="sfoot"><button type="submit" class="btn primary" ${s.busy || s.done ? "disabled" : ""}>${s.busy ? "Creating…" : "Create and commit"}</button></div></form></div>`;
@@ -1532,13 +1533,13 @@ async function openNew() {
 }
 function readNew() {
   const s = S.newst, v = (id) => { const x = $(id); return x ? x.value : null; };
-  s.name = v("nsname"); const t = v("nstpl"); if (t !== null) s.tpl = t;
+  s.name = v("nsname"); if (v("nsmsg") !== null) s.msg = v("nsmsg"); const t = v("nstpl"); if (t !== null) s.tpl = t;
   if (v("nsps") !== null) s.ps = v("nsps");
   if (v("nscfg") !== null) s.cfg = v("nscfg");
 }
 async function createNew() {
   const s = S.newst; readNew(); s.busy = true; s.err = null; paintNew();
-  const body = { name: s.name };
+  const body = { name: s.name, message: s.msg };
   if (s.tpl) body.template = s.tpl; else { body.problem_statement = s.ps; body.config = s.cfg; }
   const r = await send("/api/studies", body);
   s.busy = false;

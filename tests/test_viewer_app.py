@@ -1585,7 +1585,7 @@ def test_new_and_duplicate_study_commit_exactly_two_files(tmp_path, monkeypatch)
     assert client.get("/api/studies").json() == {"current": "cur", "studies": ["cur"]}
     client.get("/session?token=t&next=/ui")
 
-    r = client.post("/api/studies", json={"name": "copy", "template": "cur"})
+    r = client.post("/api/studies", json={"name": "copy", "template": "cur", "message": "add copy"})
     assert r.status_code == 200, r.text
     assert (root / "studies" / "copy" / "config.yaml").read_text() == (cur / "config.yaml").read_text()
     assert r.json()["open"].endswith("studies/copy")
@@ -1594,15 +1594,20 @@ def test_new_and_duplicate_study_commit_exactly_two_files(tmp_path, monkeypatch)
     assert sorted(files) == ["studies/copy/PROBLEM_STATEMENT.md", "studies/copy/config.yaml"]
 
     blank = client.post("/api/studies", json={
-        "name": "fresh", "problem_statement": "# p", "config": "budget: 60\n"})
+        "name": "fresh", "message": "add fresh", "problem_statement": "# p", "config": "budget: 60\n"})
     assert blank.status_code == 200 and blank.json()["name"] == "fresh"
 
     for body, status in (
-        ({"name": "copy", "template": "cur"}, 409),
-        ({"name": "../evil", "problem_statement": "p", "config": "budget: 1"}, 400),
-        ({"name": "bad", "problem_statement": "p", "config": "runtime: {nope: 1}"}, 422),
-        ({"name": "empty", "config": "budget: 1"}, 400),
-        ({"name": "t2", "template": "../../etc"}, 404),
+        ({"name": "copy", "template": "cur", "message": "m"}, 409),
+        ({"name": "../evil", "message": "m", "problem_statement": "p", "config": "budget: 1"}, 400),
+        ({"name": "..", "message": "m", "problem_statement": "p", "config": "budget: 1"}, 400),
+        ({"name": "a/b", "message": "m", "problem_statement": "p", "config": "budget: 1"}, 400),
+        ({"name": "/tmp/abs", "message": "m", "problem_statement": "p", "config": "budget: 1"}, 400),
+        ({"name": "nomsg", "problem_statement": "p", "config": "budget: 1"}, 400),
+        ({"name": "nomsg", "message": " ", "template": "cur"}, 400),
+        ({"name": "bad", "message": "m", "problem_statement": "p", "config": "runtime: {nope: 1}"}, 422),
+        ({"name": "empty", "message": "m", "config": "budget: 1"}, 400),
+        ({"name": "t2", "message": "m", "template": "../../etc"}, 404),
     ):
         assert client.post("/api/studies", json=body).status_code == status, body
     assert not (root / "studies" / "bad").exists()
@@ -1612,3 +1617,37 @@ def test_new_study_needs_the_session_token(tmp_path, monkeypatch):
     _root, cur = _studies_repo(tmp_path, monkeypatch)
     client = TestClient(create_app(cur, token="t"))
     assert client.post("/api/studies", json={"name": "x", "template": "cur"}).status_code in (401, 403)
+
+
+def test_new_study_commits_only_its_files_on_a_dirty_tree_and_never_pushes(tmp_path, monkeypatch):
+    import subprocess
+
+    root, cur = _studies_repo(tmp_path, monkeypatch)
+    git = lambda *a: subprocess.run(["git", "-C", str(root), *a], check=True,  # noqa: E731
+                                    capture_output=True, text=True).stdout
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    git("remote", "add", "origin", str(remote))
+    git("push", "-q", "origin", "main")
+    before_remote = subprocess.run(["git", "-C", str(remote), "rev-parse", "main"],
+                                   capture_output=True, text=True).stdout
+    (root / "studies" / "ledger.csv").write_text("a\n")
+    git("add", "studies/ledger.csv")
+    (cur / "config.yaml").write_text("budget: 99\n")
+    (cur / "stray.txt").write_text("untracked\n")
+    staged_before = git("diff", "--cached", "--name-only")
+
+    client = TestClient(create_app(cur, token="t"))
+    client.get("/session?token=t&next=/ui")
+    r = client.post("/api/studies", json={"name": "n1", "template": "cur", "message": "add n1"})
+    assert r.status_code == 200, r.text
+
+    assert git("show", "--name-only", "--format=%s", "HEAD").split() == [
+        "add", "n1", "studies/n1/PROBLEM_STATEMENT.md", "studies/n1/config.yaml"]
+    assert staged_before.split() == ["studies/ledger.csv"]
+    assert git("diff", "--cached", "--name-only").split() == ["studies/ledger.csv"]
+    assert "studies/cur/config.yaml" in git("diff", "--name-only")
+    assert "studies/cur/stray.txt" in git("status", "--porcelain")
+    after_remote = subprocess.run(["git", "-C", str(remote), "rev-parse", "main"],
+                                  capture_output=True, text=True).stdout
+    assert after_remote == before_remote

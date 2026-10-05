@@ -1484,7 +1484,7 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   **Ask the docs (spec 14 Phase 5.9):** `GET /api/docs?q=<question or exact name>[&source=1]` (read-only) returns `{text}` from the same `adda.explain.explain` that
   `adda-docs` runs; the nav's `Docs` button opens a sheet with the box and a Source toggle. **Status:** done.
   **New / duplicate study (spec 14 Phase 5.1, 5.2):** `GET /api/studies` lists the studies beside this one; `POST /api/studies` (write-token gated, audited as `create_study`)
-  takes `{name, template?, problem_statement?, config?}`, makes `<studies>/<name>/`, validates `config.yaml` as the Setup commit does, and commits exactly the two files (rolled back on failure).
+  takes `{name, message (required), template?, problem_statement?, config?}`, makes `<studies>/<name>/`, validates `config.yaml` as the Setup commit does, and commits exactly the two files with the operator's message (`--only`, so staged or dirty files elsewhere are untouched; rolled back on failure; never pushes).
   `template` copies a sibling study's two files (a duplicate); the response carries `python -m adda.viewer <path>` because one viewer serves one study. The nav's `New study` opens the sheet. **Status:** done.
   **Launcher in the Start sheet (spec 14 Phase 5.5):** when `runtime.launch` is declared the sheet names its command, Start runs it (`POST /api/study/launch`) and shows the exact command line, the captured id and the launcher's stdout/stderr;
   while a captured id has not been stopped (and `stop_command` is declared) a `Stop launch <id>` button runs it (`POST /api/study/launch/stop`) and shows its output. Without `runtime.launch` neither appears. **Status:** done.
