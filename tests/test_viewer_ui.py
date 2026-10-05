@@ -78,12 +78,102 @@ def test_no_horizontal_scroll_on_a_phone(tmp_path, page):
             "document.documentElement.scrollWidth - document.documentElement.clientWidth") <= 0
 
 
-def test_unbuilt_views_say_what_will_appear(tmp_path, page):
+def _git_study(study, monkeypatch):
+    import os
+    import subprocess
+    for k, v in {"GIT_AUTHOR_NAME": "Op", "GIT_AUTHOR_EMAIL": "op@x", "GIT_COMMITTER_NAME": "Op",
+                 "GIT_COMMITTER_EMAIL": "op@x", "GIT_CONFIG_GLOBAL": os.devnull,
+                 "GIT_CONFIG_NOSYSTEM": "1"}.items():
+        monkeypatch.setenv(k, v)
+    (study / "PROBLEM_STATEMENT.md").write_text("# minimise y\nline two\n", encoding="utf-8")
+    (study / "config.yaml").write_text("model: m1\nbudget: '00:10:00'\n", encoding="utf-8")
+    (study / ".gitignore").write_text("runs/\n", encoding="utf-8")
+    for argv in (["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-q", "-m", "first draft"]):
+        subprocess.run(["git", "-C", str(study), *argv], check=True, capture_output=True)
+
+
+def test_setup_edits_show_a_diff_and_commit_only_with_a_message(tmp_path, page, monkeypatch):
     study, _ = _study(tmp_path)
-    with _LiveServer(create_app(study)) as srv:
+    _git_study(study, monkeypatch)
+    with _LiveServer(create_app(study, token="t")) as srv:
+        page.set_viewport_size({"width": 1400, "height": 900})
+        page.goto(f"{srv.url}/session?token=t&next=/ui?run={RUN}%26view=setup")
+        page.wait_for_selector("#sutext")
+        assert page.locator("#sutext").input_value().startswith("# minimise y")
+        assert page.locator("#sucommit").is_disabled()
+        page.fill("#sutext", "# minimise y\nline two\nSuccess: y < 1\n")
+        page.wait_for_selector(".sdiff tr.add")
+        assert "edited, not committed" in page.locator("#sustate").inner_text()
+        assert page.locator("#sucommit").is_disabled()
+        page.fill("#sumsg", "state the success criterion")
+        assert page.locator("#sucommit").is_enabled()
+        page.click("#sucommit")
+        page.wait_for_selector("#suerr .st.ok")
+        assert "state the success criterion" in page.locator("#suhist").inner_text()
+        page.locator("[data-su-commit]").first.click()
+        page.wait_for_selector(".patch .add")
+        assert "Success: y < 1" in page.locator(".patch").inner_text()
+        assert "matches the committed file" in page.locator("#sustate").inner_text()
+
+
+def test_setup_refuses_a_misspelled_config_knob_and_a_read_only_session(tmp_path, page, monkeypatch):
+    study, _ = _study(tmp_path)
+    _git_study(study, monkeypatch)
+    with _LiveServer(create_app(study, token="t")) as srv:
         page.goto(f"{srv.url}/ui?run={RUN}&view=setup")
-        page.wait_for_selector(".empty")
-        assert "isn't available" in page.locator(".empty").inner_text()
+        page.wait_for_selector("#sutext")
+        page.click("[data-sufile=config]")
+        page.wait_for_function("document.querySelector('#sutext') && document.querySelector('#sutext').value.includes('model: m1')")
+        page.fill("#sutext", "model: m1\nruntime:\n  max_awake_nodez: 2\n")
+        page.wait_for_selector("#suval .st.bad")
+        assert "max_awake_nodes" in page.locator("#suval").inner_text()
+        page.fill("#sumsg", "typo")
+        assert page.locator("#sucommit").is_disabled()
+        page.fill("#sutext", "model: m2\nbudget: '00:10:00'\n")
+        page.wait_for_selector("#suval .st.ok")
+        page.click("#sucommit")
+        page.wait_for_selector("#suerr .st.bad")
+        assert "read-only" in page.locator("#suerr").inner_text()
+
+
+def test_start_sheet_lists_the_preflight_and_blocks_what_fails(tmp_path, page, monkeypatch):
+    study, run_dir = _study(tmp_path)
+    _git_study(study, monkeypatch)
+    (run_dir / "debug" / "run_status.json").write_text('{"status": "GATED"}')
+    (study / "config.yaml").write_text("model: m1\nbudget: '00:20:00'\n", encoding="utf-8")
+    with _LiveServer(create_app(study, token="t")) as srv:
+        page.goto(f"{srv.url}/session?token=t&next=/ui?run={RUN}")
+        page.wait_for_selector("#openstart")
+        page.click("#openstart")
+        page.wait_for_selector("#sheet:not([hidden]) .checks li")
+        text = page.locator("#sheet").inner_text()
+        assert "m1" in text and "Read from the committed config" in text
+        assert page.locator("#sheet .checks li").count() >= 1
+        assert "config.yaml has edits that are not committed" in text
+        page.locator("#sheet [data-su-goto]").first.click()
+        page.wait_for_selector("#sutext")
+        assert "view=setup" in page.url and page.locator("#sheet").is_hidden()
+
+
+def test_stop_asks_first_and_kill_is_behind_a_second_confirm(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    (run_dir / "debug" / "run_status.json").unlink(missing_ok=True)
+    posts = []
+    page.on("request", lambda r: posts.append(r.url) if r.method == "POST" else None)
+    with _LiveServer(create_app(study, token="t")) as srv:
+        page.goto(f"{srv.url}/session?token=t&next=/ui?run={RUN}")
+        page.wait_for_selector("[data-stop]")
+        page.click("[data-stop]")
+        page.wait_for_selector("#pop:not([hidden]) #stopgrace")
+        assert posts == []
+        page.click("[data-pop-kill]")
+        assert page.locator("#killnow").is_visible() and page.locator("#stopgrace").count() == 0
+        page.click("[data-pop-back]")
+        page.click("#stopgrace")
+        page.wait_for_selector("#pop .st.ok")
+        assert any(u.endswith(f"/api/runs/{RUN}/stop") for u in posts)
+        assert (run_dir / "debug" / "stop_request.json").exists()
+        page.wait_for_selector("text=Stop requested")
 
 
 def _ledger(run_dir, hyps):

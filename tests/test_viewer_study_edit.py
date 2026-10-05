@@ -139,3 +139,12 @@ def test_per_commit_patch_of_one_file(study):
     r = c.get(f"/api/study/commit?sha={sha}&file=problem_statement").json()
     assert "+more" in r["patch"]
     assert c.get("/api/study/commit?sha=--output=x&file=config").status_code == 502
+
+
+def test_preflight_reports_the_committed_model_and_budget_and_uncommitted_edits(study):
+    (study / "config.yaml").write_text("model: m1\nbudget: '00:10:00'\n")
+    _g(study.parent.parent, "commit", "-qam", "model")
+    (study / "PROBLEM_STATEMENT.md").write_text("edited, not committed\n")
+    c = TestClient(create_app(study))
+    conf = c.get("/api/study/preflight").json()["configured"]
+    assert conf == {"model": "m1", "budget_s": 600.0, "uncommitted": ["PROBLEM_STATEMENT.md"]}

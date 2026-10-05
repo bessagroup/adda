@@ -221,6 +221,60 @@ def logs_shots(base: str, out: Path, problems: list[str], live_log: Path | None 
     stop.set()
 
 
+def setup_fixture(study: Path) -> Path:
+    """A live copy of `study` under its own throwaway git repo, so Setup can commit."""
+    import os
+    import subprocess
+
+    root, _ = live_fixture(study)
+    env = {**os.environ, "GIT_AUTHOR_NAME": "Shots", "GIT_AUTHOR_EMAIL": "s@x",
+           "GIT_COMMITTER_NAME": "Shots", "GIT_COMMITTER_EMAIL": "s@x",
+           "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    (root / ".gitignore").write_text("runs/\nviewer_actions.jsonl\n", encoding="utf-8")
+    for argv in (["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-q", "-m", "first draft"]):
+        subprocess.run(["git", "-C", str(root), *argv], check=True, capture_output=True, env=env)
+    os.environ.update({k: v for k, v in env.items() if k.startswith("GIT_")})
+    return root
+
+
+def setup_shots(base: str, out: Path, problems: list[str]) -> None:
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        for wname, (w, h) in WIDTHS.items():
+            for theme in THEMES:
+                ctx = browser.new_context(viewport={"width": w, "height": h}, color_scheme=theme)
+                pg = ctx.new_page()
+                pg.on("pageerror", lambda e: problems.append(f"JS error: {e}"))
+                tag = f"{wname}-{theme}"
+                pg.goto(f"{base}/session?token=shots&next=/ui?view=setup")
+                pg.wait_for_selector("#sutext")
+                pg.wait_for_timeout(300)
+                pg.screenshot(path=str(out / f"setup-clean-{tag}.png"))
+                pg.fill("#sutext", pg.input_value("#sutext") + "\nSuccess: reach the stated target.\n")
+                pg.wait_for_selector(".sdiff tr.add")
+                pg.fill("#sumsg", "state the success criterion")
+                pg.screenshot(path=str(out / f"setup-diff-{tag}.png"))
+                pg.click("[data-sufile=config]")
+                pg.wait_for_function("(document.querySelector('#sutext')||{value:''}).value.includes('model')")
+                pg.fill("#sutext", "model: m\nruntime:\n  max_awake_nodez: 2\n")
+                pg.wait_for_selector("#suval .st.bad")
+                pg.screenshot(path=str(out / f"setup-invalid-{tag}.png"))
+                pg.goto(f"{base}/ui?view=timeline")
+                pg.wait_for_selector("#openstart, [data-stop]")
+                if pg.locator("[data-stop]").count():
+                    pg.click("[data-stop]")
+                    pg.wait_for_selector("#pop:not([hidden]) #stopgrace")
+                    pg.screenshot(path=str(out / f"stop-pop-{tag}.png"))
+                    pg.click("[data-pop-kill]")
+                    pg.screenshot(path=str(out / f"stop-kill-{tag}.png"))
+                else:
+                    problems.append(f"{tag}: no Stop control on the live fixture")
+                ctx.close()
+        browser.close()
+
+
 def banner_shots(base: str, out: Path, problems: list[str]) -> None:
     from playwright.sync_api import sync_playwright
 
@@ -260,6 +314,7 @@ def main() -> int:
     ap.add_argument("--deliverable", action="store_true", help="shoot the Deliverable view")
     ap.add_argument("--logs", action="store_true", help="shoot the Logs view")
     ap.add_argument("--live", action="store_true", help="with --logs: append lines to run.log while shooting")
+    ap.add_argument("--setup", action="store_true", help="shoot Setup, the Stop popover")
     ap.add_argument("--banner", action="store_true",
                     help="shoot the question banner on a fixture with a pending question")
     a = ap.parse_args()
@@ -270,7 +325,7 @@ def main() -> int:
     if a.logs and a.live:
         _root, live_log = live_fixture(Path(a.study))
         a.study = str(_root)
-    study = (question_fixture(Path(a.study)) if a.banner
+    study = (setup_fixture(Path(a.study)) if a.setup else question_fixture(Path(a.study)) if a.banner
              else data_fixture(Path(a.study), json.loads(Path(a.objective).read_text()))
              if a.objective else Path(a.study))
     cfg = uvicorn.Config(create_app(study, token="shots"), host="127.0.0.1",
@@ -288,8 +343,10 @@ def main() -> int:
     from playwright.sync_api import sync_playwright
 
     problems: list[str] = []
-    if a.banner or a.data or a.hypotheses or a.deliverable or a.logs:
-        if a.logs:
+    if a.setup or a.banner or a.data or a.hypotheses or a.deliverable or a.logs:
+        if a.setup:
+            setup_shots(base, out, problems)
+        elif a.logs:
             logs_shots(base, out, problems, live_log)
         else:
             (banner_shots if a.banner else hypothesis_shots if a.hypotheses

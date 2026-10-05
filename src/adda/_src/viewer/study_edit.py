@@ -32,8 +32,8 @@ import yaml
 
 from . import safe_git
 
-__all__ = ["FILES", "StudyEditError", "commit", "diff_rows", "read", "repo_of",
-           "validate_config"]
+__all__ = ["FILES", "StudyEditError", "commit", "committed_summary", "diff_rows",
+           "read", "repo_of", "validate_config"]
 
 FILES = {"problem_statement": "PROBLEM_STATEMENT.md", "config": "config.yaml"}
 _IGNORED_TOP = ("runs/",)
@@ -91,6 +91,30 @@ def read(study_dir: Path | str, name: str) -> dict[str, Any]:
     return {"name": name, "file": fname, "committed": committed,
             "working": working, "base": _blob_id(root, rel),
             "dirty": working != committed}
+
+
+def committed_summary(study_dir: Path | str) -> dict[str, Any]:
+    """What a run would be configured with, read from the COMMITTED config:
+    ``{model, budget_s, uncommitted[]}`` (``uncommitted`` names the edited
+    files not yet in HEAD). Fields are None when they cannot be read; an
+    unreadable repository gives None for all of them."""
+    from ..runtime.run_setup import _parse_budget_str
+    out: dict[str, Any] = {"model": None, "budget_s": None, "uncommitted": []}
+    try:
+        for name in FILES:
+            if read(study_dir, name)["dirty"]:
+                out["uncommitted"].append(FILES[name])
+        text = read(study_dir, "config")["committed"]
+        cfg = yaml.safe_load(text) if text else None
+        if isinstance(cfg, dict):
+            out["model"] = cfg.get("model")
+            try:
+                out["budget_s"] = _parse_budget_str(cfg.get("budget"))
+            except (TypeError, ValueError):
+                pass
+    except (StudyEditError, yaml.YAMLError):
+        pass
+    return out
 
 
 def diff_rows(old: str | None, new: str) -> list[dict[str, Any]]:

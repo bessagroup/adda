@@ -8,9 +8,7 @@ const VIEWS = [
   ["timeline", "Timeline"], ["hypotheses", "Hypotheses"], ["data", "Data"],
   ["deliverable", "Deliverable"], ["logs", "Logs"], ["setup", "Setup"],
 ];
-const UNBUILT = {
-  setup: ["Setup", "This view isn't available in this version of the viewer yet."],
-};
+const UNBUILT = {};
 const HOUR_PX = 96, MIN_CARD = 26, POLL_MS = 5000;
 const $ = (id) => document.getElementById(id);
 
@@ -302,8 +300,10 @@ function clockTone(el, budget) { return el > 2 * budget ? "bad" : el > 1.5 * bud
 function actionsHtml(closed) {
   const t = "This action isn't available in this version of the viewer yet.";
   return closed
-    ? `<button class="btn primary" disabled title="${t}">Re-run study</button>`
-    : `<button class="btn primary" disabled title="${t}">Note to run</button><button class="btn" disabled title="${t}">Stop</button>`;
+    ? `<button class="btn primary" id="openstart" title="Run the pre-flight checks and start a new run of this study">Re-run study</button>`
+    : `<button class="btn primary" disabled title="${t}">Note to run</button>` +
+      (S.pop.stopped[S.run] ? `<button class="btn" disabled title="A stop was requested; the run closes after its retrospectives">Stop requested</button>`
+        : `<button class="btn" data-stop aria-haspopup="dialog" aria-expanded="${S.pop.open}">Stop</button>`);
 }
 function agoText(t) {
   const m = Math.max(0, Math.floor((Date.now() / 1000 - t) / 60));
@@ -387,6 +387,7 @@ function paintWork() {
   if (S.view === "hypotheses") { w.innerHTML = hypothesesHtml(); markClamps(w); return; }
   if (S.view === "deliverable") { paintDeliverable(w, top); return; }
   if (S.view === "logs") { paintLogs(w, !!$("logbody")); loadLogs(); return; }
+  if (S.view === "setup") { if ($("sutext")) paintSetupParts(); else paintSetup(); loadSetup(); return; }
   if (S.view !== "timeline") {
     const [t, d] = UNBUILT[S.view];
     w.innerHTML = `<div class="empty"><h3>${t}</h3><p>${d}</p></div>`; return;
@@ -1254,6 +1255,205 @@ document.addEventListener("pointerover", (e) => {
 let resizeT = null;
 window.addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (S.view === "data" && S.loaded) paintWork(); }, 150); });
 
+/* ── Setup, Start-run sheet and Stop popover (spec 15 §4.3, §4.5; build step 7) ── */
+const FILE_LABEL = { problem_statement: "Problem statement", config: "Config" };
+const FILE_NAME = { problem_statement: "PROBLEM_STATEMENT.md", config: "config.yaml" };
+const READ_ONLY = "This page is read-only: open the /session?token=… URL printed when the viewer started to be allowed to write.";
+async function send(path, body) {
+  try {
+    const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+    let j = null; try { j = await r.json(); } catch (e) { j = null; }
+    if (r.status === 403 || r.status === 415) return { ok: false, status: r.status, json: j, error: READ_ONLY };
+    return { ok: r.ok, status: r.status, json: j, error: j && j.error };
+  } catch (e) { return { ok: false, status: 0, json: null, error: "Could not reach the viewer." }; }
+}
+S.su = { file: "problem_statement", f: {}, hist: null, histErr: null, open: null, patches: {}, note: null };
+function suf() { return S.su.f[S.su.file] || (S.su.f[S.su.file] = { data: null, buf: null, rows: null, val: null, msg: "", err: null, busy: false, loadErr: null }); }
+async function loadSetup() {
+  const file = S.su.file, f = suf();
+  let fetched = false;
+  if (!f.data && !f.loadErr) {
+    fetched = true;
+    try {
+      const d = await get("/api/study/file/" + file);
+      f.data = d; f.loadErr = null;
+      if (f.buf == null) f.buf = d.working != null ? d.working : (d.committed || "");
+      if (d.validation && !f.val) f.val = d.validation;
+    } catch (e) { f.loadErr = String(e.message || e); }
+  }
+  if (!S.su.hist && !S.su.histErr) {
+    fetched = true;
+    try { S.su.hist = (await get("/api/study/history")).commits || []; } catch (e) { S.su.histErr = String(e.message || e); }
+  }
+  if (S.view === "setup" && S.su.file === file && fetched) { paintSetup(true); refreshDiff(true); }
+}
+let diffT = null;
+function refreshDiff(now) {
+  clearTimeout(diffT);
+  const file = S.su.file, f = suf();
+  if (!f.data) return;
+  const run = async () => {
+    const r = await send("/api/study/file/" + file + "/diff", { text: f.buf });
+    if (r.ok) { f.rows = r.json.rows; f.changed = r.json.changed; f.val = r.json.validation || null; }
+    if (S.view === "setup" && S.su.file === file) paintSetupParts();
+  };
+  if (now) run(); else diffT = setTimeout(run, 250);
+}
+function diffHtml(f) {
+  if (!f.rows) return '<p class="none">Comparing…</p>';
+  if (!f.changed) return '<p class="none">No changes: the buffer equals the committed file.</p>';
+  return '<table class="sdiff"><tbody>' + f.rows.map((r) => r.op === "skip"
+    ? `<tr class="skip"><td colspan="4">${r.n} unchanged lines</td></tr>`
+    : `<tr class="${r.op}"><td class="n">${r.na == null ? "" : r.na}</td><td class="a">${r.a == null ? "" : esc(r.a)}</td><td class="n">${r.nb == null ? "" : r.nb}</td><td class="b">${r.b == null ? "" : esc(r.b)}</td></tr>`).join("") + "</tbody></table>";
+}
+function valHtml(f) {
+  if (S.su.file !== "config" || !f.val) return "";
+  const e = f.val.errors || [], w = f.val.warnings || [];
+  return e.map((x) => `<p class="st bad">${esc(x)}</p>`).join("") + w.map((x) => `<p class="st warn">${esc(x)}</p>`).join("") +
+    (!e.length && !w.length ? '<p class="st ok">The config is valid.</p>' : "");
+}
+function canCommit(f) { return !!(f.data && f.changed && f.msg.trim() && !f.busy && (S.su.file !== "config" || !f.val || f.val.ok)); }
+function paintSetupParts() {
+  const f = suf(), d = $("sudiff"); if (!d) return;
+  d.innerHTML = diffHtml(f);
+  $("suval").innerHTML = valHtml(f);
+  $("suerr").innerHTML = f.err ? `<p class="st bad">${esc(f.err)}</p>` : S.su.note ? `<p class="st ok">${esc(S.su.note)}</p>` : "";
+  $("sucommit").disabled = !canCommit(f);
+  $("sudiscard").disabled = !f.changed;
+  $("sustate").innerHTML = f.data ? (f.changed ? '<span class="st warn">edited, not committed</span>' : '<span class="st ok">matches the committed file</span>') : "";
+}
+function histHtml() {
+  if (S.su.histErr) return `<p class="none">Could not read the study history (${esc(S.su.histErr)}).</p>`;
+  if (!S.su.hist) return '<p class="none">Loading…</p>';
+  const name = FILE_NAME[S.su.file];
+  const rows = S.su.hist.filter((c) => c.files.some((x) => x.path === name || x.path.endsWith("/" + name)));
+  if (!rows.length) return `<p class="none">No commit has touched ${esc(name)} yet.</p>`;
+  return rows.map((c) => {
+    const open = S.su.open === c.sha, p = S.su.patches[c.sha + ":" + S.su.file];
+    const patch = open ? (p == null ? '<p class="none">Loading…</p>' : '<pre class="patch">' + p.split("\n").map((l) => `<span class="${l[0] === "+" && l[1] !== "+" ? "add" : l[0] === "-" && l[1] !== "-" ? "del" : l.startsWith("@@") ? "hunk" : ""}">${esc(l)}</span>`).join("\n") + "</pre>") : "";
+    return `<div class="hc"><button type="button" class="hrowb" data-su-commit="${esc(c.sha)}" aria-expanded="${open}"><span class="mono">${esc(c.sha.slice(0, 7))}</span><span class="hs">${esc(c.subject)}</span><span class="dcap">${esc(c.author)} · ${esc(String(c.date).slice(0, 16).replace("T", " "))}</span></button>${patch}</div>`;
+  }).join("");
+}
+function paintSetup(keepFocus) {
+  const w = $("work"), f = suf();
+  if (S.view !== "setup") return;
+  if (f.loadErr) { w.innerHTML = `<div class="empty"><h3>Setup</h3><p>Could not read the study files (${esc(f.loadErr)}). The study may not be under a git repository.</p></div>`; return; }
+  if (!f.data) { w.innerHTML = '<div class="skel"><div></div><div></div><div></div></div>'; return; }
+  const keep = keepFocus && $("sutext") ? { s: $("sutext").selectionStart, e: $("sutext").selectionEnd, t: $("sutext").scrollTop, m: document.activeElement && document.activeElement.id } : null;
+  w.innerHTML = `<div class="data setup"><div class="dh"><h3>Setup</h3><span class="seg" role="group" aria-label="File">` +
+    Object.keys(FILE_LABEL).map((k) => `<button type="button" data-sufile="${k}" aria-pressed="${S.su.file === k}">${FILE_LABEL[k]}</button>`).join("") +
+    `</span><span class="sp"></span><span id="sustate"></span></div>` +
+    `<p class="dcap">A run only sees what is committed. The buffer is yours until you commit it; the commit takes this one file and nothing else.${f.data.working != null && f.data.committed == null ? " This file is not committed yet." : ""}</p>` +
+    `<div id="suerr"></div><div class="sugrid"><div><label class="lbl" for="sutext">${esc(FILE_NAME[S.su.file])} · buffer</label>` +
+    `<textarea id="sutext" spellcheck="false" aria-label="${esc(FILE_NAME[S.su.file])} buffer"></textarea></div>` +
+    `<div><div class="lbl">Changes against the committed file</div><div id="sudiff"></div></div></div><div id="suval"></div>` +
+    `<div class="sucommit"><input id="sumsg" type="text" placeholder="Commit message (required)" aria-label="Commit message" autocomplete="off">` +
+    `<button type="button" class="btn primary" id="sucommit" disabled>Commit ${esc(FILE_NAME[S.su.file])}</button>` +
+    `<button type="button" class="btn" id="sudiscard" disabled>Discard changes</button></div>` +
+    `<div class="dh"><h3>History</h3><span class="dcap">Commits that touched ${esc(FILE_NAME[S.su.file])}; open one for its diff.</span></div><div id="suhist" class="hist2">${histHtml()}</div></div>`;
+  $("sutext").value = f.buf; $("sumsg").value = f.msg;
+  if (keep) { $("sutext").scrollTop = keep.t; if (keep.m === "sutext") { $("sutext").focus(); $("sutext").setSelectionRange(keep.s, keep.e); } }
+  f.changed = f.buf !== (f.data.committed == null ? "" : f.data.committed) || (f.data.committed == null);
+  paintSetupParts();
+}
+async function commitSetup() {
+  const f = suf(), file = S.su.file;
+  f.busy = true; f.err = null; S.su.note = null; paintSetupParts();
+  const r = await send("/api/study/file/" + file + "/commit", { text: f.buf, message: f.msg, base: f.data.base });
+  f.busy = false;
+  if (r.ok) {
+    S.su.note = "Committed " + r.json.sha.slice(0, 7) + " · " + r.json.subject;
+    f.data = null; f.buf = null; f.msg = ""; f.rows = null; f.val = null; S.su.hist = null; S.su.patches = {};
+    await loadSetup(); return;
+  }
+  f.err = r.error || ("The commit was refused (" + r.status + ").");
+  paintSetupParts();
+}
+async function openCommit(sha) {
+  S.su.open = S.su.open === sha ? null : sha;
+  $("suhist").innerHTML = histHtml();
+  const key = sha + ":" + S.su.file;
+  if (S.su.open === sha && S.su.patches[key] == null) {
+    try { S.su.patches[key] = (await get("/api/study/commit?sha=" + sha + "&file=" + S.su.file)).patch || "(no change to this file)"; }
+    catch (e) { S.su.patches[key] = "Could not read this commit's diff (" + e.message + ")."; }
+    if (S.view === "setup" && $("suhist")) $("suhist").innerHTML = histHtml();
+  }
+}
+
+/* Start-run sheet */
+S.sheet = { open: false, pre: null, err: null, busy: false, done: null };
+async function openSheet() {
+  S.sheet = { open: true, pre: null, err: null, busy: false, done: null };
+  paintSheet();
+  try { S.sheet.pre = await get("/api/study/preflight"); } catch (e) { S.sheet.err = "Could not run the pre-flight (" + e.message + ")."; }
+  paintSheet();
+}
+function closeSheet() { S.sheet.open = false; paintSheet(); }
+const CHECK_LINK = { problem_statement: "problem_statement", config: "config", budget: "config" };
+function paintSheet() {
+  const el = $("sheet"), s = S.sheet;
+  el.hidden = !s.open; if (!s.open) { el.innerHTML = ""; return; }
+  const p = s.pre, cf = p && p.configured;
+  const checks = p ? p.checks.map((c) => {
+    const m = c.ok === true ? ["ok", "pass"] : c.ok === false ? ["bad", "blocked"] : ["open", "your call"];
+    const link = c.ok === false && CHECK_LINK[c.name] ? ` <a href="${esc(url({ view: "setup" }))}" data-su-goto="${CHECK_LINK[c.name]}">Fix in Setup</a>` : "";
+    return `<li><span class="st ${m[0]}">${m[1]}</span><div><b>${esc(c.name.replace(/_/g, " "))}</b><div class="dcap">${esc(c.detail)}${link}</div></div></li>`;
+  }).join("") : "";
+  const lc = p && p.launcher;
+  el.innerHTML = `<div class="dhd"><b>Start run</b><span class="sp"></span><button type="button" class="btn ghost" data-sheet-close aria-label="Close">Close</button></div><div class="sbody">` +
+    (!p && !s.err ? '<p class="none">Running the pre-flight…</p>' : "") + (s.err ? `<p class="st bad">${esc(s.err)}</p>` : "") +
+    (p ? `<div class="kv"><span>Model</span><b>${cf && cf.model ? esc(cf.model) : dash("The committed config.yaml names no model")}</b>` +
+      `<span>Budget</span><b>${cf && cf.budget_s ? fmtH(cf.budget_s) : dash("The committed config.yaml has no parseable budget")}</b></div>` +
+      '<p class="dcap">Read from the committed config.</p>' +
+      (cf && cf.uncommitted.length ? `<p class="st warn">${esc(cf.uncommitted.join(" and "))} ${cf.uncommitted.length > 1 ? "have" : "has"} edits that are not committed. <a href="${esc(url({ view: "setup" }))}" data-su-goto="${cf.uncommitted[0] === "config.yaml" ? "config" : "problem_statement"}">Review in Setup</a></p>` : "") +
+      `<h4>Pre-flight</h4><ul class="checks">${checks}</ul>` +
+      (lc && lc.command ? `<p class="dcap">This study starts through its launcher: <span class="mono">${esc(lc.command)}</span></p>` : "") +
+      (lc && lc.error ? `<p class="st bad">${esc(lc.error)}</p>` : "") : "") +
+    (s.done ? `<p class="st ok">${esc(s.done)}</p>` : "") +
+    `<div class="sfoot"><button type="button" class="btn primary" id="dostart" ${!p || !p.can_start || s.busy || s.done || (lc && lc.error) ? "disabled" : ""}>${s.busy ? "Starting…" : "Start run"}</button>` +
+    (p && !p.can_start ? '<span class="dcap">Blocked checks must pass first.</span>' : "") + `</div></div>`;
+}
+async function doStart() {
+  const s = S.sheet; s.busy = true; s.err = null; paintSheet();
+  const lc = s.pre && s.pre.launcher && !s.pre.launcher.error;
+  const r = await send(lc ? "/api/study/launch" : "/api/study/start", {});
+  s.busy = false;
+  if (r.ok) { s.done = "Started" + (r.json && r.json.pid ? " (pid " + r.json.pid + ")" : "") + ". The run appears in the list once it writes its first files."; tick(); }
+  else s.err = (r.error || "The run was not started (" + r.status + ").") + (r.json && r.json.checks ? "" : "");
+  paintSheet();
+}
+
+/* Stop popover */
+S.pop = { open: false, confirmKill: false, busy: false, msg: null, bad: false, stopped: {} };
+function openPop(anchor) {
+  S.pop.open = !S.pop.open; S.pop.confirmKill = false; S.pop.msg = null; S.pop.anchor = anchor; paintPop();
+}
+function paintPop() {
+  const el = $("pop"), p = S.pop;
+  el.hidden = !p.open; if (!p.open) return;
+  const a = document.querySelector("[data-stop]");
+  if (a) { const b = a.getBoundingClientRect(); el.style.top = Math.round(b.bottom + 6) + "px"; el.style.left = Math.max(8, Math.round(Math.min(b.left, document.documentElement.clientWidth - 328))) + "px"; }
+  el.innerHTML = `<p class="pt"><b>Stop this run?</b></p>` +
+    (p.confirmKill
+      ? `<p class="dcap">Kill now ends the run’s processes at once. No retrospectives are written, and the run is left unclosed.</p>` +
+        `<div class="pb"><button type="button" class="btn" id="killnow" ${p.busy ? "disabled" : ""}>Kill now</button><button type="button" class="btn ghost" data-pop-back>Cancel</button></div>`
+      : `<p class="dcap">The run finishes its current step, writes its retrospectives and closes.</p>` +
+        `<div class="pb"><button type="button" class="btn primary" id="stopgrace" ${p.busy ? "disabled" : ""}>Stop gracefully</button><button type="button" class="btn ghost" data-pop-kill>Kill now…</button></div>`) +
+    (p.msg ? `<p class="st ${p.bad ? "bad" : "ok"}">${esc(p.msg)}</p>` : "");
+}
+async function doStop(kill) {
+  const p = S.pop, run = S.run; p.busy = true; p.msg = null; paintPop();
+  const r = kill ? await send("/api/study/kill", {}) : await send("/api/runs/" + encodeURIComponent(run) + "/stop", {});
+  p.busy = false;
+  if (r.ok) { p.bad = false; p.msg = kill ? "Killed." : "Stop requested. The run will close after its retrospectives."; if (!kill) p.stopped[run] = true; }
+  else {
+    p.bad = true;
+    p.msg = kill && r.status === 404 ? "This viewer did not start a live run, so it cannot kill one. Use Stop gracefully." : (r.error || "Not accepted (" + r.status + ").");
+    if (!kill && r.status === 409 && /already requested/.test(r.error || "")) { p.stopped[run] = true; }
+  }
+  paintPop(); paintTitle();
+}
+
 /* ── interaction ─────────────────────────────────────────────────────────── */
 function orderIds() {
   return S.dels.slice().sort((x, y) => String(x.started_at).localeCompare(String(y.started_at))).map((d) => d.id);
@@ -1265,6 +1465,25 @@ function setWidth(px) {
   return px;
 }
 document.addEventListener("click", (e) => {
+  const t = e.target;
+  const sf = t.closest("[data-sufile]");
+  if (sf) { S.su.file = sf.dataset.sufile; S.su.open = null; S.su.note = null; paintSetup(); loadSetup(); return; }
+  if (t.closest("#sucommit")) { commitSetup(); return; }
+  if (t.closest("#sudiscard")) { const f = suf(); f.buf = f.data.committed == null ? "" : f.data.committed; f.err = null; S.su.note = null; paintSetup(); refreshDiff(true); return; }
+  const sc = t.closest("[data-su-commit]");
+  if (sc) { openCommit(sc.dataset.suCommit); return; }
+  const sg = t.closest("[data-su-goto]");
+  if (sg) { e.preventDefault(); S.su.file = sg.dataset.suGoto; closeSheet(); nav({ view: "setup", sel: null }); return; }
+  if (t.closest("#openstart")) { openSheet(); return; }
+  if (t.closest("[data-sheet-close]")) { closeSheet(); return; }
+  if (t.closest("#dostart")) { doStart(); return; }
+  const st = t.closest("[data-stop]");
+  if (st) { openPop(st); return; }
+  if (t.closest("#stopgrace")) { doStop(false); return; }
+  if (t.closest("[data-pop-kill]")) { S.pop.confirmKill = true; paintPop(); return; }
+  if (t.closest("[data-pop-back]")) { S.pop.confirmKill = false; paintPop(); return; }
+  if (t.closest("#killnow")) { doStop(true); return; }
+  if (S.pop.open && !t.closest("#pop")) { S.pop.open = false; paintPop(); paintTitle(); }
   const sel = e.target.closest("[data-sel]");
   if (sel) { e.preventDefault(); nav({ sel: sel.dataset.sel }); return; }
   if (e.target.closest("[data-close]")) { nav({ sel: null }); return; }
@@ -1272,6 +1491,10 @@ document.addEventListener("click", (e) => {
   if (tab) { nav({ view: tab.dataset.view }); return; }
   const r = e.target.closest("a[data-run]");
   if (r) { e.preventDefault(); nav({ run: r.dataset.run, sel: null }); return; }
+});
+document.addEventListener("input", (e) => {
+  if (e.target.id === "sutext") { const f = suf(); f.buf = e.target.value; f.err = null; S.su.note = null; f.changed = f.buf !== (f.data.committed == null ? "" : f.data.committed); paintSetupParts(); refreshDiff(); }
+  if (e.target.id === "sumsg") { suf().msg = e.target.value; $("sucommit").disabled = !canCommit(suf()); }
 });
 document.addEventListener("change", (e) => {
   if (e.target.id === "logout") { if (e.target.value) { S.log.src = e.target.value; paintLogs($("work")); loadLogs(); } return; }
@@ -1282,6 +1505,7 @@ document.addEventListener("change", (e) => {
 let gPending = false;
 document.addEventListener("keydown", (e) => {
   if (e.target.closest("input,textarea,select")) return;
+  if (e.key === "Escape" && (S.sheet.open || S.pop.open)) { if (S.pop.open) { S.pop.open = false; paintPop(); paintTitle(); } else closeSheet(); return; }
   if ((e.key === "Enter" || e.key === " ") && e.target.matches("[data-sel][role=button]")) {
     e.preventDefault(); nav({ sel: e.target.dataset.sel }); return;
   }

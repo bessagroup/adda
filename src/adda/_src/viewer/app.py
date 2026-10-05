@@ -741,6 +741,8 @@ def create_app(
             "launcher": launcher,
             "checks": checks,
             "can_start": not any(c["ok"] is False for c in checks),
+            "configured": await asyncio.to_thread(
+                study_edit.committed_summary, study_dir),
             "launched": run_control.launched(study_dir),
         })
 

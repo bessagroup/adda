@@ -1466,6 +1466,13 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   uncommitted changes (`runs/` and the audit log excepted), and, for `config.yaml`, when it does not parse, has an
   unknown `runtime:` knob (with a did-you-mean) or an unparseable `budget`. A failed commit restores the file.
   `GET /api/study/commit?sha=&file=` is one commit's patch of one of the two files. No push.
+  **UI (`/ui`, spec 15 step 7):** the Setup tab edits either file in a buffer with a debounced side-by-side diff, live
+  config validation, a required commit message and the file's history (open a commit for its patch). `Re-run study`
+  opens the Start sheet: model and budget read from the committed config (`/api/study/preflight` -> `configured`), a
+  warning for uncommitted edits, the pre-flight checklist (blocked checks link to Setup), then Start (the launcher
+  when configured, else the local runner). `Stop` on a live run opens a popover: `Stop gracefully` (writes the stop
+  request) primary, `Kill now` behind a second confirm. A read-only session shows a read-only message instead of
+  acting. `viewer_shots.py --setup` shoots Setup and the Stop popover.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);
   `agent_runtime.py`'s `AgenticRun.serve_viewer`; `pyproject.toml`'s `viewer`
