@@ -28,6 +28,7 @@ _SCANNED = [
     ROOT / "internal/tools/viewer_shots.py",
     ROOT / "tests/test_viewer_ui.py",
     ROOT / "tests/test_objective_declaration.py",
+    ROOT / "internal/specs/15-viewer-design.md",
 ]
 _SUFFIXES = {".py", ".js", ".css", ".html", ".md"}
 

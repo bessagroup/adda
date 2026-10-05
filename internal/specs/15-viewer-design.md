@@ -8,7 +8,7 @@ Status: DESIGN SPEC, 2026-10-04. It supersedes spec 14's Phase 4 ("aesthetics au
 ```
 cd internal/specs/15-viewer-design && python3 -m http.server 8765
 ```
-Where this text and the prototype disagree, the text wins. Where the text is silent, match the prototype.
+Where this text and the prototype disagree, the text wins. The prototype hard-codes its sample study's baseline and target lines and its axis unit for illustration only. That is exactly what §6a forbids in the real viewer. Where the text is silent, match the prototype.
 
 ---
 
@@ -38,10 +38,10 @@ Where this text and the prototype disagree, the text wins. Where the text is sil
 - **P4 No dead ends.** Every id you can read (D012, H4, a row number, a file) is a link that selects it.
 - **P5 Honest numbers.**
   - Absent data is "—" with a tooltip saying why, never 0.
-  - Every number that carries a comparison shows its unit and its reference ("× Bessa", "of 12 h budget").
+  - Every number that carries a comparison shows its unit and its reference (a study-declared unit label such as "× baseline", or "of 12 h budget").
   - Cost that's partly unknown says so ("$83 +1 unknown").
   - A "best" says what it's the best of (see §7, open questions).
-- **P6 Jargon stays.** Elvis: "It doesnt have to pay down the jargon". We use the run's own words (delegation, gate, falsification, σ_peak) and never invent friendlier synonyms. We do make every term discoverable: a hover or long-press on a term gives its one-line definition, taken from the docs.
+- **P6 Jargon stays.** Elvis: "It doesnt have to pay down the jargon". We use the run's own words (delegation, gate, falsification, the study's own column names) and never invent friendlier synonyms. We do make every term discoverable: a hover or long-press on a term gives its one-line definition, taken from the docs.
 - **P7 Live, not twitchy.** New events arrive with a 160 ms fade-and-rise of 6 px. Nothing else moves. The only looping animation is the pulse on a live status dot. `prefers-reduced-motion` turns everything off.
 
 ## 3. Visual language
@@ -116,7 +116,7 @@ The fields, left to right:
 1. study · model;
 2. run id (mono, 20 px) plus the status pill;
 3. **wall clock:** "12.6 h / 12 h", with a track carrying ticks at 1×, 1.5× (no new delegations) and 2× (stop);
-4. **the run's figure of merit:** "19.8 × Bessa". Which column, and its reference, come from the study's declared objective, not a hard-coded σ. Clicking it selects that row;
+4. **the run's figure of merit:** the best counted row's value, with the study-declared unit label and its store, e.g. "19.8 × baseline · store B row 217". Which column, and its reference, come from the study's declared objective, not a hard-coded σ. Clicking it selects that row;
 5. **evaluations;**
 6. **cost**, with an unknown count;
 7. **actions:** Note to run · Stop (or Start, when idle) · Re-run study. Primary styling only on the single most likely action for the state: Re-run when closed, Note when live.
@@ -139,12 +139,23 @@ When an agent is waiting on a human, a question banner (§4.4) spans the full wi
   - **Selecting a row:** the inspector shows the falsification criterion, the prediction, and the full status history with validator notes. A retraction is drawn as a back-step in the history, not hidden.
   - **Filter chips:** open · closed · retracted.
 - **Data.**
-  - **Lead:** best feasible-so-far as a step function, over elapsed time, with reference lines labelled in words: "1× pass bar", "10× target".
-  - **Dots:** feasible dots are filled in the producing role's colour, infeasible ones are hollow `--ink-3`. Hovering a dot shows its row; clicking selects it.
+  - **Progress chart (revised 2026-10-06, after Elvis: "98% white space, I would hardly call it useful").**
+    - **Default x is the evaluation number:** counted plus uncounted rows across every scored store, in time order. A toggle switches to elapsed time. Best-so-far against evaluations is the standard convergence view. It also separates evaluations that a single delegation ran in one burst, which elapsed time stacks into one column.
+    - **The domain fits the data:**
+      - y spans the counted values, padded by 8%;
+      - x spans the first to the last evaluation, padded by 2%;
+      - no axis is forced to start at 0.
+    - **Values outside the domain:**
+      - a reference line outside the y-domain is drawn as an edge tag ("label ↑ above range"), not by stretching the axis;
+      - uncounted values outside the domain become edge ticks, with their count in the caption.
+    - **A log-y toggle** appears when the counted values span more than two decades.
+    - **Height:** 260 px at desktop, 200 px at phone width. The plot area takes at least 85% of the panel. No empty bands.
+    - **Best-so-far:** a step line, with its current value labelled at the right end (value, unit label, store/row) and linked.
+    - **Dots:** counted dots are filled; uncounted ones are hollow at 40% opacity. Store identity is a mark shape; role is not encoded here.
   - **Below the chart:**
-    - the stage funnel (spec 14 2.2): stages side by side, each with its own pass count, labelled with column names;
-    - then the store as a virtualised table with sortable columns, the column picker remembered per viewer.
-  - **Namespace switcher:** a segmented control.
+    - **the stage funnel** (spec 14 2.2), stages side by side, each with its own pass count, labelled with column names. The stages are the ones the study DECLARES (`funnel: [col, …]` in config.yaml). With no declaration, every 0/1 output column the store records is shown, in store order. No column name is ever built into the viewer;
+    - **the store** as a virtualised table with sortable columns, the column picker remembered per viewer.
+  - **Store switcher:** it filters the dots, the funnel and the table. It never hides the best-so-far line, which always spans every scored store.
 - **Deliverable.** The notebook rendered at a 75 ch prose measure, with figures and tables allowed to 1000 px. Math via KaTeX. A "Re-execute" button (spec 14, 5.8) streams progress into a log drawer and ends with a pass/fail mark.
 - **Logs.** A live tail in mono, with source filter chips (orchestrator, watchdog, role transcripts) and a pause button. Lines that carry an id link it (P4).
 - **Setup.** The problem statement and config editors (spec 14, 3.1/3.2). Side-by-side diff before commit, a commit message field, and the study's history list (spec 14, 5.10).
@@ -207,11 +218,15 @@ Contextual to the selection:
 - Sentence case for everything except the 11 px field labels.
 - **Buttons name the action exactly:** "Stop gracefully", not "OK".
 - **Times:** elapsed as "+3 h 12"; durations as "1 h 27" / "7 m"; clock times with a timezone, in the inspector only.
-- **Numbers:** a thin space before units in prose; "× Bessa" right after the value; money as "$4.05".
+- **Numbers:** a thin space before units in prose; a declared unit label right after the value; money as "$4.05".
+
+## 6a. Problem-agnostic, a hard rule
+
+The viewer serves ANY study. No study's vocabulary may appear in viewer code, templates, defaults, copy or spec examples: no column names, no units, no baselines, no physics. Everything study-specific comes from the study's config (`objective:`, `funnel:`, unit labels) or from the run's own records. With no declaration, the viewer shows the raw column names and nothing invented. Acceptance: a test greps the shipped viewer for a denylist built from every study in `studies/` and the benchmarks (column names, namespaces, units) and fails on a hit. The screenshot set includes the trivial example study alongside a study that declares an objective, so the undeclared path is seen.
 
 ## 7. Open questions (boss decides; raise them, don't guess)
 
-- **Q1. Figure of merit.** The store's max feasible row can be a mesh or imperfection variant (s55r2: 19.8× from a mesh ×2 row, while the run's own headline is 17.4× nominal). Proposal: the title block shows the store max, labelled "best row", and links to it. The deliverable view shows the run's own headline. Never mix them silently.
+- **Q1. Figure of merit.** The store's max feasible row can be a variant of the nominal design rather than the design itself (one zero-shot run: 19.8× from a variant row, while the run's own headline was 17.4× nominal). Proposal: the title block shows the store max, labelled "best row", and links to it. The deliverable view shows the run's own headline. Never mix them silently.
 - **Q2. Run comparison** (spec 14 2.11): a second run overlaid on the Data chart in `--ink-3`, selectable from a "Compare with…" menu.
 
 ## 8. Acceptance
