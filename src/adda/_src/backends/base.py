@@ -532,7 +532,14 @@ def is_transient_error(exc: BaseException) -> bool:
 
     Conservative: anything not recognised as transient (auth, 400, tool/logic
     errors) returns False so we never silently retry a real bug.
+
+    Only ``Exception`` subclasses can be transient. Anything else
+    (``KeyboardInterrupt``, ``SystemExit``, ``asyncio.CancelledError``, a
+    pytest-timeout ``Failed``) is a control signal addressed to the run, and
+    its message ("Timeout (>120s) ...") must not be mistaken for an API timeout.
     """
+    if not isinstance(exc, Exception):
+        return False
     if isinstance(exc, _TRANSIENT_TYPES):
         return True
     text = f"{type(exc).__name__}: {exc}".lower()

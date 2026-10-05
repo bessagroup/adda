@@ -139,3 +139,27 @@ def test_a_retry_becomes_a_diagnostics_row_and_not_an_error_count(tmp_path):
     assert (row["event"], row["attempt"], row["max_attempts"], row["exception"],
             row["delay_s"], row["node"]) == ("LLM_RETRY", 2, 5, "TimeoutError", 4.5, "worker")
     assert _N._error_counts == {}
+
+
+class _Signal(BaseException):
+    """A control signal addressed to the run (pytest-timeout's Failed, Ctrl-C)."""
+
+
+@pytest.mark.parametrize("exc", [
+    _Signal("Timeout (>120.0s) from pytest-timeout."),
+    KeyboardInterrupt("timed out"),
+])
+def test_control_signals_are_never_transient_even_if_their_text_says_timeout(exc):
+    assert is_transient_error(exc) is False
+
+
+def test_a_control_signal_propagates_from_the_retry_loop_at_once():
+    calls = []
+
+    def fn():
+        calls.append(1)
+        raise _Signal("Timeout (>120.0s) from pytest-timeout.")
+
+    with pytest.raises(_Signal):
+        retry_on_transient(fn, max_attempts=5, base_delay=0.01)
+    assert len(calls) == 1
