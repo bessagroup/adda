@@ -637,10 +637,12 @@ function loadKatex() {
   }
   return katexP;
 }
+let texPending = false;
 function texHtml(tex, display) {
   if (window.katex) {
     try { return window.katex.renderToString(tex, { displayMode: display, throwOnError: false }); } catch (e) { /* fall through to the source */ }
   }
+  texPending = true;
   return `<code class="tex">${esc(tex)}</code>`;
 }
 /* Math is lifted out before the markdown pass (which escapes angle brackets) and put back after. */
@@ -889,7 +891,10 @@ async function loadNotebook() {
     if (run !== S.run) return;
     const sig = text.length + ":" + run + ":" + (S.nbpick || "");
     S.nb = JSON.parse(text); S.nbrun = run;
-    if (sig !== S.nbsig) { S.nbsig = sig; paintWork(); loadKatex().then((ok) => { if (ok && S.view === "deliverable") paintWork(); }); }
+    if (sig !== S.nbsig) {
+      S.nbsig = sig; texPending = false; paintWork();
+      if (texPending) loadKatex().then((ok) => { if (ok && S.view === "deliverable") paintWork(); });
+    }
   } catch (e) {
     S.nb = { cells: [], error: "Could not read the notebook (" + String(e.message || e) + ")." }; S.nbrun = run; paintWork();
   } finally { nbBusy = false; }

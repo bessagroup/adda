@@ -916,6 +916,20 @@ def test_notebook_tables_get_their_own_wider_measure_and_headers_never_break_ins
         assert page.locator(".nbmd table").evaluate("e => e.scrollWidth > e.clientWidth || e.getBoundingClientRect().width <= e.parentElement.clientWidth")
 
 
+def test_a_notebook_without_math_is_painted_once_and_never_loads_katex(tmp_path, page):
+    import nbformat
+
+    study, _ = _study(tmp_path)
+    _notebook(study, [nbformat.v4.new_markdown_cell("Intro.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n")])
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=deliverable")
+        page.wait_for_selector(".nbmd table")
+        page.locator(".nbmd table").evaluate("e => { e.dataset.mark = '1'; }")
+        page.wait_for_timeout(1500)
+        assert page.locator(".nbmd table").evaluate("e => e.dataset.mark") == "1"
+        assert page.evaluate("typeof window.katex") == "undefined"
+
+
 def test_re_execute_without_the_write_token_says_the_page_is_read_only(tmp_path, page):
     study, _ = _study(tmp_path)
     _notebook(study, _nb_cells())
