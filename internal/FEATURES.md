@@ -590,6 +590,13 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   user-facing study folder; guarded by a `FileLock` (not a `threading.Lock`)
   since two runs of the same study are now real, separate processes that can
   overlap and both write to it.
+- **Semantic Scholar key handling:** one client builder
+  (`semantic_scholar.get_semantic_scholar_client`, `retry=False`) serves every
+  tool path; `_throttled_ss` is the sole retry authority. A 403 means the key
+  was rejected (429 is quota): the first 403 with a key drops it for the
+  process, retries that call once keyless, and writes one `LIT_KEY_REJECTED`
+  diagnostics event (`source=semantic_scholar`). Tests:
+  `tests/test_semantic_scholar_client.py`.
 - **Where:** `agents/literature.py` (prompt + agent), `agents/literature_tools/`
   (`discovery.py` — the three discovery tools; one module per provider:
   `corpus.py`, `semantic_scholar.py`, `openalex.py`; `throttle.py`), `literature/` (`literature_corpus.py` —

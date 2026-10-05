@@ -372,5 +372,8 @@ def build_discovery_closures(providers: dict) -> dict:
             failures.append("openalex failed — " + raw.removeprefix("ERROR: "))
         return "ERROR: no provider could answer — " + "; ".join(failures or ["none available"])
 
+    from .semantic_scholar import KEY_EVENTS
+    for _tool in (SearchPapers, CitationGraph, PaperDetails):
+        _tool._adda_diagnostic_source = KEY_EVENTS
     return {"SearchPapers": SearchPapers, "CitationGraph": CitationGraph,
             "PaperDetails": PaperDetails}

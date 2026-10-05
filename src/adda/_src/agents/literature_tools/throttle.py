@@ -111,10 +111,15 @@ def _throttled_ss(fn, *args, **kwargs):
     429 — "too many requests", transient) retries with exponential backoff,
     same discipline as _robust_get/_robust_post; three consecutive trips the
     shared breaker (SourceCooldownError, same message _robust_get raises).
-    403 (raised as PermissionError — the shared UNAUTHENTICATED quota is
-    exhausted) is NOT retried here, mirroring _robust_get's "4xx (non-429):
-    raise immediately, no retry" rule: waiting a few seconds does not help a
-    quota that resets on a much longer window.
+    429 schedule: each attempt is paced >= _SS_MIN_INTERVAL (3s) after the
+    last; backoff sleeps 1s then 2s between attempts; the third consecutive
+    429 trips the shared breaker (60s cooldown) before a third retry.
+    403 (raised as PermissionError) means Semantic Scholar REFUSED the
+    request — a rejected key, not quota exhaustion (that is a 429). With a
+    key in use, the first 403 drops the key for the process (one
+    LIT_KEY_REJECTED event, see semantic_scholar.reject_key) and the call is
+    retried once without it. A 403 with no key in use is raised immediately,
+    mirroring _robust_get's "4xx (non-429): raise immediately" rule.
 
     fn is constructed with retry=False (see the _SS(...) construction site),
     which routes through the library's OWN tenacity wrapper with
@@ -146,12 +151,24 @@ def _throttled_ss(fn, *args, **kwargs):
         except RetryError as exc:
             exc.reraise()
 
+    from .semantic_scholar import key_in_use, reject_key
+
     last_exc: Exception | None = None
-    for attempt in range(_SS_MAX_RETRIES):
+    key_retry_spent = False
+    attempt = -1
+    while attempt + 1 < _SS_MAX_RETRIES:
+        attempt += 1
         _rate_limit_wait(_SS_DOMAIN, _SS_MIN_INTERVAL)  # may raise SourceCooldownError
         try:
             result = _call_in_fresh_thread(
                 _fn_unwrapping_retry_error, *args, **kwargs)
+        except PermissionError:
+            if key_retry_spent or not key_in_use():
+                raise
+            key_retry_spent = True
+            reject_key()
+            attempt -= 1  # the keyless retry is not a 429 retry
+            continue
         except ConnectionRefusedError as exc:
             last_exc = exc
             if _record_429(_SS_DOMAIN):

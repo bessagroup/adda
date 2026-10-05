@@ -682,8 +682,9 @@ class OrchestrationMixin:
                 if _diag_src is not None:
                     _event = _diag_src.pop_diagnostic_event()
                     if _event is not None:
-                        _kind, _msg = _event
-                        node._record_intervention(_kind, node_name, _msg)
+                        _kind, _msg, *_extra = _event
+                        node._record_intervention(
+                            _kind, node_name, _msg, **(_extra[0] if _extra else {}))
                         if isinstance(result, str):
                             result = wrap_notice(_msg) + result
                 # Only for this node's OWN tools. A dispatched worker's

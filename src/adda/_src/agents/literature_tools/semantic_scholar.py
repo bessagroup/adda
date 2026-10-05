@@ -10,6 +10,8 @@ import json as _json
 import logging
 import os
 import re
+import threading
+import weakref
 
 from ...literature.http_client import SourceCooldownError, _robust_post
 from .throttle import _throttled_ss
@@ -58,7 +60,48 @@ def resolve_semantic_scholar_key() -> str | None:
     )
 
 
-def get_semantic_scholar_client():
+_state_lock = threading.Lock()
+_key_rejected = False
+_pending_event: tuple[str, str, dict] | None = None
+_clients: weakref.WeakSet[_S2Client] = weakref.WeakSet()
+
+
+def _build_inner(key: str | None):
+    from semanticscholar import SemanticScholar as _SS
+    return _SS(api_key=key, retry=False)
+
+
+class _S2Client:
+    """The semanticscholar client, resolved at call time so that dropping a
+    rejected key reaches every live holder (and the call being retried)."""
+
+    def __init__(self) -> None:
+        key = None if _key_rejected else resolve_semantic_scholar_key()
+        if not key:
+            log.warning(
+                "no usable Semantic Scholar key — proceeding with "
+                "unauthenticated access (very low rate limit). Set "
+                "semantic_scholar_api_key in config.yaml's runtime: block (or "
+                "SEMANTIC_SCHOLAR_API_KEY / F3DASM_SEMANTIC_SCHOLAR_API_KEY) "
+                "for reliable access."
+            )
+        self.keyed = bool(key)
+        self._inner = _build_inner(key)
+        _clients.add(self)
+
+    def _drop_key(self) -> None:
+        if self.keyed:
+            self._inner = _build_inner(None)
+            self.keyed = False
+
+    def get_paper(self, *a, **kw):
+        return self._inner.get_paper(*a, **kw)
+
+    def search_paper(self, *a, **kw):
+        return self._inner.search_paper(*a, **kw)
+
+
+def get_semantic_scholar_client() -> _S2Client:
     """The ONE Semantic Scholar client every tool path builds.
 
     ``retry=False``: the library's own internal 429 retry (tenacity, up to 10
@@ -69,17 +112,54 @@ def get_semantic_scholar_client():
     ``_call_in_fresh_thread``'s 30s timeout actually bound a call. Calls on
     the returned client must go through ``_throttled_ss``.
     """
-    from semanticscholar import SemanticScholar as _SS
-    key = resolve_semantic_scholar_key()
-    if not key:
-        log.warning(
-            "semantic_scholar_api_key not configured — proceeding with "
-            "unauthenticated Semantic Scholar access (very low rate limit). "
-            "Set it in config.yaml's runtime: block (or "
-            "SEMANTIC_SCHOLAR_API_KEY / F3DASM_SEMANTIC_SCHOLAR_API_KEY) for "
-            "reliable access."
+    return _S2Client()
+
+
+def key_in_use() -> bool:
+    return not _key_rejected and bool(resolve_semantic_scholar_key())
+
+
+def reject_key() -> bool:
+    """The configured key got a 403: Semantic Scholar rejects an invalid key
+    outright instead of falling back to the shared quota (a 429 is quota
+    exhaustion). Drop the key for the rest of the process and queue one
+    LIT_KEY_REJECTED event. False when there was no key to drop."""
+    global _key_rejected, _pending_event
+    with _state_lock:
+        if _key_rejected or not resolve_semantic_scholar_key():
+            return False
+        _key_rejected = True
+        _pending_event = (
+            "LIT_KEY_REJECTED",
+            "Semantic Scholar returned 403 for the configured API key, so the "
+            "key is invalid or revoked. Continuing without it for the rest of "
+            "this run (shared unauthenticated quota, much slower); fix "
+            "semantic_scholar_api_key for reliable access.",
+            {"source": "semantic_scholar"},
         )
-    return _SS(api_key=key, retry=False)
+    for c in list(_clients):
+        c._drop_key()
+    return True
+
+
+class _KeyEvents:
+    """Diagnostic source (see orchestration._wrap_closure): reports the
+    rejected-key fact once per process."""
+
+    def pop_diagnostic_event(self):
+        global _pending_event
+        with _state_lock:
+            ev, _pending_event = _pending_event, None
+        return ev
+
+
+KEY_EVENTS = _KeyEvents()
+
+
+def _reset_key_state() -> None:
+    global _key_rejected, _pending_event
+    _key_rejected, _pending_event = False, None
+    _clients.clear()
 
 
 def build_semantic_scholar_closures() -> dict:
@@ -88,23 +168,20 @@ def build_semantic_scholar_closures() -> dict:
     tools: dict = {}
     # Semantic Scholar tools via the semanticscholar library.
     try:
-        _ss_api_key = resolve_semantic_scholar_key()
+        import semanticscholar  # noqa: F401 — absent => no S2 tools
+
         _sch = get_semantic_scholar_client()
 
         def _ss_forbidden_error() -> str:
-            """Message for a 403 (PermissionError): NOT retried, since
-            the shared unauthenticated quota resets on a much longer
-            window than a request backoff — retrying immediately would
-            just burn the delegation's time on a door that is shut."""
-            hint = (
-                "" if _ss_api_key else
-                ", or set semantic_scholar_api_key in config.yaml's "
-                "runtime: block for reliable access"
-            )
+            """Message for a 403 (PermissionError) that survived the
+            keyless fallback: Semantic Scholar refused the request outright
+            (403 is a refusal, not quota exhaustion — that is a 429), and
+            repeating it will not change that."""
             return (
-                "ERROR: Semantic Scholar access forbidden (403) — the "
-                "shared unauthenticated quota is exhausted; retrying "
-                f"will not help. Use OpenAlex/arXiv instead{hint}."
+                "ERROR: Semantic Scholar refused the request (403 "
+                "Forbidden), with no API key in use. Retrying will not "
+                "help; use OpenAlex/arXiv instead, or set "
+                "semantic_scholar_api_key in config.yaml's runtime: block."
             )
 
         def search_semantic_scholar(

@@ -112,9 +112,9 @@ def test_ss_429_retries_with_backoff_then_succeeds(monkeypatch):
 
 
 def test_ss_403_is_not_retried(monkeypatch):
-    """A 403 (PermissionError) means the shared unauthenticated quota is
-    exhausted — retrying immediately cannot help, so it must propagate
-    without _throttled_ss silently eating time on doomed retries."""
+    """A 403 (PermissionError) with no key in use is a refusal —
+    retrying immediately cannot help, so it must propagate without
+    _throttled_ss silently eating time on doomed retries."""
     import adda._src.agents.literature as lit_agent  # noqa: F401
     import adda._src.agents.literature_tools.semantic_scholar as lit_ss  # noqa: F401
     import adda._src.agents.literature_tools.throttle as lit
@@ -122,6 +122,8 @@ def test_ss_403_is_not_retried(monkeypatch):
 
     monkeypatch.setattr(
         lc_mod, "_rate_limit_wait", lambda domain, min_interval=None: None)
+    monkeypatch.delenv("SEMANTIC_SCHOLAR_API_KEY", raising=False)
+    monkeypatch.setattr("adda._src.runtime.settings.get_str", lambda k, d="": d)
     attempts = {"n": 0}
 
     def forbidden():
