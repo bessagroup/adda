@@ -72,12 +72,12 @@ _KNOWN_TOOL_DOCS: dict[str, str] = {
                       "as (task, deliverable) pairs.",
     # Retired tool names stay described: the viewer reads runs recorded
     # before they were folded into Wait / WriteCell / RunNotebook, or (for
-    # Reply/FollowUp/Confer/ReportProgress) before the spec-12 migration
-    # sweep retired them in favour of SendMessage.
+    # Reply/Confer/ReportProgress) before they were retired in favour of
+    # SendMessage.
     "GetStatus": "Poll a background delegation; also delivers push "
                  "notifications.",
     "Reply": "Answer a worker's FollowUp question and unblock it.",
-    "FollowUp": "Ask the delegating party one clarifying question before "
+    "FollowUp": "Ask the human operator one clarifying question before "
                 "proceeding.",
     "Confer": "Send an async message to another node without blocking.",
     "ReportProgress": "Leave a short non-blocking progress note for your "

@@ -775,15 +775,14 @@ def _real_routing_tools(graph, out_edges: dict, name: str, agent, keep: set) -> 
 
 def test_the_maps_tools_match_the_real_wiring_under_both_knob_values(promptmap, data):
     """The <tools> catalog's routing-wired subset (Delegate/Wait/SendMessage/
-    RecallHistory/Confer/Reply/FollowUp) must equal what a real Node
+    RecallHistory/FollowUp) must equal what a real Node
     actually grants, under BOTH ``peer_interaction`` values -- the guard
     against a third drift (a hand-maintained mirror already missed
     ConsultHandbook once and SendMessage entirely a second time)."""
     from adda._src.runtime import settings
 
     routing_tool_names = {
-        "Delegate", "Wait", "SendMessage", "RecallHistory", "Confer",
-        "Reply", "FollowUp",
+        "Delegate", "Wait", "SendMessage", "RecallHistory", "FollowUp",
     }
     graph = promptmap._map_graph()
     out_edges: dict[str, list[str]] = {}

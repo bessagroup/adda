@@ -95,15 +95,15 @@ def test_topology_injected_tools_shown_only_for_outgoing_nodes():
     """strategizer/datagenerator/implementer/critic all have outgoing edges
     in the default graph (each can Delegate to literature_reviewer, or
     strategizer delegates to all) — literature_reviewer has NO outgoing
-    edges and must not show Delegate/FollowUp itself."""
+    edges and must not show Delegate/SendMessage itself."""
     graph = _default_graph()
     strategizer_tools = _node_tools("strategizer", graph.nodes["strategizer"], graph)
     lit_tools = _node_tools(
         "literature_reviewer", graph.nodes["literature_reviewer"], graph)
     assert "Delegate" in strategizer_tools
-    assert "FollowUp" in strategizer_tools
+    assert "SendMessage" in strategizer_tools
     assert "Delegate" not in lit_tools
-    assert "FollowUp" not in lit_tools
+    assert "SendMessage" not in lit_tools
 
 
 def test_declared_tools_appear_for_every_node_no_truncation():

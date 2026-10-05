@@ -1,4 +1,4 @@
-"""Additional tests for nodes.py — FollowUp/Reply, AskForFeedback, budget
+"""Additional tests for nodes.py — AskForFeedback, budget
 broadcast, Delegate(wait=True), and other uncovered paths.
 
 These tests extend coverage without touching the existing test_nodes.py file.
@@ -68,110 +68,6 @@ def _make_state(study_dir=None, **kwargs):
         budget_seconds=kwargs.pop("budget_seconds", None),
         **kwargs,
     )
-
-
-# ---------------------------------------------------------------------------
-# Reply to unknown delegation
-# ---------------------------------------------------------------------------
-
-
-def test_reply_unknown_delegation_returns_error():
-    """Reply() for an unknown delegation ID returns an ERROR string.
-
-    Reply is the old-contract surface, withheld by default since the spec-12
-    migration sweep (SendMessage(..., approve=True/feedback) replaces it) --
-    forced off here to keep exercising it directly.
-    """
-    from adda._src.nodes import Node
-
-    replies: list[str] = []
-
-    class ReplyCallingAdapter(StubAdapter):
-        def invoke(self, messages):
-            result = self.closure_tools["Reply"]("NONEXISTENT_ID", "some answer")
-            replies.append(result)
-            self.closure_tools["Done"](summary="closing")
-            self.closure_tools["Done"](summary="closing")
-            return "done"
-
-    try:
-        settings.configure({"peer_interaction": False})
-        adapter = ReplyCallingAdapter()
-        spec = _minimal_spec()
-        node = Node(
-            adapter, name="strategizer", outgoing=["implementer"], spec=spec)
-        node(_make_state())
-
-        assert replies and "ERROR" in replies[0]
-        assert "NONEXISTENT_ID" in replies[0]
-    finally:
-        settings.configure(None)
-
-
-# ---------------------------------------------------------------------------
-# FollowUp + Reply round-trip
-# ---------------------------------------------------------------------------
-
-
-def test_followup_reply_roundtrip():
-    """Worker FollowUp blocks until Reply is called; returns the answer.
-
-    Both are the old-contract surface, withheld by default since the
-    spec-12 migration sweep (SendMessage(wait_for_reply=True) replaces
-    this round-trip) -- forced off here to keep exercising it directly.
-    """
-    from adda._src.nodes import Node
-
-    settings.configure({"peer_interaction": False})
-    followup_answers: list[str] = []
-    delegation_id_box: list[str] = []
-    worker_ready = threading.Event()
-
-    class FollowUpWorkerAdapter(StubAdapter):
-        def invoke(self, messages):
-            worker_ready.set()
-            answer = self.closure_tools["FollowUp"]("What is the expected shape?")
-            followup_answers.append(answer)
-            return (
-                "## Report\n### Actions taken\nDone.\n"
-                "### Files touched\n(none)\n### Conclusions\nOK\n### Numbers\nn: 0"
-            )
-
-    class OrchestratorAdapter(StubAdapter):
-        def invoke(self, messages):
-            did = self.closure_tools["Delegate"](
-                target="implementer",
-                intent="Analyse the data.",
-                expected_report="Shapes.",
-            )
-            delegation_id_box.append(did)
-            # Wait for worker to reach FollowUp before calling Reply
-            worker_ready.wait(timeout=3)
-            time.sleep(0.05)  # give worker time to register FollowUp status
-            reply_result = self.closure_tools["Reply"](
-                # Extract D### from the delegation id string returned by Delegate
-                re.search(r"D\d{3}", did).group(0),
-                "Shape is (100, 3).",
-            )
-            time.sleep(0.1)  # let worker resume and finish
-            self.closure_tools["Done"](summary="completed")
-            self.closure_tools["Done"](summary="completed")
-            return "done"
-
-    try:
-        adapter = OrchestratorAdapter()
-        spec = _minimal_spec()
-        worker = FollowUpWorkerAdapter()
-        node = Node(
-            adapter, name="strategizer", outgoing=["implementer"], spec=spec,
-            worker_adapters={"implementer": worker},
-        )
-        node(_make_state())
-
-        assert followup_answers, "Worker FollowUp was never resolved"
-        assert "Shape is (100, 3)." in followup_answers[0]
-    finally:
-        settings.configure(None)
 
 
 # ---------------------------------------------------------------------------

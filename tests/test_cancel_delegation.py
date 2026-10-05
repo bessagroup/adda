@@ -230,21 +230,6 @@ def test_getstatus_flags_zero_progress_as_possible_stuck(tmp_path):
     assert "0 evals stamped" in out
 
 
-def test_getstatus_surfaces_worker_progress_note(tmp_path):
-    """Thin (a): a non-blocking worker note shows up on the delegator's poll."""
-    import time as _t
-    run_dir = tmp_path / "runs" / "T5"
-    (run_dir / "debug" / "strategizer_notes").mkdir(parents=True)
-    (run_dir / "experiment_data").mkdir()
-    n = _node()
-    n._current_notes_dir = run_dir / "debug" / "strategizer_notes"
-    entry = _working_entry()
-    entry["progress_note"] = ("LHS done, 250 evals; fitting GP", _t.monotonic())
-    n._registry["D009"] = entry
-    out = n.adapter.closure_tools["Wait"]("D009", block=False)
-    assert "worker note:" in out and "LHS done" in out
-
-
 def _study_with_store(tmp_path, name):
     run_dir = tmp_path / "runs" / name
     (run_dir / "debug" / "strategizer_notes").mkdir(parents=True)

@@ -121,11 +121,10 @@ agent reads one, only that it will, and that it lands in the run record.
 ## Agents talking to each other
 
 For completeness, since you will see it in transcripts: agents also message
-each other mid-flight with `Confer`, which returns immediately and never
-blocks either side. The strategizer uses it to steer a delegation that is
-*already running* rather than waiting for a wrong result and re-delegating.
-A running delegation gets the message prefixed onto its next tool result; an
-idle node's message waits until that node next checks in.
+each other mid-flight with `SendMessage`. The strategizer uses it to steer a
+delegation that is *already running* rather than waiting for a wrong result
+and re-delegating. A running delegation gets the message prefixed onto its
+next tool result; an idle node's message waits until that node next checks in.
 
 You don't drive this — it's between the agents — but it explains messages
 appearing in a transcript that the agent never asked for.

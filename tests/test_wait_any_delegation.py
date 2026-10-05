@@ -116,18 +116,6 @@ def test_bare_wait_refuses_when_nothing_is_in_flight(tmp_path):
     assert "ERROR" in out and "nothing to wait for" in out, out
 
 
-def test_bare_wait_refuses_instead_of_hanging_on_followup_only(tmp_path):
-    """Every open worker parked on a FollowUp: waiting cannot make progress,
-    so refuse and name the unblock path rather than blocking forever."""
-    _, Wait = _wait(tmp_path, {"D001": {"status": "FollowUp"}})
-    started = time.monotonic()
-    out = Wait()
-    assert time.monotonic() - started < 5, "bare Wait() hung on a FollowUp"
-    assert "ERROR" in out and "FollowUp" in out, out
-    assert "Reply(" in out, out
-    assert "D001" in out, out
-
-
 class _DeadThread:
     """A worker thread that has exited without recording a terminal status."""
 

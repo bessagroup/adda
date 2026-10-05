@@ -88,7 +88,7 @@ def wind_down_notice(stop: dict | None) -> str:
     )
 
 
-_LIVE = ("Working", "FollowUp", "Revising")
+_LIVE = ("Working", "Revising")
 
 
 class StopMixin:

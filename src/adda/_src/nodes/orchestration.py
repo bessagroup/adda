@@ -114,13 +114,6 @@ class OrchestrationMixin:
         # Tracks which budget % thresholds (80, 90, 100, 110 …) have already
         # been broadcast to workers so each is sent exactly once.
         self._budget_notified_pcts: set[int] = set()
-        # Confer messaging: async inter-node messages keyed by TARGET node name.
-        # A node's messages are delivered when it next drains (orchestrator: each
-        # turn via _drain_notifications; worker: collect-on-send when it next
-        # calls Confer). Faithful port of the stashed Confer design (audit).
-        self._confer_seq: int = 0
-        self._confer_inbox: dict[str, list[str]] = {}
-        self._confer_inbox_lock = threading.Lock()
         # Whether THIS node owns the run's epistemic ledgers. Decided once,
         # here, from what graph_builder passed: it hands the real notes_dir
         # to every orchestrating node (any node with outgoing edges), not
@@ -363,7 +356,7 @@ class OrchestrationMixin:
         destructively, so whatever calls this owns delivery."""
         text = ""
         # Operator notes: messages a human queued in the viewer while the run
-        # was working. Delivered here, on the same path as Confer, so a note
+        # was working. Delivered here, on the same path as the budget warnings, so a note
         # reaches the agent at its next tool call rather than interrupting a
         # turn in progress. Marked as coming from the operator because the
         # agent should weigh it differently from another agent's message —
@@ -381,7 +374,7 @@ class OrchestrationMixin:
                     f"agent's opinion: {_row['text']}]"
                 )
                 # A note addressed to a RUNNING delegation goes to that
-                # worker, on the same per-delegation queue Confer and the
+                # worker, on the same per-delegation queue the
                 # budget warnings use — so a human can correct work already
                 # in flight instead of waiting for a wrong result. The queue
                 # is claimed destructively, so this is the only place that
@@ -390,8 +383,7 @@ class OrchestrationMixin:
                 if _to:
                     with self._registry_lock:
                         _entry = self._registry.get(_to)
-                        _live = bool(_entry) and _entry.get("status") in (
-                            "Working", "FollowUp")
+                        _live = bool(_entry) and _entry.get("status") == "Working"
                     if _live:
                         with self._pending_worker_msgs_lock:
                             self._pending_worker_msgs.setdefault(
@@ -420,13 +412,6 @@ class OrchestrationMixin:
                 msgs = list(self._notifications)
                 self._notifications.clear()
                 text = "\n".join(msgs) + "\n\n"
-        # Confer inbox: messages other nodes addressed to THIS node (async
-        # mailbox). Drained here so the orchestrator receives them on its next
-        # turn / next tool call, prepended to any push notifications.
-        with self._confer_inbox_lock:
-            _confer = self._confer_inbox.pop(self._name, [])
-        if _confer:
-            text = "\n\n".join(_confer) + "\n\n" + text
         text = self._drain_operator_notes() + text
         text = self._stop_tick() + text
         if self._science_monitor is not None:
@@ -486,12 +471,6 @@ class OrchestrationMixin:
         # tell the difference (see nodes/notices.py).
         return wrap_notice(text)
 
-    def _next_confer_seq(self) -> int:
-        """Monotonic per-run Confer message sequence number."""
-        with self._confer_inbox_lock:
-            self._confer_seq += 1
-            return self._confer_seq
-
     def _delegation_entry(self, delegation_id: str) -> tuple[Any, dict] | None:
         """``(owning node, registry entry)`` of a delegation, or None.
 
@@ -535,14 +514,11 @@ class OrchestrationMixin:
         nothing (in which case: silence, not a notice for its own
         sake)").
 
-        Five kinds. As a DELEGATOR (``entry.get("parent") == identity``
+        Four kinds. As a DELEGATOR (``entry.get("parent") == identity``
         -- never a sibling's or a nested child's): a report open for
-        review (`OpenForReview`), a worker's `FollowUp` question awaiting
-        an answer, a finished delegation (`Done`/`Errored`) not yet
-        collected via `Wait`, and — the case Elvis named first, "respond
-        [to a] delegation" — an unread `SendMessage` question sitting in
-        a child's own `to_delegator` queue (FollowUp is being retired;
-        this is its replacement). As a WORKER (``identity`` is itself a
+        review (`OpenForReview`), a finished delegation (`Done`/`Errored`)
+        not yet collected via `Wait`, and an unread `SendMessage` question
+        sitting in a child's own `to_delegator` queue. As a WORKER (``identity`` is itself a
         registry entry, i.e. this node is mid-delegation): an unread
         `SendMessage` from ITS OWN delegator sitting in that entry's
         `to_worker` queue. Every queue peek (never a pop -- that stays
@@ -561,8 +537,6 @@ class OrchestrationMixin:
         my_own_entry = _owned[1] if _owned else None
         reviews = sorted(
             did for did, e in mine if e.get("status") == "OpenForReview")
-        followups = sorted(
-            did for did, e in mine if e.get("status") == "FollowUp")
         uncollected = sorted(
             did for did, e in mine
             if e.get("status") in ("Done", "Errored") and not e.get("waited")
@@ -582,7 +556,7 @@ class OrchestrationMixin:
                     worker_message = my_own_entry["to_worker"][0][1]
 
         if not (
-            reviews or followups or uncollected or questions
+            reviews or uncollected or questions
             or worker_message
         ):
             return ""
@@ -591,11 +565,6 @@ class OrchestrationMixin:
             bits.append(
                 f"open for review: {', '.join(reviews)} -- SendMessage(id, "
                 "..., approve=True) to finalize, or ask a question first"
-            )
-        if followups:
-            bits.append(
-                f"awaiting your answer: {', '.join(followups)} -- "
-                "Reply(id, answer)"
             )
         if uncollected:
             bits.append(
@@ -730,10 +699,8 @@ class OrchestrationMixin:
                     # delegator identity (never a sibling's or a nested
                     # child's). Gated behind peer_interaction (on by
                     # default since the migration-sweep commit) -- with the
-                    # feature off (the old-contract ablation arm),
-                    # OpenForReview cannot exist and this stays silent,
-                    # matching the pre-spec-12 Confer/FollowUp/Reply surface
-                    # that arm restores.
+                    # feature off (the no-peer-messaging arm),
+                    # OpenForReview cannot exist and this stays silent.
                     from ..runtime import features as _features
                     if _features.enabled("peer_interaction"):
                         from ..backends.base import get_delegation_id
@@ -919,7 +886,7 @@ class OrchestrationMixin:
     def _reset_for_turn(self) -> list[str]:
         """A1/A2: clear per-turn state; return the notifications to deliver.
 
-        Working/FollowUp entries are preserved so loopbacks don't orphan live
+        Working entries are preserved so loopbacks don't orphan live
         delegations whose background threads are still running.
         """
         self._route.clear()
@@ -929,7 +896,7 @@ class OrchestrationMixin:
         with self._registry_lock:
             self._registry = {
                 d: e for d, e in self._registry.items()
-                if e["status"] in ("Working", "FollowUp", "Done")
+                if e["status"] in ("Working", "Done")
             }
             self._threads = {
                 d: t for d, t in self._threads.items()
@@ -1207,7 +1174,7 @@ class OrchestrationMixin:
         with self._registry_lock:
             return [
                 d for d, e in self._registry.items()
-                if e["status"] in ("Working", "FollowUp")
+                if e["status"] == "Working"
             ]
 
     def _terminate_run(
@@ -1296,7 +1263,7 @@ class OrchestrationMixin:
             live = [
                 (did, dict(entry))
                 for did, entry in self._registry.items()
-                if entry.get("status") in ("Working", "FollowUp")
+                if entry.get("status") == "Working"
             ]
         if not live or self._delegation_log is None:
             return

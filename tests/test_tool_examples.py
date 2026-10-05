@@ -58,8 +58,8 @@ def _held_tools() -> set[str]:
         names |= set(agent.tools)
     # Granted by topology, by the runtime, or by a knowledge provider rather
     # than listed in an agent's `tools`.
-    names |= {"Delegate", "Wait", "Reply", "FollowUp", "RecallHistory",
-              "Confer", "ConsultHandbook", "ReportEvals", "AskForFeedback",
+    names |= {"Delegate", "Wait", "FollowUp", "RecallHistory",
+              "ConsultHandbook", "ReportEvals", "AskForFeedback",
               "ConsultF3dasm", "ConsultLiterature", "CorpusAdd"}
     return names
 

@@ -1,5 +1,5 @@
-"""Delegation-family tools: Delegate/Wait/CancelDelegation/Reply/
-FollowUp/Confer/RecallHistory.
+"""Delegation-family tools: Delegate/Wait/CancelDelegation/SendMessage/
+RecallHistory (and FollowUp, the operator question channel).
 
 Three objects, one per scope that used to be a level of closure nesting:
 
@@ -8,9 +8,6 @@ Three objects, one per scope that used to be a level of closure nesting:
 ``WorkerSession``    one dispatched delegation — the tools the worker itself is
                      handed, plus the thread body that runs it and records the
                      outcome.
-``ConferTools``      Confer, bound to one sender. Identical for the
-                     orchestrator and for every worker, which is why it is its
-                     own object rather than a factory.
 
 ``build_delegation_closures(node)`` at the bottom is the registration table:
 tool name -> bound method. Tools stay PascalCase methods so their docstrings
@@ -129,9 +126,7 @@ def _resolve_send_target(
 ) -> tuple[str, dict] | str:
     """Resolve a delegator's SendMessage ``to`` to (delegation_id, entry).
 
-    Unlike Confer's ``target`` (delegation.py:279-296, which broadcasts to
-    every LIVE delegation matching a bare role name), SendMessage requires
-    an UNAMBIGUOUS single addressee (spec 12, design item 3's addressing
+    SendMessage requires an UNAMBIGUOUS single addressee (spec 12, design item 3's addressing
     rule) — a role name that currently matches more than one live
     delegation is an ERROR naming the candidates, never a guess.
     """
@@ -141,7 +136,7 @@ def _resolve_send_target(
         candidates = sorted(
             did for did, e in node._registry.items()
             if e.get("target") == to
-            and e.get("status") in ("Working", "FollowUp", "OpenForReview")
+            and e.get("status") in ("Working", "OpenForReview")
         )
         if len(candidates) == 1:
             return candidates[0], node._registry[candidates[0]]
@@ -292,117 +287,6 @@ _NOTICE_POLL_TICKS = 10
 _NOTICE_POLL_S = 10.0
 
 
-class ConferTools:
-    """Confer, bound to one sender node.
-
-    Works identically for the orchestrating node, a worker, or a peer —
-    ``sender_name`` is the only difference. Async: never blocks. A message is
-    queued in the TARGET's inbox and delivered when the target next drains
-    (orchestrator: each turn via _drain_notifications; worker: collect-on-send
-    the next time IT calls Confer). Faithful port of the stashed Confer design.
-    """
-
-    def __init__(self, node: Any, sender_name: str) -> None:
-        self.node = node
-        self.sender_name = sender_name
-
-    @tool_examples(
-        "Confer('D004', 'Stop at 40 evals — the budget changed.')",
-        "Confer('strategizer', 're #3: the surrogate R2 is 0.91')",
-    )
-    def Confer(self, target: str, message: str) -> str:
-        """Send an async message to another node in the run.
-
-        Returns immediately — neither side blocks. Use it to correct or
-        steer a delegation that is ALREADY RUNNING, rather than waiting
-        for a wrong result and re-delegating.
-
-        target is a node name, a delegation id (D004 — address a
-        specific delegation when two of one role are running), or the
-        orchestrating node. A running delegation gets the message
-        prefixed onto its next tool result; an idle node's message waits
-        until that node itself Confers. The reply tells you which
-        happened — read it, because "delivered" and "queued" are
-        different outcomes.
-
-        Reply by convention with Confer(sender_name, "re #N: <answer>").
-        """
-        node, sender_name = self.node, self.sender_name
-        with node._registry_lock:
-            # A delegation id is a legitimate address: when two
-            # delegations of one role are running, the role name cannot
-            # say which is meant, and the sender is reduced to
-            # broadcasting "ignore this if you are D003".
-            by_id = node._registry.get(target)
-            live = [
-                did for did, e in node._registry.items()
-                if e.get("target") == target
-                and e.get("status") in ("Working", "FollowUp")
-            ]
-            ever_woken = (
-                target == node._name
-                or by_id is not None
-                or any(e.get("target") == target
-                       for e in node._registry.values())
-            )
-        if by_id is not None:
-            live = (
-                [target]
-                if by_id.get("status") in ("Working", "FollowUp")
-                else []
-            )
-        if not ever_woken:
-            return (
-                f"ERROR: {target!r} is neither a node that has been "
-                "delegated to this run nor a delegation id — cannot "
-                "Confer with something that was never woken."
-            )
-        seq = node._next_confer_seq()
-        envelope = (
-            f"[Confer #{seq} from {sender_name} → {target}]: {message}\n"
-            f"→ reply with Confer(\"{sender_name}\", \"re #{seq}: "
-            "<answer>\")"
-        )
-        # Deliver on the path that actually reaches a BUSY worker: the
-        # per-delegation queue whose contents are prefixed onto that
-        # worker's next tool result (the same mechanism the budget and
-        # backstop warnings ride). The name-keyed _confer_inbox alone is
-        # drained only collect-on-send — i.e. only if the recipient
-        # happens to call Confer itself — so a mid-flight correction to a
-        # worker that never calls Confer was accepted, reported as
-        # queued, and silently never delivered.
-        if live:
-            with node._pending_worker_msgs_lock:
-                for did in live:
-                    node._pending_worker_msgs.setdefault(
-                        did, []).append(envelope)
-        with node._confer_inbox_lock:
-            if by_id is None:
-                node._confer_inbox.setdefault(target, []).append(envelope)
-            # Collect-on-send: drain any messages addressed to this sender
-            # so replies arrive alongside the send confirmation.
-            inbox = node._confer_inbox.pop(sender_name, [])
-        inbox_text = ("\n\n".join(inbox) + "\n\n") if inbox else ""
-        # Say which it was. "Queued" for an idle target and "delivered"
-        # to a running one are different outcomes, and the sender's next
-        # move depends on which happened.
-        if live:
-            where = (
-                f"Delivered to {len(live)} running delegation"
-                f"{'s' if len(live) != 1 else ''} of {target!r} "
-                f"({', '.join(sorted(live))}); it appears on their next "
-                "tool result."
-            )
-        else:
-            where = (
-                f"Queued for {target!r} (confer #{seq}) — no delegation "
-                "of it is running right now, so it is delivered only if "
-                "that node itself Confers later. Nothing is waiting on "
-                "it; do not block."
-            )
-        return inbox_text + where
-
-
 class WorkerSession:
     """One dispatched delegation: the worker's own tools and its thread body.
 
@@ -470,83 +354,13 @@ class WorkerSession:
             msgs = node._pending_worker_msgs.pop(self.delegation_id, [])
         return wrap_notice("\n".join(msgs))
 
-    @tool_examples(
-        "FollowUp('Is the 0.5 kg mass cap a hard constraint or a target?')",
-    )
-    def FollowUp(self, question: str) -> str:
-        """Ask your delegating party one clarifying question before proceeding.
-
-        Routes to whoever sent you this task: the agent that delegated
-        to you.  One FollowUp per delegation.  The answer is injected
-        directly into your context.  If no answer arrives, proceed with
-        best judgment.
-        """
-        node, delegation_id = self.node, self.delegation_id
-        with node._registry_lock:
-            entry = node._registry.get(delegation_id, {})
-            if entry.get("followup_count", 0) >= 1:
-                return (
-                    "FollowUp limit reached (1 per delegation). "
-                    "Proceed with best judgment."
-                )
-            node._registry[delegation_id]["followup_question"] = question
-            node._registry[delegation_id]["followup_count"] = 1
-            node._registry[delegation_id]["status"] = "FollowUp"
-            evt = node._registry[delegation_id]["followup_event"]
-        with node._notifications_lock:
-            node._notifications.append(
-                f"[{delegation_id} FollowUp: {question!r} "
-                f"→ call Reply('{delegation_id}', answer)]"
-            )
-        evt.wait(timeout=300)  # 5-minute patience; proceed if no reply
-        with node._registry_lock:
-            answer = node._registry[delegation_id].get("followup_answer")
-            node._registry[delegation_id]["status"] = "Working"
-        # Drain any queued budget warnings alongside the answer.
-        with node._pending_worker_msgs_lock:
-            msgs = node._pending_worker_msgs.pop(delegation_id, [])
-        budget_prefix = wrap_notice("\n".join(msgs))
-        base = answer or "No answer received. Proceed with best judgment."
-        return budget_prefix + base
-
-    def ReportProgress(self, note: str) -> str:
-        """Leave a short progress note (<=200 chars) your delegator sees
-        when it polls you. NON-BLOCKING — you keep working immediately;
-        no answer comes back. Use it so the delegator can tell you are
-        making progress rather than stuck (which prevents needless
-        cancellation): e.g. 'LHS done, 250 evals; fitting GP next' or
-        'BO round 3/10, best f=-0.81 so far'.
-        """
-        _n = (note or "").strip()[:200]
-        with self.node._registry_lock:
-            e = self.node._registry.get(self.delegation_id)
-            if e is not None:
-                e["progress_note"] = (_n, time.monotonic())
-        return "Progress noted (your delegator will see it on poll)."
-
     def install_worker_tools(self) -> None:
         """Grant this delegation's worker its own per-delegation tools."""
-        node, worker, target = self.node, self.worker, self.target
+        worker = self.worker
         worker.closure_tools["ReportEvals"] = build_report_evals(
             record=lambda n: setattr(self, "claimed_evals", n),
             drain=self._drain_pending_msgs,
         )  # never errors
-        # ReportProgress/FollowUp(peer-facing)/Confer: the pre-spec-12
-        # surface, retired in favour of SendMessage (already on the
-        # worker's copied adapter from its own routing tools, see
-        # build_routing_tools) whenever peer_interaction is on -- its
-        # default now. Off is the old-contract ablation arm: install these
-        # exactly as before so that arm stays byte-identical.
-        from ....runtime import features as _features
-        if not _features.enabled("peer_interaction"):
-            worker.closure_tools["ReportProgress"] = self.ReportProgress
-            worker.closure_tools["FollowUp"] = node._wrap_closure(
-                self.FollowUp, target)
-            # Confer: async messaging to the orchestrator (or any woken
-            # peer). The worker drains its OWN inbox collect-on-send (see
-            # ConferTools).
-            worker.closure_tools["Confer"] = node._wrap_closure(
-                ConferTools(node, target).Confer, target)
         # ConsultHandbook is injected universally at adapter construction
         # (agent_runtime._make_adapter) — every node gets it equally there.
 
@@ -1490,16 +1304,16 @@ class DelegationTools:
             "CHOOSE THE MODE DELIBERATELY — neither is the default-good answer:\n"
             "  wait=False (async): returns a D### ID immediately and the worker\n"
             "    runs in the background. Multiple workers can then be alive at\n"
-            "    once — which is the ONLY way Confer (live worker-to-worker\n"
-            "    messaging) can do anything, and the only way the run's wall-clock\n"
+            "    once — [[if peer_interaction]]which is the ONLY way SendMessage can reach a\n"
+            "    worker mid-flight, and [[/if]]the only way the run's wall-clock\n"
             "    is the longest single chain rather than the sum of every\n"
             "    delegation. Collect them with a bare Wait() per worker — it\n"
             "    returns whichever finishes first, so a fan-out costs no polling.\n"
             "  wait=True (sync): blocks until the worker finishes and returns its\n"
             "    report directly, with zero polling. Simpler when this task must\n"
             "    fully finish before you can even decide the next one.\n"
-            "  Ask yourself: could this run alongside other work, or might a peer\n"
-            "  worker need to Confer with it mid-flight? If yes, async. If it is a\n"
+            "  Ask yourself: could this run alongside other work[[if peer_interaction]], or might\n"
+            "  you need to message it mid-flight[[/if]]? If yes, async. If it is a\n"
             "  hard prerequisite for your very next decision, sync. Decide per\n"
             "  delegation; do not pick one mode reflexively for the whole run.\n\n"
             "CONTEXT PACKAGING: workers start each delegation with no memory of\n"
@@ -2130,11 +1944,7 @@ class DelegationTools:
                 "queue_reason": queue_reason,
                 "target": target,
                 "namespace": (namespace or None),
-                "followup_question": None,
-                "followup_answer": None,
-                "followup_event": threading.Event(),
                 "getstatus_count": 0,
-                "followup_count": 0,
                 # Read-time falsification ritual: flips True once the
                 # checkpoint has been shown for this delegation's report
                 # (fire-once anti-nag). The Done()-gate dangling check is
@@ -2262,7 +2072,7 @@ class DelegationTools:
             if entry is None:
                 return self._status_from_log(delegation_id, prefix)
             status = entry["status"]
-            if status in ("Working", "FollowUp"):
+            if status == "Working":
                 # Increment poll count and record timing.
                 entry["getstatus_count"] = entry.get("getstatus_count", 0) + 1
                 poll = {
@@ -2272,7 +2082,6 @@ class DelegationTools:
                     "prev_stamped": entry.get("last_stamped", 0),
                     "last_progress": entry.get(
                         "last_progress_time", entry["start_time"]),
-                    "note": entry.get("progress_note"),
                 }
                 entry["last_getstatus_time"] = time.monotonic()
 
@@ -2302,7 +2111,7 @@ class DelegationTools:
                 f"[{delegation_id}] resuming its session to revise its "
                 "report -- not ready yet; check back shortly."
             ) + _tail
-        if status not in ("Working", "FollowUp"):
+        if status != "Working":
             return f"Errored:\n{entry['result']}" + _tail
         if "session_started_at" in entry and entry["session_started_at"] is None:
             return (
@@ -2345,12 +2154,6 @@ class DelegationTools:
         progress_desc, cur_stamped = self._progress_description(
             delegation_id, poll, now_mono, elapsed)
 
-        note_desc = ""
-        if poll["note"]:
-            _ntext, _nts = poll["note"]
-            note_desc = (
-                f" · worker note: {_ntext!r} ({int(now_mono - _nts)}s ago)")
-
         hints: list[str] = []
         last_poll = poll["last"]
         # Rate warning: polled too recently.
@@ -2375,7 +2178,7 @@ class DelegationTools:
         )
         return (
             f"Working (running for {elapsed}s, polled {poll_count}× · "
-            + progress_desc + note_desc + ")" + hint_str
+            + progress_desc + ")" + hint_str
         )
 
     def _progress_description(
@@ -2421,7 +2224,7 @@ class DelegationTools:
             progress_desc = f"0 evals stamped after {elapsed}s"
         # Per-delegation memory telemetry (resource-governance L3): surface this
         # delegation's process-tree RSS so the strategizer can SEE a fat campaign
-        # and Confer the implementer. Best-effort; appended only if known.
+        # and tell the implementer. Best-effort; appended only if known.
         if _run_exp is not None:
             try:
                 from ....infra.watchdog_cleanup import (
@@ -2534,7 +2337,7 @@ class DelegationTools:
             with node._registry_lock:
                 active = [
                     did for did, e in node._registry.items()
-                    if e["status"] in ("Working", "FollowUp")
+                    if e["status"] == "Working"
                     and did != delegation_id
                 ]
             for did in active:
@@ -2565,7 +2368,7 @@ class DelegationTools:
                     f"Known: {list(node._registry)}"
                 )
             st = entry.get("status")
-            if st not in ("Working", "FollowUp"):
+            if st != "Working":
                 return (
                     f"Delegation {delegation_id} is {st!r}, not "
                     "running — nothing to cancel."
@@ -2631,8 +2434,9 @@ class DelegationTools:
 
         Refuses when there is nothing to wait for, and refuses rather than
         hanging when waiting cannot make progress — every in-flight delegation
-        parked on a FollowUp (answer it with Reply), or already gone without
-        reporting (read it with block=False)."""
+        [[if peer_interaction]]open for review (finalize it with SendMessage(id,
+        ..., approve=True)), or [[/if]]already gone without reporting (read it
+        with block=False)."""
         if not block:
             if delegation_id is None:
                 return ("ERROR: block=False reads ONE delegation's status — "
@@ -2724,7 +2528,7 @@ class DelegationTools:
                         i for i, e in node._registry.items()
                         if i != did and e.get("parent") == my_identity
                         and e.get("status") in
-                        ("Working", "FollowUp", "OpenForReview", "Revising"))
+                        ("Working", "OpenForReview", "Revising"))
                     if pending:
                         body += (
                             "\n\n[still in flight: " + ", ".join(pending)
@@ -2756,7 +2560,7 @@ class DelegationTools:
                     i for i, e in node._registry.items()
                     if e.get("parent") == my_identity
                     and e.get("status") in
-                    ("Working", "FollowUp", "OpenForReview", "Revising")
+                    ("Working", "OpenForReview", "Revising")
                 )
                 # Classify what is actually still capable of finishing.
                 # A blocking tool call ends no turn, so the run's time
@@ -2766,9 +2570,9 @@ class DelegationTools:
                 # arrive. A thread that has died without recording a
                 # terminal status is exactly that: nothing else in the
                 # runtime marks the registry on its behalf. OPEN-FOR-
-                # REVIEW is the same shape as FollowUp here: nothing
-                # finishes it but the delegator's OWN SendMessage.
-                waitable, blocked, dead, reviewing = [], [], [], []
+                # REVIEW is the same shape: nothing finishes it but the
+                # delegator's OWN SendMessage.
+                waitable, dead, reviewing = [], [], []
                 for i in open_ids:
                     status = node._registry[i].get("status")
                     t = node._threads.get(i)
@@ -2776,8 +2580,6 @@ class DelegationTools:
                         reviewing.append(i)
                     elif t is not None and not t.is_alive():
                         dead.append(i)
-                    elif status == "FollowUp":
-                        blocked.append(i)
                     else:
                         # No registered thread means we cannot prove it is
                         # gone; assume it is still coming.
@@ -2796,12 +2598,6 @@ class DelegationTools:
                         f"({', '.join(reviewing)}) — call SendMessage(id, "
                         "..., approve=True) to finalize it, or ask a "
                         "question first"
-                    )
-                if blocked:
-                    bits.append(
-                        "parked on a FollowUp question "
-                        f"({', '.join(blocked)}) — call Wait(id, block=False) to "
-                        "read it, then Reply(id, answer) to unblock it"
                     )
                 if dead:
                     bits.append(
@@ -2880,7 +2676,7 @@ class DelegationTools:
                 i for i, e in node._registry.items()
                 if e.get("parent") == my_identity
                 and e.get("status") in
-                ("Working", "FollowUp", "OpenForReview", "Revising"))
+                ("Working", "OpenForReview", "Revising"))
         return (
             "[woken early by the message above; still in flight: "
             + (", ".join(pending) or "none")
@@ -2929,31 +2725,7 @@ class DelegationTools:
             node._last_wait_drift = drift or ""
         return out, wake
 
-    @tool_examples(
-        "Reply('D004', answer='Yes — treat the mass cap as hard.')",
-    )
-    def Reply(self, delegation_id: str, answer: str) -> str:
-        """Answer a worker's FollowUp question and unblock it.
-
-        Call this after Wait returns 'FollowUp: <question>'.
-        The answer is injected into the worker's context and it resumes.
-        """
-        node = self.node
-        with node._registry_lock:
-            entry = node._registry.get(delegation_id)
-            if entry is None:
-                return f"ERROR: unknown delegation {delegation_id!r}."
-            if entry.get("status") != "FollowUp":
-                return (
-                    f"ERROR: delegation {delegation_id!r} is not awaiting a "
-                    f"FollowUp (status: {entry.get('status')!r})."
-                )
-            entry["followup_answer"] = answer
-            evt = entry["followup_event"]
-        evt.set()
-        return f"Reply sent to {delegation_id}. Worker resuming."
-
-    # ── SendMessage: spec 12, peer_interaction feature (default OFF) ─────────
+    # ── SendMessage: spec 12, peer_interaction feature ────────────────────────
     # ONE shared, node-level closure -- exactly like Delegate/Wait -- used by
     # EVERY thread regardless of role: the entry node's own turn, a pure
     # worker (only incoming edges) messaging its delegator, and a node that
@@ -3244,12 +3016,9 @@ class DelegationTools:
         "FollowUp('Is the 0.5 kg mass cap a hard constraint or a target?')",
     )
     def FollowUp(self, question: str) -> str:
-        """Ask your delegating party one clarifying question before proceeding.
+        """Ask the human operator one clarifying question before proceeding.
 
-        Routes to whoever sent you this task: the human operator if you are
-        the entry node, or the agent that delegated to you if you are a worker.
-        One FollowUp per delegation.  The answer is injected directly into
-        your context.  If no answer is available, proceed with best judgment.
+        The answer is injected directly into your context.  If no answer is available, proceed with best judgment.
         Use it only for genuine briefing ambiguities (or a result so
         surprising it may signal a bug) — never for rhetorical/confirmatory
         questions or to replace your own reasoning.
@@ -3493,14 +3262,8 @@ def build_delegation_closures(node) -> dict:
     return {
         "Delegate": with_doc(t.Delegate, t.delegate_doc()),
         "Wait": t.Wait,
-        "Reply": t.Reply,
         "FollowUp": t.FollowUp,
         "SendMessage": t.SendMessage,
         "RecallHistory": t.RecallHistory,
         "CancelDelegation": t.CancelDelegation,
-        # One Confer for every node: the orchestrator's used to be a wrapper
-        # whose only job was to drain notifications first, carrying a copy of
-        # this docstring — two definitions of one prompt. The dispatch
-        # wrapper drains for every tool now, so the wrapper had nothing left.
-        "Confer": ConferTools(node, node._name).Confer,
     }

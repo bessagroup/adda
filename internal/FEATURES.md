@@ -130,9 +130,9 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
 - **Tools:** `Delegate`*, `Wait`, `SendMessage`, `ReportEvals`.
   (`Wait(id, block=False)` is the status poll that used to be `GetStatus`.)
   (*Delegate is injected dynamically, not in a static `tools` set.)
-  `Confer`/`Reply`/the peer-facing `FollowUp`/`ReportProgress` are the
-  pre-spec-12 surface `SendMessage` replaced — withheld by default, restored
-  only by the `peer_interaction` ablation arm off (see below).
+  `Confer`/`Reply`/the worker-facing `FollowUp`/`ReportProgress` are the
+  pre-spec-12 surface `SendMessage` replaced; they no longer exist in either
+  `peer_interaction` arm (see below).
 - **Fan-out harvesting:** `Wait()` takes an OPTIONAL delegation id. Bare
   `Wait()` blocks until whichever delegation becomes actionable first — a
   finish, a worker's question, or a report OPEN FOR REVIEW (delivered, hence
@@ -271,7 +271,7 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
 ### `SendMessage` — the peer/human messaging tool (spec 12, migration complete)
 - **What:** one tool for all peer and human messaging —
   `SendMessage(to, message, wait_for_reply=False, approve=False)` —
-  replacing `Confer`/`FollowUp`/`Reply`/`ReportProgress` (`internal/specs/
+  replacing `Confer`/worker-`FollowUp`/`Reply`/`ReportProgress` (`internal/specs/
   12-peer-interaction.md`). A shared, node-level closure (used by every thread
   regardless of role, exactly like `Delegate`/`Wait` — the calling
   thread's own thread-local delegation id resolves "who am I" per call,
@@ -291,11 +291,14 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   its OWN children's messages, never a sibling delegation's.
 - **Ablation:** gated behind `peer_interaction` (`runtime/features.py`),
   default **True** like every other Feature since the migration-sweep
-  commit. On: `Confer`/`Reply`/the peer-facing `FollowUp`/`ReportProgress`
-  are withheld (`nodes/tools/routing/__init__.py`'s `build_routing_tools`,
-  `WorkerSession.install_worker_tools`) and `SendMessage` is granted
-  instead. Off: restores that exact pre-spec-12 surface byte-for-byte, a
-  real ablation arm kept for comparison, not a testing shortcut. `Wait` was
+  commit. On: `SendMessage` is granted and reports open for review. Off
+  (**meaning changed**: it used to restore the pre-spec-12 `Confer`/`Reply`/
+  worker-`FollowUp` surface, which has been deleted): the "no peer
+  messaging" arm — no `SendMessage`, no pending-for-you notice, reports
+  finalize on delivery, and only the entry node keeps a human channel
+  (`FollowUp`, the operator question; with the feature on the same channel is
+  `SendMessage(to="human")`). Prompt text that names the channel is gated on
+  the knob. `Wait` was
   also re-tightened to outgoing-edges-only in this same series (a separate
   commit, `1d7e14c`) — see BACKLOG's spec 12 entry.
 - **Cross-node lookup:** a delegation's registry entry lives in its
@@ -418,7 +421,7 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   `"waited"` reset and unread-message notice), `backends/claude.py`
   (`ainvoke`/`invoke`'s `resume` parameter).
   **Status:** done — migration sweep landed (`peer_interaction` defaults
-  True; `Confer`/`FollowUp`/`Reply`/`ReportProgress` withheld by default,
+  True; the legacy `Confer`/`Reply`/worker-`FollowUp`/`ReportProgress` surface deleted,
   see `internal/specs/12-peer-interaction.md`). The corrective
   retry-on-malformed cycle NOT repeating for a revised report is a
   deliberate, accepted tradeoff (every revision is reviewed by the
@@ -839,7 +842,7 @@ against the SDK's cost on calls it did price.
 ### Per-delegation resource telemetry
 - **What:** `Wait(id, block=False)` shows a delegation's eval count, current RSS, and **peak
   RSS** (the high-water across the watcher's ticks), so the strategizer can see a
-  fat or fattening campaign (and `Confer` the implementer).
+  fat or fattening campaign (and tell the implementer with `SendMessage`).
 - **Where:** `nodes/tools/routing/`, `watchdog_cleanup.py`
   `delegation_rss` / `delegation_peak_rss`.
 - **Status:** done.
@@ -900,7 +903,7 @@ against the SDK's cost on calls it did price.
 
 ### Per-delegation ledger KPIs auto-appended to the report
 - **What:** when a delegation completes, a KPI footer is appended to the result
-  the strategizer auto-receives (Wait/Confer/Done) — per-eval wall-time
+  the strategizer auto-receives (Wait/Done) — per-eval wall-time
   (median, max), this delegation's total eval wall-time, the ledger total, and —
   when a wall budget is set — the time remaining (telemetry, not a hard stop), so
   the median is actionable (≈ remaining / median = sims still affordable).
@@ -1284,7 +1287,7 @@ against the SDK's cost on calls it did price.
 
 ### Notice provenance — telling adda's voice from a tool's output
 - **What:** every piece of text adda injects into an agent's context —
-  nudges, science-monitor drift, budget warnings, operator notes, Confer
+  nudges, science-monitor drift, budget warnings, operator notes, peer
   messages, delegation notifications — is wrapped in an `<adda-note>` marker
   at the point of injection. The viewer lifts marked blocks out of the tool
   result and renders them in their own band (`--surface0`, peach left rule)
@@ -1320,7 +1323,7 @@ against the SDK's cost on calls it did price.
   apart from stalling on a question nobody can see.
   A note may carry the **delegation id** it is aimed at. Addressed at a
   RUNNING delegation it is routed onto that worker's per-delegation queue
-  and prefixed onto its next tool result — the same path `Confer` and the
+  and prefixed onto its next tool result — the same path the
   budget warnings use — so the operator can correct work already in flight
   instead of waiting for a wrong result. Addressed at a finished delegation
   it goes to the entry node with the intended recipient named, never
@@ -1347,7 +1350,7 @@ alternative: whoever wants the run over writes `debug/stop_request.json`
 node notices it at its next checkpoint — the start of a turn, every tool
 result, and each tick of a blocking `Wait` — and:
 
-1. tells every live delegation, on the per-delegation queue Confer and the
+1. tells every live delegation, on the per-delegation queue the
    budget warnings use, to report what it has and finish (a worker mid a
    single long tool call sees it at its next tool boundary);
 2. refuses new `Delegate` calls (a refusal by design, not an `ERROR:`);
@@ -1466,7 +1469,7 @@ Kill (needs the PID registry that Start, 5.3, creates) follow.
 | Tool | Feature |
 |---|---|
 | `Delegate` | Delegation (dynamically injected) |
-| `Wait` · `FollowUp` · `Confer` · `ReportEvals` | Delegation + messaging + telemetry (`Wait(id, block=False)` is the status poll) |
+| `Wait` · `FollowUp` (entry node: operator channel) · `ReportEvals` | Delegation + messaging + telemetry (`Wait(id, block=False)` is the status poll) |
 | `WriteCell` · `ShowNotebook` · `WriteDeliverable` | Notebook authoring (`WriteDeliverable`: the study's declared extra files only). Three markdown-cell names are RESERVED with an auto-added canonical heading (`problem`, `hypotheses`, `verdict` — the last is `<deliverable_format>` step 7, `## Verdict & result`, ahead of the analysis pillar); any other name is a free-form custom narrative cell (content used verbatim, no forced heading), mirroring the custom code-phase philosophy — the deliverable's structure must not block what an agent needs to say. Only a pillar name or `<pillar>__why` collides and is rejected |
 | `RunNotebook` | Per-cell notebook debugger (#13), and with `gate=True` the reproduction gate as a dry run |
 | `RunScratch` | Worker scratch execution against a ledger copy |

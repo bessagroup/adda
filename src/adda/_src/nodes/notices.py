@@ -1,6 +1,6 @@
 """Provenance marking for text adda injects into an agent's tool results.
 
-Nudges, science-monitor drift, budget warnings, operator notes and Confer
+Nudges, science-monitor drift, budget warnings, operator notes and peer
 messages all reach an agent the same way: prepended to the text of whatever
 tool it called next. On disk and in the viewer that made them
 indistinguishable from the tool's own output — a reader could not tell

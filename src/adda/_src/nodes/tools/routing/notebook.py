@@ -412,7 +412,7 @@ class NotebookTools:
             _shutil.rmtree(sandbox, ignore_errors=True)
 
     def _any_delegation_running(self) -> bool:
-        """True while at least one delegation is Working/FollowUp.
+        """True while at least one delegation is Working.
 
         A running delegation may be writing metered evals into the canonical
         store through get_evaluator() at the same moment RunScratch/RunNotebook
@@ -422,7 +422,7 @@ class NotebookTools:
         node = self.node
         with node._registry_lock:
             return any(
-                e.get("status") in ("Working", "FollowUp")
+                e.get("status") == "Working"
                 for e in node._registry.values()
             )
 
@@ -468,7 +468,7 @@ class NotebookTools:
         creates files rather than growing them, and deleting one of those
         is the same data-loss case) is the only thing ever reverted, and
         only when no delegation was
-        Working/FollowUp at EITHER end of the call (``_any_delegation_running``,
+        Working at EITHER end of the call (``_any_delegation_running``,
         checked before AND after — a delegation that starts and finishes
         entirely inside the call's window without being caught by either
         check is a residual gap this accepts, matching the same before/after

@@ -227,7 +227,7 @@ class LifecycleMixin:
                 with self._registry_lock:
                     _abandoned = [
                         d for d, e in self._registry.items()
-                        if e["status"] in ("Working", "FollowUp")
+                        if e["status"] == "Working"
                     ]
                 return self._trip(
                     state,

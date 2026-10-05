@@ -392,10 +392,6 @@ def test_working_delegations_survive_loopback():
             "hypothesis_ids": [],
             "started_at": "2026-01-01T00:00:00+00:00",
             "start_time": time.monotonic(),
-            "followup_event": fake_event,
-            "followup_question": None,
-            "followup_answer": None,
-            "followup_count": 0,
         }
         node._threads["D001"] = threading.Thread(target=lambda: None)
 
@@ -432,9 +428,7 @@ def test_running_delegation_does_not_burn_finish_attempts():
         node._registry["D004"] = {
             "status": "Working", "result": None, "evals": 0,
             "hypothesis_ids": [], "started_at": "2026-01-01T00:00:00+00:00",
-            "start_time": time.monotonic(), "followup_event": fake_event,
-            "followup_question": None, "followup_answer": None,
-            "followup_count": 0,
+            "start_time": time.monotonic(),
         }
         node._threads["D004"] = threading.Thread(target=lambda: None)
 

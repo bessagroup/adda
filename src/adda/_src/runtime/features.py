@@ -212,16 +212,13 @@ FEATURES: tuple[Feature, ...] = (
     ),
     Feature(
         key="peer_interaction",
-        # Migration-sweep commit (internal/specs/12-peer-interaction.md):
-        # default is now True, matching every other feature. On (the
-        # default): SendMessage is the only peer/human messaging surface —
-        # Confer, Reply, the peer-facing FollowUp and ReportProgress are
-        # withheld (nodes/tools/routing/__init__.py and
-        # WorkerSession.install_worker_tools gate them on this same knob;
-        # the entry node's to="human" channel is unaffected — it is
-        # SendMessage's own implementation, not a retired tool). Off is
-        # still a real ablation arm, kept for comparison against the old
-        # contract: it restores exactly the pre-spec-12 surface.
+        # (internal/specs/12-peer-interaction.md.) On (the default):
+        # SendMessage is the peer and human messaging surface, and a report
+        # stays open for review until its delegator approves it. Off is the
+        # "no peer messaging" arm: no SendMessage, reports finalise on
+        # delivery, and only the entry node keeps a human channel
+        # (FollowUp). The legacy Confer/Reply/worker-FollowUp/ReportProgress
+        # surface no longer exists in either arm.
         default=True,
         tools=frozenset({"SendMessage"}),
     ),

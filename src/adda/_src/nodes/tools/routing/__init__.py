@@ -72,24 +72,22 @@ def build_routing_tools(node) -> dict:
     # delegations, including fan-out. This is a deliberate UN-shipping of
     # that widening, not an oversight -- see spec 12's own Risk note on it.
     #
-    # Reply/FollowUp (peer-facing) vs SendMessage: mutually exclusive on the
-    # peer_interaction knob, not stacked. FollowUp routes to whoever
-    # delegated to THIS node (or a human, for the entry node) regardless of
-    # this node's own outgoing edges, and Reply answers a FollowUp this
-    # node received as a delegator -- both retired in favour of SendMessage
-    # when the feature is on (its default now; see runtime/features.py).
-    # Off is the old-contract ablation arm, restoring exactly this surface.
+    # peer_interaction off is the "no peer messaging" arm: no SendMessage,
+    # and reports finalise on delivery. The operator channel survives it: the
+    # entry node reaches the human through FollowUp there, and through
+    # SendMessage(to="human") when the feature is on.
     from ....runtime import features as _features
     closures: dict = {}
-    if not _features.enabled("peer_interaction"):
-        closures["Reply"] = _dele["Reply"]
+    if (not _features.enabled("peer_interaction")
+            and node._spec is not None
+            and getattr(node._spec, "entry", None) == node._name):
         closures["FollowUp"] = _dele["FollowUp"]
     if node._outgoing:
         closures["Delegate"] = _dele["Delegate"]
         closures["Wait"] = _dele["Wait"]
 
     # SendMessage (spec 12): granted unconditionally when the feature is on
-    # (like Reply/FollowUp were, above) -- a node with no edges at all is
+    # -- a node with no edges at all is
     # never dispatched, so the tool being present but practically
     # unreachable there is harmless.
     if _features.enabled("peer_interaction"):
@@ -132,8 +130,6 @@ def build_routing_tools(node) -> dict:
         closures["WriteNote"] = _notes["WriteNote"]
     if "ReadNote" in _agent_tools:
         closures["ReadNote"] = _notes["ReadNote"]
-    if "Confer" in _agent_tools and not _features.enabled("peer_interaction"):
-        closures["Confer"] = _dele["Confer"]
     # CancelDelegation is OPT-IN (plug-and-play), not always-on: its def is
     # intact but it is granted only to an agent that lists it in its `tools`.
     # PRODUCTION agents do not — dropped (drop-but-don't-delete) pending the

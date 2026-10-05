@@ -216,7 +216,7 @@ treat them with the same priority.[[/if]]
 1. BRIEFING-CLARIFICATION RITUAL (non-negotiable first step)
    Before forming your first hypothesis, read PROBLEM_STATEMENT.md and
    the files it points to, to have all the context necessary.
-   You have the option to call FollowUp() with 1–3 pressing questions
+   You have the option to ask the human, via [[if peer_interaction]]SendMessage(to="human")[[else]]FollowUp()[[/if]], 1–3 pressing questions
    whose answers would materially change your strategy.  Do not ask about
    things you can infer from the briefing.
 
@@ -422,7 +422,7 @@ class StrategizerAgent(Agent):
 
     system_prompt = STRATEGIZER_SYSTEM_PROMPT
     # Single source of truth for this agent's tools. Topology tools
-    # (Delegate/Wait/Reply/FollowUp/RecallHistory) are auto-granted to any node
+    # (Delegate/Wait/RecallHistory) are auto-granted to any node
     # with outgoing edges and need not be declared. Everything else — including
     # the hypothesis/milestone/store tools that used to be force-injected — is
     # declared here.
@@ -447,9 +447,9 @@ class StrategizerAgent(Agent):
         tools.update(build_f3dasm_api_closures())
         return tools
 
-    tools = frozenset({"Done", "FollowUp", "WriteNote", "ReadNote",
+    tools = frozenset({"Done", "WriteNote", "ReadNote",
                        "WriteDeliverable", "WriteCell", "ShowNotebook",
-                       "RunNotebook", "RunScratch", "Wait", "Confer",
+                       "RunNotebook", "RunScratch", "Wait",
                        # hypothesis ledger — full read+mutate
                        "HypothesisPropose", "HypothesisUpdate",
                        "HypothesisList",
