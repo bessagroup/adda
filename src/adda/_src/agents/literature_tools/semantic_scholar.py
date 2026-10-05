@@ -42,44 +42,54 @@ def _s2_paper_id(paper_id: str) -> str:
     return pid
 
 
+def resolve_semantic_scholar_key() -> str | None:
+    """The configured Semantic Scholar key, or None.
+
+    config.yaml's runtime: block (or F3DASM_SEMANTIC_SCHOLAR_API_KEY) is the
+    explicit-config channel; the bare SEMANTIC_SCHOLAR_API_KEY is honoured
+    too since it is Semantic Scholar's own documented convention, not ours to
+    rename out from under anyone already using it.
+    """
+    from ...runtime.settings import get_str
+    return (
+        get_str("semantic_scholar_api_key", "")
+        or os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
+        or None
+    )
+
+
+def get_semantic_scholar_client():
+    """The ONE Semantic Scholar client every tool path builds.
+
+    ``retry=False``: the library's own internal 429 retry (tenacity, up to 10
+    attempts, 5-60s exponential backoff each) would silently absorb every 429
+    before it reaches ``_throttled_ss``, which is the sole retry authority for
+    this traffic (pacing, backoff, shared circuit breaker). Disabling it makes
+    each request's real outcome surface at once, which is also what lets
+    ``_call_in_fresh_thread``'s 30s timeout actually bound a call. Calls on
+    the returned client must go through ``_throttled_ss``.
+    """
+    from semanticscholar import SemanticScholar as _SS
+    key = resolve_semantic_scholar_key()
+    if not key:
+        log.warning(
+            "semantic_scholar_api_key not configured — proceeding with "
+            "unauthenticated Semantic Scholar access (very low rate limit). "
+            "Set it in config.yaml's runtime: block (or "
+            "SEMANTIC_SCHOLAR_API_KEY / F3DASM_SEMANTIC_SCHOLAR_API_KEY) for "
+            "reliable access."
+        )
+    return _SS(api_key=key, retry=False)
+
+
 def build_semantic_scholar_closures() -> dict:
     """The three semanticscholar-library calls; {} (with a warning) when
     the library is not installed."""
     tools: dict = {}
     # Semantic Scholar tools via the semanticscholar library.
     try:
-        from semanticscholar import SemanticScholar as _SS
-
-        from ...runtime.settings import get_str
-        # config.yaml's runtime: block (or F3DASM_SEMANTIC_SCHOLAR_API_KEY)
-        # is the explicit-config channel; the bare env var is honoured too
-        # since it is Semantic Scholar's own documented convention, not
-        # ours to rename out from under anyone already using it.
-        _ss_api_key = (
-            get_str("semantic_scholar_api_key", "")
-            or os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
-        )
-        if not _ss_api_key:
-            log.warning(
-                "semantic_scholar_api_key not configured — proceeding "
-                "with unauthenticated Semantic Scholar access (very low "
-                "rate limit). Set it in config.yaml's runtime: block "
-                "(or SEMANTIC_SCHOLAR_API_KEY / "
-                "F3DASM_SEMANTIC_SCHOLAR_API_KEY) for reliable access."
-            )
-        # retry=False: the library's OWN internal 429 retry (tenacity,
-        # up to 10 attempts, 5-60s exponential backoff EACH — legitimately
-        # several minutes for one call) would otherwise silently absorb
-        # every 429 before it ever reaches _throttled_ss, so our own
-        # pacing/backoff/circuit-breaker (http_client's
-        # _rate_limit_wait/_record_429, meant to be the SOLE retry
-        # authority for this traffic — see _throttled_ss) never sees a
-        # 429 until an entire hidden multi-minute retry storm has
-        # already run underneath it. Disabling it here makes every
-        # individual request's real outcome surface immediately, which
-        # is also what makes _call_in_fresh_thread's 30s timeout
-        # actually bound the call to ~30s instead of ~12 minutes.
-        _sch = _SS(api_key=_ss_api_key or None, retry=False)
+        _ss_api_key = resolve_semantic_scholar_key()
+        _sch = get_semantic_scholar_client()
 
         def _ss_forbidden_error() -> str:
             """Message for a 403 (PermissionError): NOT retried, since

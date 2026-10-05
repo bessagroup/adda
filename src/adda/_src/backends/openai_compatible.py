@@ -586,14 +586,19 @@ def _make_literature_tools() -> list:
 
     # --- semantic scholar ---
     try:
-        from semanticscholar import SemanticScholar as _SS
+        import semanticscholar  # noqa: F401 — absent => no S2 tools
 
-        _ss = _SS(api_key=os.environ.get("SEMANTIC_SCHOLAR_API_KEY"))
+        from ..agents.literature_tools.semantic_scholar import (
+            get_semantic_scholar_client,
+        )
+        from ..agents.literature_tools.throttle import _throttled_ss
+
+        _ss = get_semantic_scholar_client()
 
         def get_paper_details(paper_id: str) -> str:
             """Get details for a paper by its S2, DOI, or arxiv ID."""
             import json
-            paper = _ss.get_paper(paper_id, fields=[
+            paper = _throttled_ss(_ss.get_paper, paper_id, fields=[
                 "title", "year", "venue", "citationCount",
                 "influentialCitationCount", "tldr", "authors",
             ])
@@ -610,7 +615,8 @@ def _make_literature_tools() -> list:
         def get_citations_and_references(paper_id: str) -> str:
             """Get citing papers and references for a paper."""
             import json
-            paper = _ss.get_paper(paper_id, fields=["citations", "references"])
+            paper = _throttled_ss(
+                _ss.get_paper, paper_id, fields=["citations", "references"])
             refs = [{"title": r.get("title"), "paperId": r.get("paperId")} for r in (paper.references or [])]
             cits = [{"title": c.get("title"), "paperId": c.get("paperId")} for c in (paper.citations or [])]
             return json.dumps({"references": refs[:20], "citations": cits[:20]}, indent=2)
