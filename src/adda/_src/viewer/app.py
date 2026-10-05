@@ -911,6 +911,15 @@ def create_app(
             run_dir, after=after, limit=limit,
             kind=request.query_params.get("kind") or None))
 
+    async def get_notes(request):
+        """The strategizer's ``strategizer_notes/*.md`` (strategy files, study
+        summary), oldest first, each with its mtime."""
+        run_id = request.path_params["run_id"]
+        run_dir = _run_dir(study_dir, run_id)
+        if run_dir is None:
+            return _not_found(f"no such run {run_id!r}")
+        return JSONResponse(readers.read_strategizer_notes(run_dir))
+
     async def get_retrospectives(request):
         """Every retrospective split into CONSISTENCY / DECISION / FRICTION /
         BLOCKED / TIME, plus ``missing``: the runtime's RETROSPECTIVES_MISSING
@@ -1186,6 +1195,7 @@ def create_app(
               methods=["POST"]),
         Route("/api/runs/{run_id}/problem_statement", get_problem_statement),
         Route("/api/runs/{run_id}/diagnostics", get_diagnostics),
+        Route("/api/runs/{run_id}/notes", get_notes),
         Route("/api/runs/{run_id}/retrospectives", get_retrospectives),
         Route("/api/runs/{run_id}/critic_reviews", get_critic_reviews),
         Route("/api/runs/{run_id}/node/{name}/transcripts", get_node_transcripts),

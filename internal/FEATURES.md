@@ -1360,6 +1360,9 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   `diagnostics.jsonl` by line cursor (`next_cursor` is always an int, a live run keeps appending;
   compare with `total`). `kind` filters on the row's `error_type`, else `tool`; `counts` is the whole
   file's kind vocabulary regardless of the filter. Unparseable lines are skipped.
+  **Strategizer notes (spec 14 2.8):** `GET /api/runs/<id>/notes` returns `{notes}`: every `*.md` in
+  `debug/strategizer_notes/` (`strategy_NN_*.md`, `study_summary.md`) as `{name, mtime, text}`, oldest
+  first. Any subset, or none, is valid.
   The viewer binds loopback only: any other `--host` needs `--allow-network` and prints a warning.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);

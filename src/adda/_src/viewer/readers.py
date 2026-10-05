@@ -439,6 +439,21 @@ def read_diagnostics(run_dir: Path | str, *, after: int = 0, limit: int = 200,
             "counts": counts}
 
 
+def read_strategizer_notes(run_dir: Path | str) -> dict[str, Any]:
+    """The strategizer's written reasoning: every ``*.md`` under
+    ``debug/strategizer_notes/`` (``strategy_NN_*.md``, ``study_summary.md``),
+    oldest first by mtime, each ``{name, mtime, text}``. A run may have any
+    subset or none (the JSON ledgers beside them are served elsewhere)."""
+    root = Path(run_dir) / "debug" / _NOTES_DIR
+    files = sorted((f for f in root.glob("*.md") if f.is_file()),
+                   key=lambda f: (f.stat().st_mtime, f.name)
+                   ) if root.is_dir() else []
+    return {"notes": [
+        {"name": f.name, "mtime": f.stat().st_mtime,
+         "text": f.read_text(encoding="utf-8", errors="replace")}
+        for f in files]}
+
+
 def read_diagnostics_tail(run_dir: Path | str) -> list[dict[str, Any]]:
     """Every diagnostics.jsonl row seen so far (open vocabulary — no fixed
     schema beyond ``ts``/``node``/``tool``/``error_type``/``fault``/
