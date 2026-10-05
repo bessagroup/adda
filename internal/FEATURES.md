@@ -899,6 +899,15 @@ eval counts: `best` when declared plus `stores` {scored, not_scored}, `min` and 
 remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
 `tests/test_run_ledger_kpis.py`.
 
+### Run report: Verdict audit (2026-10-05)
+`studies/run_ledger.py::analysis_brief` ends its ERROR_RETURN section with a "Verdict audit": one block per
+closing status entry (SUPPORTED / FALSIFIED / INCONCLUSIVE) in `strategizer_notes/hypotheses.json`, with the
+statement, falsification criterion, prior -> posterior, evidence numbers and validator note verbatim, and
+`N_NEW_EVALS`, the store rows stamped with the cited delegation over the canonical store and every
+namespace (precomputed-pool rows are reported apart, not counted). `NO_NEW_EVIDENCE` flags a verdict with
+0 such rows, and the header counts them ("k of n"). It is a flag for review, not an error, and it classifies
+no claim. A run with no ledger reads "no hypothesis ledger". Tests: `tests/test_run_ledger_verdict_audit.py`.
+
 ### Per-delegation resource telemetry
 - **What:** `Wait(id, block=False)` shows a delegation's eval count, current RSS, and **peak
   RSS** (the high-water across the watcher's ticks), so the strategizer can see a

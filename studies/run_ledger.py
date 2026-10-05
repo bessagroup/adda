@@ -406,6 +406,75 @@ def _delegation_proxies(run_dir: Path) -> list[dict]:
     return out
 
 
+def _store_csvs(run_dir: Path) -> list[Path]:
+    """Every output.csv of the run: the canonical store and each design namespace."""
+    root = run_dir / "experiment_data"
+    found = [root / "experiment_data" / "output.csv"]
+    if root.is_dir():
+        found += [d / "experiment_data" / "output.csv" for d in sorted(root.iterdir())
+                  if d.is_dir() and d.name != "experiment_data"]
+    return [f for f in found if f.exists()]
+
+
+def verdict_audit(run_dir: Path) -> list[str]:
+    """Closing hypothesis verdicts next to the evidence they cite (read-only).
+
+    One block per closing status entry in strategizer_notes/hypotheses.json, with
+    the statement, criterion, evidence and validator note verbatim. N_NEW_EVALS is
+    the number of store rows stamped with the cited delegation, over all stores;
+    rows ingested from the precomputed pool are not new evaluations and are
+    reported apart. NO_NEW_EVIDENCE is a mechanical flag for a human to review,
+    never a verdict. Nothing here classifies the claims.
+    """
+    from adda._src.epistemics.hypothesis_ledger import CLOSING_STATUSES
+
+    f = Path(run_dir) / "debug" / "strategizer_notes" / "hypotheses.json"
+    if not f.exists():
+        return ["- no hypothesis ledger"]
+    try:
+        ledger = json.loads(f.read_text())
+    except Exception as exc:
+        return [f"- hypothesis ledger unreadable: {exc}"]
+    new: dict[str, int] = {}
+    pool: dict[str, int] = {}
+    for csv_path in _store_csvs(Path(run_dir)):
+        for r in csv.DictReader(csv_path.open()):
+            d = r.get("_delegation_id") or ""
+            bucket = pool if r.get("_source") == "precomputed_pool" else new
+            bucket[d] = bucket.get(d, 0) + 1
+    blocks: list[str] = []
+    flagged = total = 0
+    for hid, h in ledger.items():
+        prev_status, prev_p = "OPEN", h.get("prior")
+        for e in h.get("status_log") or []:
+            if e.get("status") in CLOSING_STATUSES:
+                total += 1
+                ev = e.get("evidence") or {}
+                cited = ev.get("delegation") or e.get("triggered_by")
+                n_new = new.get(cited, 0) if cited else 0
+                n_pool = pool.get(cited, 0) if cited else 0
+                flag = n_new == 0
+                flagged += flag
+                blocks += [
+                    f"### {h.get('id', hid)}: {prev_status} -> {e['status']}"
+                    f"  (posterior {prev_p} -> {e.get('posterior')})"
+                    + ("  NO_NEW_EVIDENCE" if flag else ""),
+                    f"- statement: {h.get('statement')}",
+                    f"- falsification_criterion: {h.get('falsification_criterion')}",
+                    f"- cited delegation: {cited or '(none)'}; N_NEW_EVALS: {n_new}"
+                    + (f" (plus {n_pool} precomputed-pool rows)" if n_pool else ""),
+                    f"- evidence numbers: {json.dumps(ev.get('numbers'), sort_keys=True)}",
+                    f"- validator_note: {e.get('validator_note')}",
+                    ""]
+            if e.get("status"):
+                prev_status = e["status"]
+            if e.get("posterior") is not None:
+                prev_p = e["posterior"]
+    head = [f"- {flagged} of {total} closing verdicts cite no new evaluations "
+            "(a flag for review, not an error)", ""]
+    return head + blocks if total else ["- no closing verdicts"]
+
+
 def analysis_brief(run_dir: Path) -> str:
     """Mechanical post-run digest for the CLAUDE.md run-analysis protocol.
 
@@ -548,6 +617,10 @@ def analysis_brief(run_dir: Path) -> str:
     L.append("")
     L.append(f"## ERROR_RETURN events verbatim ({len(errs)}; target 0)")
     L.extend(errs or ["- (none)"])
+
+    L.append("")
+    L.append("## Verdict audit (closing hypothesis verdicts vs the evidence they cite)")
+    L.extend(verdict_audit(run_dir))
 
     # prose artifacts — READ; do not trust a grep
     retro = debug / "retrospectives.jsonl"
