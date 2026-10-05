@@ -1349,6 +1349,11 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   all parse), with unstructured text kept in `preamble` and the raw `text` always present, plus
   `delegation_id` when `source_id` is a delegation of the run. `missing` is the run's
   `RETROSPECTIVES_MISSING` diagnostics rows, so a node that never answered is visible.
+  **Critic reviews (spec 14 2.5):** `GET /api/runs/<id>/critic_reviews` returns `{reviews}`, one per
+  `critic_reviews/call_NNN.md`: `verdict` and `findings` come from the gate's own parsers
+  (`nodes/parsing`), `numbers` is the `findings_*` counts, `source_id` (`critic-N`) matches the
+  retrospective of the same call, and `delegation_id` is set only when the run has exactly one critic
+  delegation per review (the pairing is ordinal; nothing on disk names it).
   The viewer binds loopback only: any other `--host` needs `--allow-network` and prints a warning.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);

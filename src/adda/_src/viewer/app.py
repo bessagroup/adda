@@ -901,6 +901,15 @@ def create_app(
             return _not_found(f"no such run {run_id!r}")
         return JSONResponse(readers.read_retrospectives(run_dir))
 
+    async def get_critic_reviews(request):
+        """The persisted critic reviews (``debug/critic_reviews/call_NNN.md``)
+        with the gate's own verdict parse, ``Numbers`` block and ``Findings``."""
+        run_id = request.path_params["run_id"]
+        run_dir = _run_dir(study_dir, run_id)
+        if run_dir is None:
+            return _not_found(f"no such run {run_id!r}")
+        return JSONResponse(readers.read_critic_reviews(run_dir))
+
     async def get_node_transcripts(request):
         run_id = request.path_params["run_id"]
         name = request.path_params["name"]
@@ -1157,6 +1166,7 @@ def create_app(
               methods=["POST"]),
         Route("/api/runs/{run_id}/problem_statement", get_problem_statement),
         Route("/api/runs/{run_id}/retrospectives", get_retrospectives),
+        Route("/api/runs/{run_id}/critic_reviews", get_critic_reviews),
         Route("/api/runs/{run_id}/node/{name}/transcripts", get_node_transcripts),
         Route(
             "/api/runs/{run_id}/transcript/{key:path}/events",

@@ -1328,6 +1328,48 @@ def read_retrospectives(run_dir: Path | str) -> dict[str, Any]:
     return {"retrospectives": rows, "missing": missing}
 
 
+def read_critic_reviews(run_dir: Path | str) -> dict[str, Any]:
+    """Every critic review the run persisted, in call order.
+
+    ``verdict`` is the gate's own parse (``nodes.parsing._parse_verdict``) and
+    ``findings`` its own ``Findings`` section extractor, so the viewer reads a
+    review exactly as the gate did. ``source_id`` (``critic-N``) matches the
+    retrospective the same call wrote. ``delegation_id`` is the critic
+    delegation of the same ordinal, set only when the log holds exactly one
+    critic delegation per review (nothing on disk names the pairing, so a
+    count mismatch leaves it ``None`` rather than guessing).
+    """
+    from ..nodes.parsing import _extract_report_section, _parse_verdict
+
+    run_dir = Path(run_dir)
+    root = run_dir / "debug" / "critic_reviews"
+    files = sorted(root.glob("call_*.md")) if root.is_dir() else []
+    critic_rows = [d.get("id") for d in read_delegations(run_dir)
+                   if d.get("to_node") == "critic"]
+    paired = len(critic_rows) == len(files)
+    reviews: list[dict[str, Any]] = []
+    for i, f in enumerate(files):
+        m = re.fullmatch(r"call_(\d+)\.md", f.name)
+        if not m:
+            continue
+        text = f.read_text(encoding="utf-8", errors="replace")
+        numbers: dict[str, int] = {}
+        for line in _extract_report_section(text, "Numbers").splitlines():
+            nm = re.match(r"\s*[-*]?\s*(findings_\w+)\s*:\s*(\d+)\s*$", line)
+            if nm:
+                numbers[nm.group(1)] = int(nm.group(2))
+        n = int(m.group(1))
+        reviews.append({
+            "call": n, "file": f.name, "mtime": f.stat().st_mtime,
+            "source_id": f"critic-{n}",
+            "delegation_id": critic_rows[i] if paired else None,
+            "verdict": _parse_verdict(text),
+            "numbers": numbers,
+            "findings": _extract_report_section(text, "Findings"),
+            "text": text})
+    return {"reviews": reviews}
+
+
 def read_transcript(run_dir: Path | str, key: str) -> list[dict[str, Any]] | None:
     """Parsed events for one transcript file.
 
