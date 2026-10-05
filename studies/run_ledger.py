@@ -45,7 +45,69 @@ COLUMNS = [
     "arm_f3dasm_api", "arm_doe_playbook", "arm_verdict_validator",
     "arm_pipeline_deliverable", "arm_reproduction_gate",
     "arm_peer_interaction", "arm_max_awake_nodes",
+    # Process KPIs (CLAUDE.md §1 step 5). error_returns = ERROR_RETURN events
+    # (target 0). first_feasible_* = position/time of the first canonical-store
+    # row whose objective is finite and below the infeasibility-sentinel
+    # magnitude (store._INFEASIBLE_SENTINEL_MAG); blank = none ever. best_trace
+    # = running min AND max of that objective (direction is the analyst's call)
+    # at <=20 evenly spaced eval counts: {"obj", "n", "min", "max"}.
+    "error_returns", "first_feasible_eval", "first_feasible_s", "best_trace",
 ]
+
+_SENTINEL_MAG = 1e8  # mirrors nodes/tools/routing/store._INFEASIBLE_SENTINEL_MAG
+_TRACE_POINTS = 20
+
+
+def _objective_kpis(run_dir: Path) -> dict:
+    """first-feasible position/time and best-so-far trace of the canonical
+    store's objective (first non-provenance column), in timestamp order."""
+    from datetime import datetime
+    oc = run_dir / "experiment_data" / "experiment_data" / "output.csv"
+    if not oc.exists():
+        return {}
+    try:
+        rows = list(csv.DictReader(oc.open()))
+        cols = [c for c in (rows[0] if rows else {}) if c and not c.startswith("_")]
+        if not cols:
+            return {}
+        obj = cols[0]
+        rows.sort(key=lambda r: r.get("_ts") or "")
+        vals = []
+        for r in rows:
+            try:
+                v = float(r.get(obj))
+            except (TypeError, ValueError):
+                v = float("nan")
+            vals.append(v if abs(v) < _SENTINEL_MAG else None)  # NaN -> None too
+        out: dict = {}
+        first = next((i for i, v in enumerate(vals) if v is not None), None)
+        if first is not None:
+            out["first_feasible_eval"] = first + 1
+            try:
+                t0 = float((run_dir / "debug" / "run_started_at").read_text())
+                ts = datetime.fromisoformat(rows[first]["_ts"]).timestamp()
+                out["first_feasible_s"] = round(ts - t0, 1)
+            except (OSError, ValueError, KeyError):
+                pass
+        n = len(vals)
+        lo = hi = None
+        mins: list = []
+        maxs: list = []
+        for v in vals:
+            if v is not None:
+                lo = v if lo is None else min(lo, v)
+                hi = v if hi is None else max(hi, v)
+            mins.append(lo)
+            maxs.append(hi)
+        if n:
+            k = min(_TRACE_POINTS, n)
+            idx = sorted({round((j + 1) * n / k) - 1 for j in range(k)})
+            out["best_trace"] = json.dumps({
+                "obj": obj, "n": [i + 1 for i in idx],
+                "min": [mins[i] for i in idx], "max": [maxs[i] for i in idx]})
+        return out
+    except Exception:
+        return {}
 
 
 def _migrate_header() -> None:
@@ -260,6 +322,10 @@ def extract(run_dir: Path) -> dict:
         c = Counter(r.get("error_type") or r.get("type")
                     or r.get("intervention") or "other" for r in rows)
         row["diagnostics"] = json.dumps(dict(c))
+        row["error_returns"] = c.get("ERROR_RETURN", 0)
+    else:
+        row["error_returns"] = 0
+    row.update(_objective_kpis(run_dir))
     return row
 
 
@@ -352,7 +418,9 @@ def analysis_brief(run_dir: Path) -> str:
         cur = row.get(k, "")
         return f"- {k}: {cur}" + (f"   (prev {prev.get(k, '')})" if prev else "")
 
-    for k in ("outcome", "critic_consults", "delegations", "ledger_rows",
+    for k in ("outcome", "critic_consults", "error_returns",
+              "first_feasible_eval", "first_feasible_s", "delegations",
+              "ledger_rows",
               "mean_wall_ms", "time_used", "input_tokens", "output_tokens",
               "cost_usd", "milestones_done", "milestones_skipped",
               "milestones_pending"):

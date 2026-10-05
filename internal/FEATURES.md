@@ -846,6 +846,17 @@ SDK's `total_cost_usd` (never merged into it); `summary.json` carries
 None plus a logged warning, never zero. Validated in `tests/test_model_prices.py`
 against the SDK's cost on calls it did price.
 
+### Run-ledger process KPIs (2026-10-04)
+`studies/run_ledger.py` adds `error_returns` (count of ERROR_RETURN events,
+target 0), `first_feasible_eval` / `first_feasible_s` (position and seconds
+since `debug/run_started_at` of the first canonical-store row whose objective
+is finite and below the infeasibility-sentinel magnitude, same rule as
+`QueryStore`'s best-feasible selection; blank = never) and `best_trace` (JSON:
+running min AND max of the objective at <=20 evenly spaced eval counts; the
+direction is the analyst's call). Gate attempts remain `critic_consults`
+(count of `critic_reviews/call_NNN.md`). Validated in
+`tests/test_run_ledger_kpis.py`.
+
 ### Per-delegation resource telemetry
 - **What:** `Wait(id, block=False)` shows a delegation's eval count, current RSS, and **peak
   RSS** (the high-water across the watcher's ticks), so the strategizer can see a
