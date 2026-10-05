@@ -1208,6 +1208,9 @@ def test_read_trajectory_returns_columns_with_a_kind_and_never_ranks(tmp_path):
     assert st["columns"]["feasible"] == {"kind": "binary", "values": [1.0, 0.0, 1.0]}
     assert "label" not in st["columns"] and "_ts" not in st["columns"]
     assert t["declared_outputs"] == []
+    # a whole row is recoverable without a second request: labels and inputs ride along
+    assert st["text"] == {"label": ["a", "b", "c"]}
+    assert st["inputs"] == {"x": [1.0, 2.0, 3.0]}
 
 
 def _funnel_run(tmp_path):

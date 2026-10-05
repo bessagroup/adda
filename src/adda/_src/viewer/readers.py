@@ -806,6 +806,22 @@ def _as_number(v: str) -> float | None:
     return x if x == x and abs(x) != float("inf") else None
 
 
+def _read_inputs(path: Path, n: int) -> dict[str, list[Any]]:
+    """The store's input columns, one list per column, aligned with output.csv rows."""
+    head, rows = _read_csv_rows(path)
+    rows = rows[:n]
+    out: dict[str, list[Any]] = {}
+    for j, col in enumerate(head[1:]):
+        vals: list[Any] = []
+        for r in rows:
+            raw = r[j + 1] if j + 1 < len(r) else ""
+            num = _as_number(raw) if raw != "" else None
+            vals.append(num if num is not None else (raw or None))
+        if any(v is not None for v in vals):
+            out[col] = vals
+    return out
+
+
 def read_trajectory(run_dir: Path | str) -> dict[str, Any]:
     """Every ledgered row of each store as parallel columns, oldest first.
 
@@ -813,7 +829,9 @@ def read_trajectory(run_dir: Path | str) -> dict[str, Any]:
     whether to minimise it, and which 0/1 column means "feasible" are the
     study's, not the viewer's, so each numeric column is returned with its
     ``kind`` ("binary" when every value is 0/1/True/False) and the reader
-    ranks nothing.
+    ranks nothing. ``text`` carries the label columns (status, note) and
+    ``inputs`` the input columns, both aligned with the same rows, so the
+    page can show a whole row without a second request.
     """
     cfg, base_path, found = _oracle_stores(Path(run_dir))
     stores = []
@@ -824,16 +842,17 @@ def read_trajectory(run_dir: Path | str) -> dict[str, Any]:
         rows = rows[:_MAX_TRAJECTORY_ROWS]
         names = head[1:]
         cols: dict[str, dict[str, Any]] = {}
+        text: dict[str, list[str]] = {}
         for j, col in enumerate(names):
             if col in _PROVENANCE_COLS:
                 continue
-            vals = [_as_number(r[j + 1]) if j + 1 < len(r) and r[j + 1] != ""
-                    else None for r in rows]
-            if not any(v is not None for v in vals):
-                continue
+            raw = [r[j + 1] if j + 1 < len(r) else "" for r in rows]
+            vals = [_as_number(v) if v != "" else None for v in raw]
             # A column with any non-numeric entry is a label, not a measure.
-            if any(j + 1 < len(r) and r[j + 1] != "" and _as_number(r[j + 1]) is None
-                   for r in rows):
+            if any(v != "" and x is None for v, x in zip(raw, vals, strict=True)):
+                text[col] = raw
+                continue
+            if not any(v is not None for v in vals):
                 continue
             kind = ("binary" if all(v in (None, 0.0, 1.0) for v in vals)
                     else "numeric")
@@ -853,6 +872,8 @@ def read_trajectory(run_dir: Path | str) -> dict[str, Any]:
             "delegation": prov("_delegation_id"),
             "status": [r[1] if len(r) > 1 else "" for r in job_rows][:len(rows)],
             "columns": cols,
+            "text": text,
+            "inputs": _read_inputs(data / "input.csv", len(rows)),
         })
     declared: list[str] = []
     for src in [cfg, *(cfg.get("oracles") or {}).values()]:
