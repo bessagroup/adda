@@ -491,3 +491,5 @@ a.idlink:hover{text-decoration:underline}
 .pop p{margin:0 0 var(--s2)}
 .pop .pb{display:flex;gap:var(--s2);margin-top:var(--s3)}
 @media (max-width:819px){.setup .sugrid{grid-template-columns:1fr}.setup textarea,.setup #sudiff{height:auto;min-height:12rem;max-height:24rem}.hrowb{grid-template-columns:7ch minmax(0,1fr)}.hrowb .dcap{display:none}}
+
+a.btn{text-decoration:none;display:inline-flex;align-items:center}

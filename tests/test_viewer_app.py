@@ -1508,3 +1508,39 @@ def test_figure_of_merit_route_reads_the_declared_objective(tmp_path):
     body = client.get("/api/runs/20260904T120000/figure_of_merit").json()
     assert (body["value"], body["row"]) == (4.0, 1)
     assert client.get("/api/runs/nope/figure_of_merit").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# /api/runs/{id}/download (spec 14 Phase 5.11)
+# ---------------------------------------------------------------------------
+
+def test_download_debug_and_store_are_zips_of_existing_files(tmp_path):
+    import io
+    import zipfile
+
+    study = _make_study(tmp_path)
+    run = _make_run(study, "R1")
+    (run / "debug" / "run.log").write_text("hello")
+    client = TestClient(create_app(study))
+
+    r = client.get("/api/runs/R1/download?what=debug")
+    assert r.status_code == 200
+    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    assert names == ["debug/run.log"]
+    assert "R1_debug.zip" in r.headers["content-disposition"]
+
+    # nothing of that kind, unknown kind, unknown or escaping run
+    assert client.get("/api/runs/R1/download?what=notebook").status_code == 404
+    assert client.get("/api/runs/R1/download?what=store").status_code == 404
+    assert client.get("/api/runs/R1/download?what=nope").status_code == 400
+    assert client.get("/api/runs/ZZ/download?what=debug").status_code == 404
+    assert client.get("/api/runs/../download?what=debug").status_code == 404
+
+
+def test_download_notebook_serves_the_runs_file(tmp_path):
+    study = _make_study(tmp_path)
+    _make_run(study, "R1")
+    (study / "pipeline_R1.ipynb").write_text('{"cells": []}')
+    client = TestClient(create_app(study))
+    r = client.get("/api/runs/R1/download?what=notebook")
+    assert r.status_code == 200 and r.content == b'{"cells": []}'

@@ -726,6 +726,13 @@ function rxMark() {
   if (S.rx.run !== S.run) return "";
   return { running: '<span class="st live">re-executing</span>', passed: '<span class="st ok">passed</span>', failed: '<span class="st bad">failed</span>' }[S.rx.state] || "";
 }
+function dlLinks(run) {
+  const base = "/api/runs/" + encodeURIComponent(run) + "/download?what=";
+  const one = (k, label, tip) => `<a class="btn" href="${base}${k}" download title="${tip}">${label}</a>`;
+  return one("notebook", "Notebook", "Download this run’s pipeline notebook.") +
+    one("store", "Store", "Download the run’s ledger tables (input, output, jobs, domain) as a zip.") +
+    one("debug", "Debug", "Download the run’s whole debug folder as a zip.");
+}
 function paintDeliverable(w, top) {
   const nb = S.nb;
   if (!nb || S.nbrun !== S.run) { w.innerHTML = '<div class="skel"><div></div><div></div><div></div></div>'; return; }
@@ -737,6 +744,7 @@ function paintDeliverable(w, top) {
   const running = S.rx.state === "running" && S.rx.run === S.run;
   w.innerHTML = `<div class="data nb"><div class="dh"><h3>Deliverable</h3><span class="dcap">${esc(name)} · ${nb.cells.length} cell${nb.cells.length === 1 ? "" : "s"}</span><span class="sp"></span>` +
     nbSwitch(nb) + `<label class="toggle"><input type="checkbox" id="nbcode" ${S.codeOpen ? "checked" : ""}> Show code</label>${rxMark()}` +
+    dlLinks(S.run) +
     `<button type="button" class="btn" id="reexec" ${running ? "disabled" : ""} title="Run the notebook again against a copy of this run’s ledger and check that it reproduces.">Re-execute</button></div>` +
     headlineHtml(nb) + nb.cells.map(nbCell).join("") + `</div>`;
   w.scrollTop = top;

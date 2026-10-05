@@ -32,7 +32,7 @@ from starlette.templating import Jinja2Templates
 
 from ..infra import operator_channel, stop_request
 from ..nodes.notices import split_notices
-from . import notebook_replay, readers, run_control, study_edit
+from . import downloads, notebook_replay, readers, run_control, study_edit
 from .transcript_events import (  # noqa: F401 — re-exported for the renderers below
     _ASSISTANT_TYPES,
     _HUMAN_TYPES,
@@ -612,6 +612,24 @@ def create_app(
         if nb is None:
             return JSONResponse({"cells": [], "missing": True})
         return JSONResponse(nb)
+
+    async def get_download(request):
+        run_id = request.path_params["run_id"]
+        if run_id in ("", ".", "..") or _run_dir(study_dir, run_id) is None:
+            return _not_found(f"no such run {run_id!r}")
+        kind = request.query_params.get("what", "")
+        if kind not in downloads.KINDS:
+            return JSONResponse(
+                {"error": f"what must be one of {', '.join(downloads.KINDS)}"},
+                status_code=400)
+        got = downloads.prepare(study_dir, run_id, kind)
+        if got is None:
+            return _not_found(f"this run has no {kind} to download")
+        path, name, temp = got
+        from starlette.background import BackgroundTask
+        return FileResponse(
+            path, filename=name,
+            background=BackgroundTask(path.unlink, missing_ok=True) if temp else None)
 
     async def get_vitals(request):
         """The run's real cost and wall clock — see readers.read_vitals for
@@ -1412,6 +1430,7 @@ def create_app(
         Route("/api/runs/{run_id}/funnel", get_funnel),
         Route("/api/runs/{run_id}/figure_of_merit", get_figure_of_merit),
         Route("/api/runs/{run_id}/monitor", get_monitor),
+        Route("/api/runs/{run_id}/download", get_download),
         Route("/api/runs/{run_id}/artifacts", get_artifacts),
         Route("/api/runs/{run_id}/artifact", get_artifact),
         Route("/api/runs/{run_id}/notebook", get_notebook),
