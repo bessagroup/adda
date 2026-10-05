@@ -60,6 +60,37 @@ def test_selection_lives_in_the_url_and_esc_closes(tmp_path, page):
         assert page.locator(".ih").count() == 0
 
 
+def test_long_idle_spans_collapse_to_a_break_band_and_close_gates_do_not_overlap(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    rows = []
+    for i, (a, b) in enumerate([("12:00", "12:05"), ("12:10", "12:15"), ("12:20", "12:25"), ("18:40", "18:45")]):
+        d = _delegation(f"D{i + 1:03d}", "implementer")
+        d["started_at"], d["completed_at"] = f"2026-09-17T{a}:00+00:00", f"2026-09-17T{b}:00+00:00"
+        rows.append(d)
+    for i, sec in enumerate(["10", "20", "30"]):
+        g = _delegation(f"GATE{i + 1:03d}", "critic")
+        g["started_at"] = g["completed_at"] = f"2026-09-17T12:26:{sec}+00:00"
+        rows.append(g)
+    _write_jsonl(run_dir / "debug" / "delegation_log.jsonl", rows)
+    (run_dir / "debug" / "run_status.json").write_text('{"status": "GATED"}')
+    with _LiveServer(create_app(study)) as srv:
+        page.set_viewport_size({"width": 1400, "height": 900})
+        page.goto(f"{srv.url}/ui?run={RUN}&view=timeline")
+        page.wait_for_selector(".brk")
+        band = page.locator(".brk")
+        assert band.count() == 1, band.all_inner_texts()
+        assert "6 h 13 m with no delegation running" in band.inner_text()
+        assert band.bounding_box()["height"] == 24
+        assert page.locator(".stack").bounding_box()["height"] < 500
+        boxes = [page.locator(".gate span").nth(i).bounding_box() for i in range(3)]
+        for i in range(3):
+            for j in range(i + 1, 3):
+                a, b = boxes[i], boxes[j]
+                apart = a["x"] + a["width"] <= b["x"] or b["x"] + b["width"] <= a["x"] \
+                    or a["y"] + a["height"] <= b["y"] or b["y"] + b["height"] <= a["y"]
+                assert apart, (a, b)
+
+
 def test_deep_link_opens_the_inspector_and_ids_are_links(tmp_path, page):
     study, _ = _study(tmp_path)
     with _LiveServer(create_app(study)) as srv:

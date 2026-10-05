@@ -1473,6 +1473,10 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   when configured, else the local runner). `Stop` on a live run opens a popover: `Stop gracefully` (writes the stop
   request) primary, `Kill now` behind a second confirm and offered only while a process this viewer started is alive (the registry's `launched[].alive`). A read-only session shows a read-only message instead of
   acting. `viewer_shots.py --setup` shoots Setup and the Stop popover.
+  **Timeline (spec 15):** any span over 30 min with no delegation running (and no gate) is drawn as a 24 px break
+  band labelled "<duration> with no delegation running"; hour ticks inside it are skipped, the ruler resumes after
+  it and the now line stays at the true end. Gate chips are laid out right to left so none overlap, each on its own
+  rule. `viewer_shots.py --timeline` shoots a long idle tail.
 - **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
   `app.py` the Starlette app, `templates/graph.html` the UI);
   `agent_runtime.py`'s `AgenticRun.serve_viewer`; `pyproject.toml`'s `viewer`

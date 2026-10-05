@@ -276,6 +276,26 @@ def setup_shots(base: str, out: Path, problems: list[str]) -> None:
         browser.close()
 
 
+def timeline_shots(base: str, out: Path, problems: list[str]) -> None:
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        for wname, (w, h) in WIDTHS.items():
+            for theme in THEMES:
+                ctx = browser.new_context(viewport={"width": w, "height": h}, color_scheme=theme)
+                pg = ctx.new_page()
+                pg.on("pageerror", lambda e: problems.append(f"JS error: {e}"))
+                pg.goto(f"{base}/ui?view=timeline")
+                pg.wait_for_selector(".card")
+                pg.wait_for_timeout(300)
+                if w > 400 and not pg.locator(".brk").count():
+                    problems.append(f"timeline-{wname}-{theme}: no break band on a long idle run")
+                pg.screenshot(path=str(out / f"timeline-live-{wname}-{theme}.png"), full_page=True)
+                ctx.close()
+        browser.close()
+
+
 def banner_shots(base: str, out: Path, problems: list[str]) -> None:
     from playwright.sync_api import sync_playwright
 
@@ -315,6 +335,7 @@ def main() -> int:
     ap.add_argument("--deliverable", action="store_true", help="shoot the Deliverable view")
     ap.add_argument("--logs", action="store_true", help="shoot the Logs view")
     ap.add_argument("--live", action="store_true", help="with --logs: append lines to run.log while shooting")
+    ap.add_argument("--timeline", action="store_true", help="shoot the Timeline of a live copy (long idle tail)")
     ap.add_argument("--setup", action="store_true", help="shoot Setup, the Stop popover")
     ap.add_argument("--banner", action="store_true",
                     help="shoot the question banner on a fixture with a pending question")
@@ -326,7 +347,7 @@ def main() -> int:
     if a.logs and a.live:
         _root, live_log = live_fixture(Path(a.study))
         a.study = str(_root)
-    study = (setup_fixture(Path(a.study)) if a.setup else question_fixture(Path(a.study)) if a.banner
+    study = (live_fixture(Path(a.study))[0] if a.timeline else setup_fixture(Path(a.study)) if a.setup else question_fixture(Path(a.study)) if a.banner
              else data_fixture(Path(a.study), json.loads(Path(a.objective).read_text()))
              if a.objective else Path(a.study))
     cfg = uvicorn.Config(create_app(study, token="shots"), host="127.0.0.1",
@@ -344,8 +365,10 @@ def main() -> int:
     from playwright.sync_api import sync_playwright
 
     problems: list[str] = []
-    if a.setup or a.banner or a.data or a.hypotheses or a.deliverable or a.logs:
-        if a.setup:
+    if a.timeline or a.setup or a.banner or a.data or a.hypotheses or a.deliverable or a.logs:
+        if a.timeline:
+            timeline_shots(base, out, problems)
+        elif a.setup:
             setup_shots(base, out, problems)
         elif a.logs:
             logs_shots(base, out, problems, live_log)

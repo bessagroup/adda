@@ -174,6 +174,8 @@ kbd{font:500 var(--t-label)/1 var(--f-ui);border:1px solid var(--rule-strong);bo
 .chip.f{background:transparent;border:1px solid var(--warn);color:var(--warn)}
 .chip.h{background:transparent;border:1px solid var(--rule-strong);font-family:var(--f-mono)}
 .queued{position:absolute;background:var(--hatch);border-left:2px dashed var(--rule-strong);pointer-events:none}
+.brk{position:absolute;left:0;right:0;display:flex;align-items:center;justify-content:center;border-top:1px dashed var(--rule);border-bottom:1px dashed var(--rule);z-index:0}
+.brk span{background:var(--ground);padding:0 var(--s2);font:400 var(--t-meta)/16px var(--f-ui);color:var(--ink-3)}
 .gate{position:absolute;left:0;right:0;height:0}
 .gate::before{content:"";position:absolute;left:0;right:0;top:0;border-top:2px solid var(--gc);z-index:0}
 .gate span{position:absolute;z-index:3;right:0;top:-12px;background:var(--ground);padding:0 var(--s2);font:500 var(--t-meta)/20px var(--f-ui);color:var(--gc);border:1px solid var(--gc);border-radius:var(--r-ctl);cursor:pointer}
@@ -336,6 +338,7 @@ a.idlink:hover{text-decoration:underline}
   .work{overflow:visible}
   .tl{display:block;padding:var(--s3);width:auto;min-width:0!important}
   .ruler,.lanehead,.hr,.queued,.now{display:none}
+  .brk{display:none}
   .lanes{border:0;height:auto!important;width:auto!important}
   .lanes>.stack{height:auto!important;display:flex;flex-direction:column;gap:var(--s2)}
   .card{position:relative!important;top:auto!important;left:auto!important;width:auto!important;height:auto!important;min-height:0}

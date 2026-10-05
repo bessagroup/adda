@@ -9,7 +9,7 @@ const VIEWS = [
   ["deliverable", "Deliverable"], ["logs", "Logs"], ["setup", "Setup"],
 ];
 const UNBUILT = {};
-const HOUR_PX = 96, MIN_CARD = 26, POLL_MS = 5000;
+const HOUR_PX = 96, MIN_CARD = 26, BREAK_S = 1800, BREAK_PX = 24, BREAK_LEAD = 16, POLL_MS = 5000;
 const $ = (id) => document.getElementById(id);
 
 const S = {
@@ -417,7 +417,24 @@ function timelineHtml() {
   });
   const end = Math.max(...items.map((i) => i.b ?? i.a), v.closed && v.elapsed_s ? t0 + v.elapsed_s : 0, v.closed ? 0 : now);
   const hours = Math.max(1, Math.ceil((end - t0) / 3600));
-  const px = (t) => ((t - t0) / 3600) * HOUR_PX;
+  // Spans longer than BREAK_S in which nothing runs (and no gate falls) are drawn as a BREAK_PX band.
+  const busy = items.map((i) => [i.a, i.kind === "gate" ? i.a : i.b]).sort((x, y) => x[0] - y[0]);
+  const breaks = [];
+  let cursor = t0;
+  busy.forEach(([a, b]) => {
+    if (a - cursor > BREAK_S) breaks.push({ from: cursor, to: a });
+    cursor = Math.max(cursor, b);
+  });
+  if (end - cursor > BREAK_S) breaks.push({ from: cursor, to: end });
+  breaks.forEach((k) => { k.saved = ((k.to - k.from) / 3600) * HOUR_PX - BREAK_PX - BREAK_LEAD; });
+  const px = (t) => {
+    let y = ((t - t0) / 3600) * HOUR_PX;
+    for (const k of breaks) {
+      if (t >= k.to) y -= k.saved;
+      else if (t > k.from) y -= ((t - k.from) / (k.to - k.from)) * k.saved;
+    }
+    return y;
+  };
   // slots from the true session intervals; a card is never drawn shorter than MIN_CARD
   const cards = items.filter((i) => i.kind === "card").sort((x, y) => x.a - y.a);
   const slotEnd = [];
@@ -431,20 +448,32 @@ function timelineHtml() {
   const avail = $("work").clientWidth - 72 - 2 * 16;
   const COL_PX = Math.max(150, Math.min(260, Math.floor(avail / slots)));
   const stackW = slots * COL_PX;
-  const totalPx = Math.max(px(end) + MIN_CARD, hours * HOUR_PX);
+  const totalPx = Math.max(px(end) + MIN_CARD, px(t0 + hours * 3600));
   const ticks = [], rules = [];
   for (let h = 0; h <= hours; h++) {
-    ticks.push(`<div class="tick" style="top:${h * HOUR_PX}px">${h === 0 ? "0" : "+" + h + " h"}</div>`);
-    rules.push(`<div class="hr" style="top:${h * HOUR_PX}px"></div>`);
+    const t = t0 + h * 3600;
+    if (breaks.some((k) => t > k.from && t < k.to)) continue;
+    const y = px(t);
+    ticks.push(`<div class="tick" style="top:${y}px">${h === 0 ? "0" : "+" + h + " h"}</div>`);
+    rules.push(`<div class="hr" style="top:${y}px"></div>`);
   }
-  let lastGateY = -1e9, stagger = 0;
+  const bands = breaks.map((k) => `<div class="brk" style="top:${px(k.from) + BREAK_LEAD}px;height:${BREAK_PX}px"><span>${esc(fmtDur(k.to - k.from)).replace(/^(\d+ h \d+)$/, '$1 m')} with no delegation running</span></div>`);
+  const placed = [];
   const els = items.sort((x, y) => x.a - y.a).map((i) => {
     const d = i.d;
     if (i.kind === "gate") {
       const [c, l] = delState(d), y = px(i.a);
-      stagger = y - lastGateY < 28 ? stagger + 1 : 0; lastGateY = y;
+      const w = 22 + 7 * ("gate · " + l).length;
+      let off = 0, moved = true;
+      while (moved) {
+        moved = false;
+        for (const q of placed) {
+          if (Math.abs(q.y - y) < 24 && off < q.off + q.w + 6 && off + w + 6 > q.off) { off = q.off + q.w + 6; moved = true; }
+        }
+      }
+      placed.push({ y, off, w });
       return `<div class="gate${S.sel === d.id ? " sel" : ""}" style="top:${y}px;--gc:var(--${c === "open" ? "ink-3" : c})">` +
-        `<span role="button" tabindex="0" data-sel="${esc(d.id)}" style="right:${stagger * 124}px" title="${esc(d.id)} · acceptance gate">gate · ${esc(l)}</span></div>`;
+        `<span role="button" tabindex="0" data-sel="${esc(d.id)}" style="right:${off}px" title="${esc(d.id)} · acceptance gate">gate · ${esc(l)}</span></div>`;
     }
     const st = delState(d), left = i.slot * COL_PX + 4, h = Math.round(i.h);
     const queue = i.posted < i.a - 60
@@ -464,7 +493,7 @@ function timelineHtml() {
   return `<div class="tl"><div class="ruler"><div class="rs" style="height:${totalPx}px">${ticks.join("")}</div></div>` +
     `<div class="lanes" style="width:${stackW}px"><div class="lanehead" style="grid-template-columns:repeat(${slots},${COL_PX}px)">` +
     Array.from({ length: slots }, (_, k) => `<span>slot ${k + 1}</span>`).join("") + `</div>` +
-    `<div class="stack" style="position:relative;height:${totalPx}px">${rules.join("")}${els.join("")}${nowLine}</div></div></div>`;
+    `<div class="stack" style="position:relative;height:${totalPx}px">${rules.join("")}${bands.join("")}${els.join("")}${nowLine}</div></div></div>`;
 }
 function firstLine(t) {
   const s = String(t || "").replace(/\s+/g, " ").trim();
