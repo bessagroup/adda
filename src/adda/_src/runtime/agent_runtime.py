@@ -487,6 +487,7 @@ class AgenticRun:
             run_dir, self.study_dir, evaluator_config=_eval_cfg,
             eval_budget=getattr(self, "_eval_budget", None),
             mem_cap_bytes=getattr(self, "_mem_cap_bytes", None),
+            objective_config=study_cfg.get("objective"),
         )
         ingest_note = self._ingest_pool(study_cfg, canonical_cfg)
 

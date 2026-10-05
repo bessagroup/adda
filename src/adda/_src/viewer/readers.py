@@ -691,6 +691,38 @@ def read_trajectory(run_dir: Path | str) -> dict[str, Any]:
 _FUNNEL_DEFAULT_ORDER = ("coil", "prefilter", "ran|solved", "^converged$", "feas")
 
 
+def read_figure_of_merit(run_dir: Path | str) -> dict[str, Any]:
+    """The run's best row under the study's DECLARED objective (config.yaml
+    ``objective:``, recorded in run_config.json), canonical store only.
+
+    Nothing is inferred: with no declaration the answer is ``declared: False``
+    and no row is ranked. A row counts only if its objective is finite and,
+    when ``feasible`` is declared, that column is 1, the same rule the run
+    ledger applies. This is the store's best row, not the run's own headline.
+    """
+    from ..evaluation.objective import objective_values
+    cfg, _, found = _oracle_stores(Path(run_dir))
+    objective = cfg.get("objective") or None
+    if not objective:
+        return {"declared": False}
+    out: dict[str, Any] = {"declared": True, **objective, "n": 0,
+                           "n_counted": 0, "row": None, "value": None}
+    canon = next((p for name, p in found if name is None), None)
+    if canon is None:
+        return out
+    head, rows = _read_csv_rows(canon / _DATA_DIR / "output.csv")
+    named = [dict(zip(head, r, strict=False)) for r in rows]
+    vals = objective_values(named, objective, objective["column"])
+    counted = [(v, i) for i, v in enumerate(vals) if v is not None]
+    out["n"] = len(rows)
+    out["n_counted"] = len(counted)
+    if counted:
+        v, i = (max if objective["direction"] == "max" else min)(
+            counted, key=lambda t: t[0])
+        out["value"], out["row"] = v, i
+    return out
+
+
 def read_funnel(run_dir: Path | str, stages: list[str] | None = None) -> dict[str, Any]:
     """Per store: how many rows survive each 0/1 stage column, in order.
 

@@ -46,40 +46,48 @@ COLUMNS = [
     "arm_pipeline_deliverable", "arm_reproduction_gate",
     "arm_peer_interaction", "arm_max_awake_nodes",
     # Process KPIs (CLAUDE.md §1 step 5). error_returns = ERROR_RETURN events
-    # (target 0). first_feasible_* = position/time of the first canonical-store
-    # row whose objective is finite and below the infeasibility-sentinel
-    # magnitude (store._INFEASIBLE_SENTINEL_MAG); blank = none ever. best_trace
-    # = running min AND max of that objective (direction is the analyst's call)
-    # at <=20 evenly spaced eval counts: {"obj", "n", "min", "max"}.
-    "error_returns", "first_feasible_eval", "first_feasible_s", "best_trace",
+    # (target 0). `objective` = what the study declared in config.yaml
+    # (`column:direction[:feasible=col]`), else "undeclared". first_feasible_* =
+    # position/time of the first canonical-store row that COUNTS under that
+    # declaration (finite objective, and feasible==1 when declared); blank =
+    # none ever. best_trace = running best at <=20 evenly spaced eval counts:
+    # {"obj","n","best"} when declared, {"obj","n","min","max"} when not (the
+    # direction is not ours to guess).
+    "error_returns", "objective", "first_feasible_eval", "first_feasible_s",
+    "best_trace",
 ]
 
-_SENTINEL_MAG = 1e8  # mirrors nodes/tools/routing/store._INFEASIBLE_SENTINEL_MAG
 _TRACE_POINTS = 20
 
 
 def _objective_kpis(run_dir: Path) -> dict:
     """first-feasible position/time and best-so-far trace of the canonical
-    store's objective (first non-provenance column), in timestamp order."""
+    store's objective, in timestamp order, under the study's declared
+    objective (run_config.json["objective"])."""
     from datetime import datetime
+
+    from adda._src.evaluation.objective import (
+        best_so_far,
+        label,
+        objective_values,
+    )
+    try:
+        cfg = json.loads((run_dir / "debug" / "run_config.json").read_text())
+    except (OSError, ValueError):
+        cfg = {}
+    objective = cfg.get("objective") or None
+    out: dict = {"objective": label(objective)}
     oc = run_dir / "experiment_data" / "experiment_data" / "output.csv"
     if not oc.exists():
-        return {}
+        return out
     try:
         rows = list(csv.DictReader(oc.open()))
         cols = [c for c in (rows[0] if rows else {}) if c and not c.startswith("_")]
-        if not cols:
-            return {}
-        obj = cols[0]
+        if not cols and not objective:
+            return out
+        obj = objective["column"] if objective else cols[0]
         rows.sort(key=lambda r: r.get("_ts") or "")
-        vals = []
-        for r in rows:
-            try:
-                v = float(r.get(obj))
-            except (TypeError, ValueError):
-                v = float("nan")
-            vals.append(v if abs(v) < _SENTINEL_MAG else None)  # NaN -> None too
-        out: dict = {}
+        vals = objective_values(rows, objective, obj)
         first = next((i for i, v in enumerate(vals) if v is not None), None)
         if first is not None:
             out["first_feasible_eval"] = first + 1
@@ -90,24 +98,16 @@ def _objective_kpis(run_dir: Path) -> dict:
             except (OSError, ValueError, KeyError):
                 pass
         n = len(vals)
-        lo = hi = None
-        mins: list = []
-        maxs: list = []
-        for v in vals:
-            if v is not None:
-                lo = v if lo is None else min(lo, v)
-                hi = v if hi is None else max(hi, v)
-            mins.append(lo)
-            maxs.append(hi)
         if n:
             k = min(_TRACE_POINTS, n)
             idx = sorted({round((j + 1) * n / k) - 1 for j in range(k)})
+            series = best_so_far(vals, objective)
             out["best_trace"] = json.dumps({
                 "obj": obj, "n": [i + 1 for i in idx],
-                "min": [mins[i] for i in idx], "max": [maxs[i] for i in idx]})
+                **{name: [seq[i] for i in idx] for name, seq in series.items()}})
         return out
     except Exception:
-        return {}
+        return out
 
 
 def _migrate_header() -> None:

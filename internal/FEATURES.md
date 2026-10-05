@@ -846,15 +846,27 @@ SDK's `total_cost_usd` (never merged into it); `summary.json` carries
 None plus a logged warning, never zero. Validated in `tests/test_model_prices.py`
 against the SDK's cost on calls it did price.
 
+### Declared study objective (2026-10-04)
+- **What:** optional `objective:` block in config.yaml (`column`, `direction`
+  max|min, optional `feasible` 0/1 column). Parsed and validated by
+  `evaluation/objective.py::parse_objective` in `run_setup._init_canonical_store`
+  (unknown key, missing direction, or a column the declared oracle does not
+  produce refuses the run), recorded as `objective` in run_config.json.
+  `objective_values` / `best_so_far` are the one definition of "a row counts"
+  (finite, below the sentinel magnitude, and `feasible == 1` when declared):
+  `viewer/readers.py::read_figure_of_merit` (`GET /api/runs/{id}/figure_of_merit`,
+  the store's best counted row; `declared: false` when absent) and the run
+  ledger both use it. Absent block = undeclared: finite rule, running min AND
+  max, nothing ranked. Tests: `tests/test_objective_declaration.py`.
+
 ### Run-ledger process KPIs (2026-10-04)
-`studies/run_ledger.py` adds `error_returns` (count of ERROR_RETURN events,
-target 0), `first_feasible_eval` / `first_feasible_s` (position and seconds
-since `debug/run_started_at` of the first canonical-store row whose objective
-is finite and below the infeasibility-sentinel magnitude, same rule as
-`QueryStore`'s best-feasible selection; blank = never) and `best_trace` (JSON:
-running min AND max of the objective at <=20 evenly spaced eval counts; the
-direction is the analyst's call). Gate attempts remain `critic_consults`
-(count of `critic_reviews/call_NNN.md`). Validated in
+`studies/run_ledger.py` adds `error_returns` (ERROR_RETURN count, target 0),
+`objective` (`column:direction[:feasible=col]` or `undeclared`),
+`first_feasible_eval` / `first_feasible_s` (position and seconds since
+`debug/run_started_at` of the first canonical-store row that counts under the
+declared objective; blank = never) and `best_trace` (JSON, <=20 evenly spaced
+eval counts: `best` when declared, `min` and `max` when not). Gate attempts
+remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
 `tests/test_run_ledger_kpis.py`.
 
 ### Per-delegation resource telemetry

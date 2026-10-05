@@ -53,6 +53,7 @@ can set:
 | `budget_usd` | **hard** cost ceiling — halts the run when spend reaches it (resumable: raise it and resume). Inactive on a backend with no per-call cost data (e.g. Ollama) | none |
 | `required_deliverables` | extra files that must exist before the run can finish | none |
 | `evaluator` | how a design gets scored, see below | honor-system |
+| `objective` | which output is optimised, in which direction, and which 0/1 column marks a design feasible; see below | undeclared |
 
 | `runtime` | run knobs — debug capture, timeouts, retry, limits; see below | all defaulted |
 
@@ -178,6 +179,25 @@ agents write the evaluator themselves during the run.
 
 **Nothing**: no evaluator and none described falls back to the honor system, and the
 agents self-report. Fine for exploring, not for a result you want verified.
+
+## Declaring the objective
+
+Say what "best" and "feasible" mean, once, and the run ledger and the viewer's
+figure of merit both use it. Nothing is inferred from column names.
+
+```yaml
+objective:
+  column: sigma_peak
+  direction: max          # max | min
+  feasible: feasible      # optional: a 0/1 output column
+```
+
+A design counts only if its `column` value is finite and, when `feasible` is
+given, that column is 1; a finite value on an infeasible design does not count.
+`column` and `feasible` must be outputs the evaluator declares (`output_names`
+or the lookup's `output_columns`); an unknown name refuses the run at start.
+Without the block the ledger records `objective: undeclared`, judges rows by
+the finite rule alone, and reports the running min and max instead of a best.
 
 ## What the run produces
 

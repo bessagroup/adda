@@ -1374,3 +1374,19 @@ def test_funnel_route_serves_stages_and_404s_unknown_run(tmp_path):
     body = client.get("/api/runs/20260904T120000/funnel?stages=feasible").json()
     assert body["stores"][0]["stages"][0]["cumulative"] == 1
     assert client.get("/api/runs/nope/funnel").status_code == 404
+
+
+def test_figure_of_merit_route_reads_the_declared_objective(tmp_path):
+    study = _make_study(tmp_path)
+    run = _make_run(study, "20260904T120000")
+    (run / "debug").mkdir(exist_ok=True)
+    (run / "debug" / "run_config.json").write_text(json.dumps(
+        {"objective": {"column": "s", "direction": "max", "feasible": "ok"}}),
+        encoding="utf-8")
+    data = run / "experiment_data" / "experiment_data"
+    data.mkdir(parents=True)
+    (data / "output.csv").write_text(",s,ok\n0,9,0\n1,4,1\n", encoding="utf-8")
+    client = TestClient(create_app(study))
+    body = client.get("/api/runs/20260904T120000/figure_of_merit").json()
+    assert (body["value"], body["row"]) == (4.0, 1)
+    assert client.get("/api/runs/nope/figure_of_merit").status_code == 404

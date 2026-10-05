@@ -886,6 +886,13 @@ def create_app(
         stages = [c for c in raw.split(",") if c] if raw is not None else None
         return JSONResponse(readers.read_funnel(run_dir, stages))
 
+    async def get_figure_of_merit(request):
+        run_id = request.path_params["run_id"]
+        run_dir = _run_dir(study_dir, run_id)
+        if run_dir is None:
+            return _not_found(f"no such run {run_id!r}")
+        return JSONResponse(readers.read_figure_of_merit(run_dir))
+
     async def get_monitor(request):
         run_id = request.path_params["run_id"]
         run_dir = _run_dir(study_dir, run_id)
@@ -1118,6 +1125,7 @@ def create_app(
         Route("/api/runs/{run_id}/oracle", get_oracle),
         Route("/api/runs/{run_id}/trajectory", get_trajectory),
         Route("/api/runs/{run_id}/funnel", get_funnel),
+        Route("/api/runs/{run_id}/figure_of_merit", get_figure_of_merit),
         Route("/api/runs/{run_id}/monitor", get_monitor),
         Route("/api/runs/{run_id}/artifacts", get_artifacts),
         Route("/api/runs/{run_id}/artifact", get_artifact),
