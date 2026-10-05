@@ -35,7 +35,7 @@ _CALL = re.compile(
 _DERIVED_DEFAULTS = {"stop_grace_s": ("math.nan", "min(900, deadline/10)")}
 
 
-_VIEWER_READ = {"launch"}
+_VIEWER_READ = {"launch": "none"}
 
 
 def _keys_read_in_source() -> set[str]:
@@ -52,7 +52,7 @@ def _keys_read_in_source() -> set[str]:
     found |= set(features.FEATURE_KEYS)
     # `launch` is a mapping the viewer reads from config.yaml itself
     # (viewer/run_control.py::launcher_config), not through get_*.
-    found |= _VIEWER_READ
+    found |= set(_VIEWER_READ)
     return found
 
 
@@ -123,6 +123,7 @@ def _defaults_in_source() -> dict[str, str]:
             out[key] = default.strip()
     for feature in features.FEATURES:
         out[feature.key] = str(feature.default)
+    out.update(_VIEWER_READ)
     return out
 
 
