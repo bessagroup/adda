@@ -206,8 +206,13 @@ kbd{font:500 var(--t-label)/1 var(--f-ui);border:1px solid var(--rule-strong);bo
 .cht .refl{fill:var(--ink-2);font-size:var(--t-meta)}
 .cht .step{fill:none;stroke:var(--ink);stroke-width:2}
 .dot{cursor:pointer}
-.cht .dot.f{fill:var(--role);stroke:var(--surface);stroke-width:1.5}
-.cht .dot.i{fill:none;stroke:var(--ink-3);stroke-width:1.5}
+.cht .dot.f{fill:var(--ink-2);stroke:var(--surface);stroke-width:1.5}
+.cht .dot.i{fill:none;stroke:var(--ink-2);stroke-width:1.5;opacity:.4}
+.cht .dot.i:hover{opacity:1}
+.cht .edgetick{stroke:var(--ink-3);stroke-width:2;opacity:.6}
+.cht .bestlab{fill:var(--ink);font-weight:600;font-size:var(--t-meta);cursor:pointer;paint-order:stroke;stroke:var(--surface);stroke-width:4px;stroke-linejoin:round}
+.cht .bestlab:hover,.cht .bestlab:focus-visible{fill:var(--select)}
+.cht .refl{paint-order:stroke;stroke:var(--surface);stroke-width:3px}
 .cht .dot:hover{stroke:var(--ink);stroke-width:2}
 .cht .dot.sel{stroke:var(--select);stroke-width:3}
 .tip{position:absolute;z-index:5;background:var(--ink);color:var(--surface);border-radius:var(--r-ctl);padding:var(--s2) var(--s3);font-size:var(--t-meta);pointer-events:none;min-width:160px;box-shadow:var(--shadow)}
@@ -216,12 +221,10 @@ kbd{font:500 var(--t-label)/1 var(--f-ui);border:1px solid var(--rule-strong);bo
 .legend{display:flex;gap:var(--s4);flex-wrap:wrap;font-size:var(--t-meta);color:var(--ink-2);margin-top:var(--s2);align-items:center}
 .legend span{display:inline-flex;align-items:center;gap:var(--s2)}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:50%}
-.legend i.f{background:var(--role)}
-.legend i.i{border:1.5px solid var(--ink-3)}
-.legend i.sw{background:var(--role);border-radius:2px}
-.nskey{border:1px solid var(--rule-strong);background:var(--surface);border-radius:var(--r-ctl);padding:var(--s1) var(--s2);font-size:var(--t-meta);color:var(--ink-2);cursor:pointer;display:inline-flex;align-items:center;gap:var(--s2)}
-.nskey small{color:var(--ink-3)}
-.nskey[aria-pressed=false]{opacity:.5;text-decoration:line-through}
+.legend i.f{background:var(--ink-2)}
+.legend i.i{border:1.5px solid var(--ink-2);opacity:.4}
+.legend svg{margin-right:var(--s1)}
+.legend svg .dot{fill:var(--ink-2);stroke:none}
 .legend i.stepkey{width:16px;height:2px;border-radius:0;background:var(--ink)}
 .funnel{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:var(--s2)}
 .stage{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-panel);padding:var(--s3);min-width:0}

@@ -1409,10 +1409,14 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
   tab on an open run, never by a hidden tab or a closed run. Send shows "Answered, undo for 10 s" and
   posts when the window ends (or at once if the tab is hidden or closed); Undo restores the text.
   `viewer_shots.py --banner` builds a pending-question fixture and shoots it.
-  **Build step 3, Data view (spec 15 4.3):** best-so-far over elapsed time from the declared objective, one
-  step line across every scored store (dots marked per namespace; the legend filters dots; the title's best
-  row names its store and selects it) (`/figure_of_merit` + `/trajectory`), reference lines only from `objective.lines`, display scaling only
-  from `objective.unit_label` (one function, `disp`); feasible dots filled in the producing role's colour,
+  **Build step 3, Data view (spec 15 4.3):** best-so-far from the declared objective, scored across every
+  store that records its columns (`/figure_of_merit` + `/trajectory`); x is the evaluation number (a toggle
+  gives elapsed hours), both axes fit the data (never forced to zero), a log-y toggle appears only when
+  counted values span more than two decades. The store switcher picks the focus store whose dots are drawn
+  (it follows a selected row); the best line and the "value unit · store row N" label span all stores and
+  the label selects that row. Reference lines come only from `objective.lines`; one outside the range becomes
+  an edge tag ("above/below range"), and uncounted rows outside it become edge ticks. Display scaling only
+  from `objective.unit_label` (one function, `disp`); counted dots filled in the producing role's colour,
   infeasible hollow, click selects `sel=row:N`. The funnel (`/funnel`) shows each stage's cumulative and
   "alone" counts. The store table is virtualised, sortable, with a column picker remembered per viewer
   (localStorage). `/trajectory` stores now also carry `inputs` and `text` (non-numeric output columns) so a

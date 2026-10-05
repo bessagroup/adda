@@ -22,7 +22,7 @@ const S = {
   vitals: null, dels: [], ledger: { hypotheses: [], milestones: [] }, fom: null,
   reviews: [], evidence: {}, follow: false, timer: null, sig: "", loaded: false,
   error: null, questions: [], drafts: {}, errs: {}, holding: {}, toast: null, qsig: "",
-  data: null, dsig: "", ns: null, sort: null, cols: null, tscroll: 0,
+  data: null, dsig: "", ns: undefined, sort: null, cols: null, tscroll: 0,
 };
 
 /* ── helpers ─────────────────────────────────────────────────────────────── */
@@ -183,7 +183,7 @@ async function get(path) {
 function resetRun() {
   lastRun = S.run;
   S.vitals = null; S.dels = []; S.ledger = { hypotheses: [], milestones: [] };
-  S.fom = null; S.data = null; S.dsig = ""; S.ns = null; S.hide = {}; S.sort = null; S.tscroll = 0;
+  S.fom = null; S.data = null; S.dsig = ""; S.ns = undefined; S.xmode = "eval"; S.logy = false; S.sort = null; S.tscroll = 0;
   S.reviews = []; S.evidence = {}; S.sig = ""; S.loaded = false; S.error = null; S.questions = []; S.qsig = "";
   clearTimeout(S.timer);
   tick();
@@ -539,8 +539,9 @@ function fmtVal(v) { const u = unitOf(); return fmtNum(disp(v)) + (u ? " " + u.l
 const stores = () => (S.data && S.data.traj ? S.data.traj.stores : []);
 const nsOf = (st) => st.namespace || null;
 function curStore() {
-  const all = stores();
-  return all.find((x) => nsOf(x) === S.ns) || all.find((x) => nsOf(x) === null) || all[0] || null;
+  const all = stores(), f = S.fom && S.fom.declared && S.fom.row != null ? S.fom : null;
+  const want = S.ns !== undefined ? S.ns : f ? f.namespace || null : null;
+  return all.find((x) => nsOf(x) === want) || all.find((x) => nsOf(x) === null) || all[0] || null;
 }
 const rowKey = (st, i) => "row:" + (nsOf(st) ? nsOf(st) + ":" : "") + i;
 const ROW_RE = /^row:(?:([^:]+):)?(\d+)$/;
@@ -617,59 +618,92 @@ function markPath(kind, x, y) {
   if (kind === "triangle") return `M${x} ${y - r - 1}L${x + r + 1} ${y + r}L${x - r - 1} ${y + r}z`;
   return `M${x - r + 1} ${y}a${r - 1} ${r - 1} 0 1 0 ${2 * (r - 1)} 0a${r - 1} ${r - 1} 0 1 0 ${-2 * (r - 1)} 0z`;
 }
+function chartModel() {
+  const f = S.fom, names = scoredList(), all = stores().filter((x) => names.includes(nsOf(x)));
+  const rows = [];
+  all.forEach((st, si) => {
+    const col = st.columns[f.column], fe = f.feasible && st.columns[f.feasible] ? st.columns[f.feasible].values : null;
+    for (let i = 0; i < st.n; i++) {
+      const raw = col ? col.values[i] : null, finite = raw != null && Math.abs(raw) < SENTINEL;
+      rows.push({ st, si, i, t: parseT(st.ts[i]), y: finite ? disp(raw) : null, ok: finite && (fe ? fe[i] === 1 : !f.feasible) });
+    }
+  });
+  rows.sort((a, b) => (a.t == null) - (b.t == null) || (a.t || 0) - (b.t || 0) || a.si - b.si || a.i - b.i);
+  const t0 = runT0();
+  rows.forEach((r, k) => { r.ev = k + 1; r.h = r.t != null && t0 != null ? (r.t - t0) / 3600 : null; });
+  return { all, rows };
+}
 function chartHtml(W) {
   const f = S.fom;
   if (!f || !f.declared) return note("The study declares no objective, so there is no best-so-far to draw. Declare one in an <code>objective:</code> block of config.yaml.");
-  const names = scoredList(), all = stores().filter((x) => names.includes(nsOf(x)));
+  const { all, rows } = chartModel(), focus = curStore();
   const notScored = (f.not_scored || []).map((x) => `${esc(x.namespace || "canonical")} (missing ${x.missing.map(esc).join(", ")})`);
   if (!all.length) return note(`No store records the declared objective <b>${esc(f.column)}</b> yet.` + (notScored.length ? ` Not scored: ${notScored.join("; ")}.` : ""));
-  const t0 = runT0(), pts = []; let undrawn = 0, total = 0;
-  all.forEach((st, si) => {
-    const col = st.columns[f.column], fe = f.feasible && st.columns[f.feasible] ? st.columns[f.feasible].values : null;
-    total += st.n;
-    for (let i = 0; i < st.n; i++) {
-      const y = col ? col.values[i] : null, t = parseT(st.ts[i]);
-      if (y == null || Math.abs(y) >= SENTINEL || t == null || t0 == null) { undrawn++; continue; }
-      pts.push({ st, si, i, x: (t - t0) / 3600, y: disp(y), ok: fe ? fe[i] === 1 : !f.feasible });
-    }
-  });
-  const lines = (f.lines || []).map((l) => ({ y: disp(l.value), label: l.label }));
-  const counted = pts.filter((p) => p.ok);
-  const basis = counted.length || lines.length ? [...counted.map((p) => p.y), ...lines.map((l) => l.y)] : pts.map((p) => p.y);
-  if (!pts.length) return note("No row has a finite value for the objective yet.");
-  let lo = Math.min(...basis), hi = Math.max(...basis);
+  const counted = rows.filter((r) => r.ok), drawable = rows.filter((r) => r.y != null);
+  if (!drawable.length) return note("No row has a finite value for the objective yet.");
+  const useTime = S.xmode === "time" && rows.every((r) => r.h != null), xv = (r) => (useTime ? r.h : r.ev);
+  const basis = (counted.length ? counted : drawable).map((r) => r.y);
+  const pos = counted.length > 0 && counted.every((r) => r.y > 0), decades = pos ? Math.log10(Math.max(...basis) / Math.min(...basis)) : 0;
+  const canLog = decades > 2, log = canLog && S.logy;
+  const tf = log ? Math.log10 : (v) => v;
+  let lo = tf(Math.min(...basis)), hi = tf(Math.max(...basis));
   if (lo === hi) { lo -= 1; hi += 1; }
   const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
-  const hidden = S.hide || {}, vis = pts.filter((p) => !hidden[nsOf(p.st) || ""]);
-  const shown = vis.filter((p) => p.y >= lo && p.y <= hi), clipped = vis.length - shown.length;
-  const xEnd = Math.max(...pts.map((p) => p.x), (elapsedNow() || 0) / 3600, 0.1) * 1.02;
-  const H = 300, L = 56, R = 16, T = 28, B = 32;
-  const sx = (x) => L + (x / xEnd) * (W - L - R), sy = (y) => T + (1 - (y - lo) / (hi - lo)) * (H - T - B);
-  const grid = niceTicks(lo, hi, 5).map((v) => `<line class="gl" x1="${L}" x2="${W - R}" y1="${sy(v)}" y2="${sy(v)}"/><text x="${L - 8}" y="${sy(v) + 4}" text-anchor="end">${fmtNum(v)}</text>`).join("") +
-    niceTicks(0, xEnd, 6).map((v) => `<text x="${sx(v)}" y="${H - B + 18}" text-anchor="middle">${v === 0 ? "0" : "+" + v + " h"}</text>`).join("");
-  const refs = lines.map((l) => `<line class="ref" x1="${L}" x2="${W - R}" y1="${sy(l.y)}" y2="${sy(l.y)}"/><text class="refl" x="${W - R - 4}" y="${sy(l.y) - 6}" text-anchor="end">${esc(l.label)}</text>`).join("");
+  let x0 = Math.min(...rows.map(xv)), x1 = Math.max(...rows.map(xv));
+  if (x0 === x1) { x0 -= 1; x1 += 1; }
+  const xp = (x1 - x0) * 0.02; x0 -= xp; x1 += xp;
+  const phone = W < 520, H = phone ? 200 : 260, L = 48, R = 12, T = 10, B = 22;
+  const sx = (x) => L + ((x - x0) / (x1 - x0)) * (W - L - R), sy = (y) => T + (1 - (tf(y) - lo) / (hi - lo)) * (H - T - B);
+  const inY = (y) => y != null && (!log || y > 0) && tf(y) >= lo && tf(y) <= hi;
+  const yTicks = log ? niceTicks(Math.ceil(lo), Math.floor(hi), 4).map((e) => Math.pow(10, e)) : niceTicks(lo, hi, 4);
+  const xTicks = niceTicks(x0 < 0 ? 0 : x0, x1, phone ? 4 : 6).filter((v) => v >= x0 && v <= x1);
+  const grid = yTicks.filter(inY).map((v) => `<line class="gl" x1="${L}" x2="${W - R}" y1="${sy(v)}" y2="${sy(v)}"/><text x="${L - 6}" y="${sy(v) + 4}" text-anchor="end">${fmtNum(v)}</text>`).join("") +
+    xTicks.map((v) => `<text x="${sx(v)}" y="${H - 6}" text-anchor="middle">${useTime ? "+" + v + " h" : v}</text>`).join("");
+  let above = 0, below = 0;
+  const refs = (f.lines || []).map((l) => {
+    const y = disp(l.value);
+    if (inY(y)) return `<line class="ref" x1="${L}" x2="${W - R}" y1="${sy(y)}" y2="${sy(y)}"/><text class="refl" x="${W - R - 4}" y="${sy(y) - 5}" text-anchor="end">${esc(l.label)}</text>`;
+    const isUp = log ? y > 0 && tf(y) > hi : y > hi, row = isUp ? above++ : below++;
+    return `<text class="refl tag" x="${W - R - 4}" y="${isUp ? T + 10 + row * 13 : H - B - 5 - row * 13}" text-anchor="end">${esc(l.label)} ${isUp ? "↑ above" : "↓ below"} range</text>`;
+  }).join("");
   const better = f.direction === "max" ? Math.max : Math.min;
-  let best = null, d = "";
-  counted.slice().sort((a, b) => a.x - b.x).forEach((p) => {
-    if (best == null) { best = p.y; d = `M${sx(p.x)} ${sy(best)}`; }
-    else if (better(best, p.y) !== best) { d += `H${sx(p.x)}V${sy(p.y)}`; best = p.y; }
+  let best = null, bestRow = null, d = "";
+  counted.forEach((r) => {
+    if (best == null) { best = r.y; bestRow = r; d = `M${sx(xv(r))} ${sy(best)}`; }
+    else if (better(best, r.y) !== best) { d += `H${sx(xv(r))}V${sy(r.y)}`; best = r.y; bestRow = r; }
   });
-  if (d) d += `H${sx(xEnd)}`;
-  const dot = (p) => {
-    const dm = DM.get(p.st.delegation[p.i]), key = rowKey(p.st, p.i);
-    return `<path class="dot ${p.ok ? "f" : "i"}${S.sel === key ? " sel" : ""}" d="${markPath(MARKS[p.si % MARKS.length], sx(p.x), sy(p.y))}" data-sel="${key}" data-row="${p.i}" data-ns="${esc(nsOf(p.st) || "")}"` +
-      (p.ok ? ` style="--role:var(${dm ? "--r-" + esc(dm) : "--ink-2"})"` : "") + `/>`;
+  if (d) d += `H${sx(x1 - xp)}`;
+  const focusNs = nsOf(focus), mine = rows.filter((r) => nsOf(r.st) === focusNs);
+  const dot = (r) => {
+    const key = rowKey(r.st, r.i);
+    return `<path class="dot ${r.ok ? "f" : "i"}${S.sel === key ? " sel" : ""}" d="${markPath(MARKS[r.si % MARKS.length], sx(xv(r)), sy(r.y))}" data-sel="${key}" data-row="${r.i}" data-ns="${esc(nsOf(r.st) || "")}"/>`;
   };
-  const roles = [...new Set(counted.map((p) => DM.get(p.st.delegation[p.i])).filter(Boolean))];
-  const unit = unitOf() ? unitOf().label : f.column;
-  const nsKey = all.map((st, si) => `<button class="nskey" data-hide="${esc(nsOf(st) || "")}" aria-pressed="${!hidden[nsOf(st) || ""]}" title="Show or hide this store’s dots. The best-so-far line always spans every scored store."><svg width="14" height="14" viewBox="-7 -7 14 14"><path class="dot f" style="--role:var(--ink-2)" d="${markPath(MARKS[si % MARKS.length], 0, 0)}"/></svg>${esc(nsOf(st) || "canonical")}<small>${st.n}</small></button>`).join("");
-  const cap = `${counted.length} counted of ${total} rows` + (all.length > 1 ? ` across ${all.length} stores` : "") + (undrawn ? ` · ${undrawn} with no finite value or time are not drawn` : "") + (clipped ? ` · ${clipped} outside the axis` : "") + (notScored.length ? ` · not scored: ${notScored.join("; ")}` : "");
-  return `<div class="chartwrap"><svg class="cht" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Best ${esc(f.column)} so far over elapsed time">` +
-    `<text class="ylab" x="${L - 8}" y="${T - 12}" text-anchor="start">${esc(unit)}</text>${grid}${refs}` +
-    `<path class="step" d="${d}"/>${shown.filter((p) => !p.ok).map(dot).join("")}${shown.filter((p) => p.ok).map(dot).join("")}</svg><div class="tip" id="tip" hidden></div></div>` +
-    `<div class="legend">${all.length > 1 ? nsKey : ""}<span><i class="dot f" style="--role:var(--ink-2)"></i>feasible, in its role’s colour</span><span><i class="dot i"></i>infeasible</span>` +
-    roles.map((r) => `<span><i class="sw" style="--role:var(--r-${esc(r)})"></i>${esc(shortRole(r))}</span>`).join("") + `<span><i class="stepkey"></i>best so far (${esc(f.direction)})</span></div>` +
+  const inside = mine.filter((r) => r.y != null && inY(r.y)), edge = mine.filter((r) => r.y != null && !inY(r.y));
+  const ticks = edge.map((r) => { const up = log ? r.y > 0 && tf(r.y) > hi : r.y > hi, y = up ? T : H - B;
+    return `<line class="edgetick" x1="${sx(xv(r))}" x2="${sx(xv(r))}" y1="${y}" y2="${y + (up ? 6 : -6)}"/>`; }).join("");
+  let bestLab = "";
+  if (bestRow) {
+    const bx = W - R - 4, by = sy(best), flip = by < T + 18, bk = rowKey(bestRow.st, bestRow.i);
+    bestLab = `<text class="bestlab" role="button" tabindex="0" data-sel="${bk}" x="${bx}" y="${flip ? by + 16 : by - 7}" text-anchor="end">${esc(fmtNum(best))}${unitOf() ? " " + esc(unitOf().label) : ""} · ${esc(nsOf(bestRow.st) || "canonical")} row ${bestRow.i}</text>`;
+  }
+  const marks = all.length > 1 ? all.map((st, si) => `<span title="Mark shape for this store"><svg width="14" height="14" viewBox="-7 -7 14 14"><path class="dot f" d="${markPath(MARKS[si % MARKS.length], 0, 0)}"/></svg>${esc(nsOf(st) || "canonical")}</span>`).join("") : "";
+  const noX = rows.length - drawable.length;
+  const cap = `${counted.length} counted of ${rows.length} rows` + (all.length > 1 ? ` across ${all.length} stores; dots for the ${esc(focusNs || "canonical")} store` : "") +
+    (noX ? ` · ${noX} with no finite value are not drawn` : "") + (edge.length ? ` · ${edge.length} outside the range (ticks at the edge)` : "") +
+    (S.xmode === "time" && !useTime ? " · some rows carry no time, so the axis is the evaluation number" : "") + (notScored.length ? ` · not scored: ${notScored.join("; ")}` : "");
+  return `<div class="chartwrap"><svg class="cht" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Best ${esc(f.column)} so far over ${useTime ? "elapsed time" : "evaluations"}">` +
+    `${grid}${refs}<path class="step" d="${d}"/>${ticks}${inside.filter((r) => !r.ok).map(dot).join("")}${inside.filter((r) => r.ok).map(dot).join("")}${bestLab}</svg><div class="tip" id="tip" hidden></div></div>` +
+    `<div class="legend"><span><i class="dot f"></i>counted</span><span><i class="dot i"></i>not counted</span>${marks}<span><i class="stepkey"></i>best so far (${esc(f.direction)})</span></div>` +
     `<div class="dcap">${cap}</div>`;
+}
+function chartControls() {
+  const f = S.fom; if (!f || !f.declared) return "";
+  const { rows } = chartModel(), counted = rows.filter((r) => r.ok).map((r) => r.y);
+  const canTime = rows.length > 0 && rows.every((r) => r.h != null);
+  const canLog = counted.length > 0 && counted.every((v) => v > 0) && Math.log10(Math.max(...counted) / Math.min(...counted)) > 2;
+  return `<div class="seg" role="group" aria-label="Chart x axis"><button data-xmode="eval" aria-pressed="${S.xmode !== "time" || !canTime}">evaluation</button>` +
+    `<button data-xmode="time" aria-pressed="${S.xmode === "time" && canTime}"${canTime ? "" : " disabled title=\"Some rows record no time\""}>elapsed time</button></div>` +
+    (canLog ? `<div class="seg" role="group" aria-label="Chart y scale"><button data-logy="0" aria-pressed="${!S.logy}">linear</button><button data-logy="1" aria-pressed="${!!S.logy}">log</button></div>` : "");
 }
 function funnelHtml(st) {
   const fn = S.data.fun && S.data.fun.stores.find((x) => x.namespace === st.namespace);
@@ -714,15 +748,17 @@ function paintRows() {
 function paintData(w) {
   if (!S.data) { w.innerHTML = '<div class="skel"><div></div><div></div><div></div></div>'; return; }
   if (S.data.error) { w.innerHTML = `<div class="empty"><h3>Data</h3><p>Could not read the store (${esc(S.data.error)}). Retrying.</p></div>`; return; }
+  const selRow = ROW_RE.exec(S.sel || "");
+  if (selRow && S.lastRowSel !== S.sel) S.ns = selRow[1] || null;
   const st = curStore();
   if (!st) { w.innerHTML = '<div class="empty"><h3>Data</h3><p>This run has no oracle store yet. Rows appear here once the oracle evaluates its first design.</p></div>'; return; }
   DM = new Map(S.dels.map((d) => [d.id, d.to_node]));
   const m = model(st), all = stores();
   const seg = all.length > 1 ? `<div class="seg" role="group" aria-label="Store">` + all.map((x) =>
-    `<button data-ns="${esc(nsOf(x) || "")}" aria-pressed="${nsOf(x) === nsOf(st)}">${esc(nsOf(x) || "canonical")}<small>${x.n}</small></button>`).join("") + `</div>` : "";
+    `<button data-store="${esc(nsOf(x) || "")}" aria-pressed="${nsOf(x) === nsOf(st)}" title="Show this store’s dots, funnel and rows. The best-so-far line always spans every scored store.">${esc(nsOf(x) || "canonical")}<small>${x.n}</small></button>`).join("") + `</div>` : "";
   const W = Math.max(320, w.clientWidth - 2 * 24);
   const f = S.fom && S.fom.declared ? S.fom : null;
-  w.innerHTML = `<div class="data"><div class="dh"><h3>Best so far${f ? ` · ${esc(f.column)}` : ""}</h3>${f ? `<span class="dcap">${f.direction === "max" ? "higher" : "lower"} is better${f.feasible ? ", counting rows where " + esc(f.feasible) + " = 1" : ""}</span>` : ""}<span class="sp"></span>${seg}</div>` +
+  w.innerHTML = `<div class="data"><div class="dh"><h3>Best so far${f ? ` · ${esc(f.column)}${unitOf() ? " (" + esc(unitOf().label) + ")" : ""}` : ""}</h3>${f ? `<span class="dcap">${f.direction === "max" ? "higher" : "lower"} is better${f.feasible ? ", counting rows where " + esc(f.feasible) + " = 1" : ""}</span>` : ""}<span class="sp"></span>${seg}${chartControls()}</div>` +
     chartHtml(W) + `<div class="dh"><h3>Stage funnel</h3></div>` + funnelHtml(st) + `<div class="dh"><h3>Store</h3></div>` + tableHtml(st, m) + `</div>`;
   const cols = visibleCols(st, m);
   TBL = { st, m, cols, order: tableOrder(st, m) };
@@ -769,10 +805,12 @@ document.addEventListener("scroll", (e) => {
   if (e.target && e.target.id === "tbl") { S.tscroll = e.target.scrollTop; paintRows(); }
 }, true);
 document.addEventListener("click", (e) => {
-  const ns = e.target.closest("[data-ns]");
-  if (ns) { S.ns = ns.dataset.ns || null; S.tscroll = 0; S.sort = null; paintWork(); return; }
-  const hd = e.target.closest("[data-hide]");
-  if (hd) { S.hide = { ...(S.hide || {}), [hd.dataset.hide]: !(S.hide || {})[hd.dataset.hide] }; paintWork(); return; }
+  const ns = e.target.closest("[data-store]");
+  if (ns) { S.ns = ns.dataset.store || null; S.tscroll = 0; S.sort = null; paintWork(); return; }
+  const xm = e.target.closest("[data-xmode]");
+  if (xm) { S.xmode = xm.dataset.xmode; paintWork(); return; }
+  const lg = e.target.closest("[data-logy]");
+  if (lg) { S.logy = lg.dataset.logy === "1"; paintWork(); return; }
   const so = e.target.closest("[data-sort]");
   if (so) {
     const cur = S.sort || { key: "#", dir: "desc" };

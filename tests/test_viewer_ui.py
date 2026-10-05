@@ -179,10 +179,11 @@ def test_data_view_draws_the_declared_objective_in_display_units(tmp_path, page)
         assert page.locator(".cht .dot.f").count() == 3
         # the axis follows the counted rows; the infeasible row above it is reported, not drawn
         assert page.locator(".cht .dot.i").count() == 2
-        assert "1 outside the axis" in page.locator(".dcap", has_text="outside the axis").inner_text()
+        assert page.locator(".cht .edgetick").count() == 1
+        assert "1 outside the range" in page.locator(".dcap", has_text="outside the range").inner_text()
         assert "reference" in page.locator(".cht .refl").text_content()
-        assert page.locator(".cht .ylab").text_content() == "x unit"   # one scaling, in one place
-        assert "Best so far" in page.locator(".dh h3").first.inner_text()
+        assert "(x unit)" in page.locator(".dh h3").first.inner_text()   # one scaling, in one place
+        assert "2.5 x unit · canonical row 4" in page.locator(".cht .bestlab").text_content()
         page.locator(".cht .dot.f").first.click(force=True)
         page.wait_for_selector(".ih")
         assert "sel=row%3A" in page.url
@@ -252,12 +253,14 @@ def test_the_best_row_and_chart_span_every_store_and_name_the_namespace(tmp_path
         page.wait_for_selector("svg.cht")
         best = page.locator("#title button.vital.link")
         assert "4 x unit" in best.inner_text() and "alpha row 1" in best.inner_text()
-        # the canonical store (3 counted) and the namespace (2 counted) both draw dots
-        assert page.locator(".cht .dot.f[data-ns='']").count() == 3
+        # the switcher opens on the store holding the best row and filters the dots, not the line
         assert page.locator(".cht .dot.f[data-ns='alpha']").count() == 2
-        page.click("[data-hide='alpha']")
+        assert page.locator(".cht .dot[data-ns='']").count() == 0
+        line = page.locator(".cht .step").get_attribute("d")
+        page.click("[data-store='']")
+        assert page.locator(".cht .dot.f[data-ns='']").count() == 3
         assert page.locator(".cht .dot[data-ns='alpha']").count() == 0
-        assert page.locator(".cht .step").get_attribute("d")        # the line still spans every store
+        assert page.locator(".cht .step").get_attribute("d") == line
         best.click()
         page.wait_for_selector(".ih")
         assert "sel=row%3Aalpha%3A1" in page.url
@@ -276,3 +279,49 @@ def test_a_store_without_the_declared_columns_is_named_not_scored(tmp_path, page
         page.goto(f"{srv.url}/ui?run={RUN}&view=data")
         page.wait_for_selector("svg.cht")
         assert "not scored: beta (missing score, feasible)" in page.locator(".dcap", has_text="not scored").inner_text()
+
+
+def test_the_chart_fits_its_data_and_fills_its_panel(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _with_store(run_dir, n=40)
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector("svg.cht")
+        assert page.locator("svg.cht").get_attribute("height") == "260"
+        # the y axis hugs the data (8% pad), it is not stretched to a round bound
+        ticks = [float(t) for t in page.locator(".cht .gl + text").all_text_contents()]
+        assert max(ticks) <= 21 and min(ticks) >= -2     # counted values span 0.5 to 19.5
+        # x is the evaluation number by default, elapsed time on request
+        assert "+" not in "".join(page.locator(".cht text:not(.bestlab):not(.refl)").all_text_contents())
+        page.click("[data-xmode='time']")
+        assert "h" in "".join(page.locator(".cht text").all_text_contents())
+
+
+def test_a_reference_line_outside_the_range_becomes_an_edge_tag(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    far = {**OBJECTIVE, "lines": [{"value": 500.0, "label": "far goal"}]}
+    _with_store(run_dir, objective=far)
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector("svg.cht")
+        assert page.locator(".cht line.ref").count() == 0
+        assert "far goal ↑ above range" in page.locator(".cht .refl.tag").text_content()
+
+
+def test_a_log_toggle_appears_only_when_the_values_span_two_decades(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    _with_store(run_dir)
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector("svg.cht")
+        assert page.locator("[data-logy]").count() == 0
+    data = run_dir / "experiment_data" / "experiment_data"
+    n = 6
+    (data / "output.csv").write_text(
+        ",score,feasible,note,_delegation_id,_ts\n" + "".join(
+            f"{i},{10 ** i},1,n{i},D001,2026-09-17T12:{i:02d}:00+00:00\n" for i in range(n)))
+    with _LiveServer(create_app(study)) as srv:
+        page.goto(f"{srv.url}/ui?run={RUN}&view=data")
+        page.wait_for_selector("[data-logy]")
+        page.click("[data-logy='1']")
+        assert page.locator("[data-logy='1'][aria-pressed='true']").count() == 1
