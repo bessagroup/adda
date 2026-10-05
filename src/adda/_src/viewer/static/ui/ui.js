@@ -9,7 +9,7 @@ const VIEWS = [
   ["deliverable", "Deliverable"], ["logs", "Logs"], ["setup", "Setup"],
 ];
 const UNBUILT = {};
-const HOUR_PX = 96, MIN_CARD = 26, BREAK_S = 1800, BREAK_PX = 24, BREAK_LEAD = 16, POLL_MS = 5000;
+const FIT_HOUR_PX = 1800, TICK_STEPS = [60, 120, 300, 600, 900, 1800, 3600], HOUR_PX = 96, MIN_CARD = 26, BREAK_S = 1800, BREAK_PX = 24, BREAK_LEAD = 16, POLL_MS = 5000;
 const $ = (id) => document.getElementById(id);
 
 const S = {
@@ -403,6 +403,10 @@ function runT0() {
   return (v && v.started_at && parseT(v.started_at)) ??
     Math.min(...S.dels.map((d) => parseT(d.started_at)).filter((x) => x != null));
 }
+function tickLabel(sec) {
+  const m = Math.round(sec / 60), h = Math.floor(m / 60), r = m % 60;
+  return h && r ? `${h} h ${r} m` : h ? `${h} h` : `${m} m`;
+}
 function timelineHtml() {
   const v = S.vitals, t0 = runT0(), now = Date.now() / 1000;
   const items = [];
@@ -415,7 +419,9 @@ function timelineHtml() {
     items.push({ d, kind: "card", queued, posted, a: begun, b: Math.max(done ?? begun, begun) });
   });
   const end = Math.max(...items.map((i) => i.b ?? i.a), v.closed && v.elapsed_s ? t0 + v.elapsed_s : 0, v.closed ? 0 : now);
-  const hours = Math.max(1, Math.ceil((end - t0) / 3600));
+  // A closed run is fitted to the pane (at least MIN_HOUR_PX, at most FIT_HOUR_PX per hour); a live run keeps a steady scale.
+  const fitPx = v.closed && end > t0 ? ((window.innerHeight - $("work").getBoundingClientRect().top - 120) * 3600) / (end - t0) : 0;
+  const hourPx = Math.max(HOUR_PX, Math.min(FIT_HOUR_PX, fitPx));
   // Spans longer than BREAK_S in which nothing runs (and no gate falls) are drawn as a BREAK_PX band.
   const busy = items.map((i) => [i.a, i.kind === "gate" ? i.a : i.b]).sort((x, y) => x[0] - y[0]);
   const breaks = [];
@@ -425,9 +431,9 @@ function timelineHtml() {
     cursor = Math.max(cursor, b);
   });
   if (end - cursor > BREAK_S) breaks.push({ from: cursor, to: end });
-  breaks.forEach((k) => { k.saved = ((k.to - k.from) / 3600) * HOUR_PX - BREAK_PX - BREAK_LEAD; });
+  breaks.forEach((k) => { k.saved = ((k.to - k.from) / 3600) * hourPx - BREAK_PX - BREAK_LEAD; });
   const px = (t) => {
-    let y = ((t - t0) / 3600) * HOUR_PX;
+    let y = ((t - t0) / 3600) * hourPx;
     for (const k of breaks) {
       if (t >= k.to) y -= k.saved;
       else if (t > k.from) y -= ((t - k.from) / (k.to - k.from)) * k.saved;
@@ -447,13 +453,15 @@ function timelineHtml() {
   const avail = $("work").clientWidth - 72 - 2 * 16;
   const COL_PX = Math.max(150, Math.min(260, Math.floor(avail / slots)));
   const stackW = slots * COL_PX;
-  const totalPx = Math.max(px(end) + MIN_CARD, px(t0 + hours * 3600));
+  const step = TICK_STEPS.find((x) => (x * hourPx) / 3600 >= 48) || Math.ceil((48 * 3600) / hourPx / 3600) * 3600;
+  const nTicks = Math.max(1, Math.floor((end - t0) / step));
+  const totalPx = px(end) + MIN_CARD;
   const ticks = [], rules = [];
-  for (let h = 0; h <= hours; h++) {
-    const t = t0 + h * 3600;
+  for (let h = 0; h <= nTicks; h++) {
+    const t = t0 + h * step;
     if (breaks.some((k) => t > k.from && t < k.to)) continue;
     const y = px(t);
-    ticks.push(`<div class="tick" style="top:${y}px">${h === 0 ? "0" : "+" + h + " h"}</div>`);
+    ticks.push(`<div class="tick" style="top:${y}px">${h === 0 ? "0" : "+" + tickLabel(h * step)}</div>`);
     rules.push(`<div class="hr" style="top:${y}px"></div>`);
   }
   const bands = breaks.map((k) => `<div class="brk" style="top:${px(k.from) + BREAK_LEAD}px;height:${BREAK_PX}px"><span>${esc(fmtDur(k.to - k.from)).replace(/^(\d+ h \d+)$/, '$1 m')} with no delegation running</span></div>`);
@@ -462,7 +470,8 @@ function timelineHtml() {
     const d = i.d;
     if (i.kind === "gate") {
       const [c, l] = delState(d), y = px(i.a);
-      const w = 22 + 7 * ("gate · " + l).length;
+      const lab = `gate · ${l} · ${tickLabel(i.a - t0)}`;
+      const w = 22 + 7 * lab.length;
       let off = 0, moved = true;
       while (moved) {
         moved = false;
@@ -472,7 +481,7 @@ function timelineHtml() {
       }
       placed.push({ y, off, w });
       return `<div class="gate${S.sel === d.id ? " sel" : ""}" style="top:${y}px;--gc:var(--${c === "open" ? "ink-3" : c})">` +
-        `<span role="button" tabindex="0" data-sel="${esc(d.id)}" style="right:${off}px" title="${esc(d.id)} · acceptance gate">gate · ${esc(l)}</span></div>`;
+        `<span role="button" tabindex="0" data-sel="${esc(d.id)}" style="right:${off}px" title="${esc(d.id)} · acceptance gate on the run’s deliverable, reviewed ${esc(fmtElapsed(parseT(d.started_at) - t0))} to ${esc(fmtElapsed(i.a - t0))}">${esc(lab)}</span></div>`;
     }
     const st = delState(d), left = i.slot * COL_PX + 4, h = Math.round(i.h);
     const queue = i.posted < i.a - 60
@@ -1309,7 +1318,7 @@ document.addEventListener("pointerover", (e) => {
   tip.style.transform = `translate(${flip ? "-100%" : "0"},${above ? "-100%" : "0"})`;
 });
 let resizeT = null;
-window.addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (S.view === "data" && S.loaded) paintWork(); }, 150); });
+window.addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if ((S.view === "data" || S.view === "timeline") && S.loaded) paintWork(); }, 150); });
 
 /* ── Setup, Start-run sheet and Stop popover (spec 15 §4.3, §4.5; build step 7) ── */
 const FILE_LABEL = { problem_statement: "Problem statement", config: "Config" };

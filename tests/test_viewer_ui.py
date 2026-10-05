@@ -625,6 +625,37 @@ def test_a_store_without_0_1_columns_draws_no_empty_funnel_section(tmp_path, pag
         assert headings == ["Best so far", "Store"], headings
 
 
+def test_a_closed_runs_timeline_is_fitted_to_the_pane_and_each_gate_says_when(tmp_path, page):
+    study, run_dir = _study(tmp_path)
+    rows = []
+    for i, (a, b) in enumerate([("12:00", "12:01"), ("12:02", "12:10")]):
+        d = _delegation(f"D{i + 1:03d}", "implementer")
+        d["started_at"], d["completed_at"] = f"2026-09-17T{a}:00+00:00", f"2026-09-17T{b}:00+00:00"
+        rows.append(d)
+    for i, m in enumerate(["12:14", "12:18", "12:24"]):
+        g = _delegation(f"GATE{i + 1:03d}", "critic")
+        g["started_at"], g["completed_at"] = f"2026-09-17T{m[:3]}{int(m[3:]) - 2:02d}:00+00:00", f"2026-09-17T{m}:00+00:00"
+        rows.append(g)
+    _write_jsonl(run_dir / "debug" / "delegation_log.jsonl", rows)
+    import os
+    from datetime import datetime
+    at = lambda hm: datetime.fromisoformat(f"2026-09-17T{hm}:00+00:00").timestamp()  # noqa: E731
+    (run_dir / "debug" / "run_started_at").write_text(str(at("12:00")))
+    status = run_dir / "debug" / "run_status.json"
+    status.write_text('{"status": "GATED"}')
+    os.utime(status, (at("12:24"), at("12:24")))
+    with _LiveServer(create_app(study)) as srv:
+        page.set_viewport_size({"width": 1600, "height": 1000})
+        page.goto(f"{srv.url}/ui?run={RUN}&view=timeline")
+        page.wait_for_selector(".gate span")
+        stack = page.locator(".stack").bounding_box()
+        assert stack["height"] > 600, stack
+        ys = [page.locator(".gate span").nth(i).bounding_box()["y"] for i in range(3)]
+        assert ys[1] - ys[0] > 40 and ys[2] - ys[1] > 40, ys
+        assert "· 14 m" in page.locator(".gate span").nth(0).inner_text()
+        assert page.locator(".tick").count() > 3
+
+
 def test_data_view_draws_no_chart_and_no_lines_when_nothing_is_declared(tmp_path, page):
     study, run_dir = _study(tmp_path)
     _with_store(run_dir, objective=None)
