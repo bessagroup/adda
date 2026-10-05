@@ -4,8 +4,9 @@ The single place that says **what the agentic system can do, why, and where it
 lives.** Read this to get your bearings without reading code.
 
 > **Contract (enforced):** every agent tool listed in an agent's `tools` set MUST
-> appear in the "Tools" table below — `tests/test_features_documented.py`
-> fails the build otherwise. Every new *capability* (tool OR infrastructure)
+> be named in this file (and belongs in the "Tools" table below) —
+> `tests/test_features_documented.py` fails the build if the name is absent
+> anywhere. Injected closures are not enumerated by the test. Every new *capability* (tool OR infrastructure)
 > MUST get an entry here in the same commit that adds it. The test can only
 > enumerate tools; infrastructure features rely on this written contract.
 
@@ -19,21 +20,34 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
 ### Hypothesis ledger
 - **What:** the run's record of falsifiable hypotheses and their verdicts (OPEN /
   SUPPORTED / FALSIFIED / INCONCLUSIVE), append-only.
-- **Where:** `hypothesis_ledger.py`; the strategizer's mutate closures
-  (`HypothesisPropose`/`HypothesisUpdate`, whose `falsification_attempt=True`
-  links an unflagged delegation as an attempt) in
-  `nodes/tools/routing/ledger.py`; per-run file `debug/strategizer_notes/hypotheses.json`.
+- **Where:** `hypothesis_ledger.py`; the mutate tools `HypothesisPropose`/
+  `HypothesisUpdate` (`LedgerTools`, `nodes/tools/routing/ledger.py`;
+  `falsification_attempt=True` links an unflagged delegation as an attempt);
+  read-only `HypothesisList` in `nodes/tools/routing/store.py`, grantable to any
+  node; per-run file `debug/strategizer_notes/hypotheses.json`.
+- **Guards (HypothesisUpdate):** SUPPORTED with no completed attempt is a
+  two-shot confirm (re-call with a ≥30-char justification); a closing verdict
+  cites ONE completed (DONE) delegation; `falsification_attempt=True` refuses a
+  delegation that started before the hypothesis was registered or is not Done;
+  `D000` (precomputed pool) is citable, as evidence or attempt, only when the
+  store holds D000 rows (`_check_d000_pool_exists`). Over 3 OPEN (`MAX_OPEN`) is
+  a nudge, not a block.
 - **Status:** core.
 
 ### Falsification charter (the Popperian rules)
 - **What:** the single binding text defining how a hypothesis may be tested and
   labelled (severity of the attempt, verdict follows the result, no goalpost-moving).
-- **Why:** one shared standard both the strategizer and the critic cite.
+- **Why:** one shared standard the strategizer, the critic and the live verdict
+  validator all cite.
 - **Where:** `knowledge/charter.py`. **Status:** core (§4 user-owned).
 
 ### Live verdict validator (#9)
 - **What:** when a hypothesis is closed, an independent referee checks — *live* —
-  that the verdict obeys the charter, and nudges the strategizer if not.
+  that the verdict obeys the charter, and nudges the strategizer if not
+  (critique appended to the HypothesisUpdate result and written onto the ledger
+  entry; `VERDICT_SUBSTANCE_FLAG` diagnostic; from the 2nd flag on the same
+  hypothesis, a louder gate-critic warning). Closing verdicts only; no-op when no
+  critic is connected.
 - **Why:** the gate critic only checks at the end; this catches charter violations
   at the moment of assertion.
 - **Where:** `verdict_validator.py` (judge logic); invoked by `nodes/tools/routing/ledger.py`
@@ -48,7 +62,9 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   `retry_max=1` (NOT the run-wide 5×600s agent-turn budget). A hung CLI stream once
   froze a whole run for ~89 min here; on any timeout/failure the verdict simply
   stands (the call is advisory).
-- **Config:** kill switch `F3DASM_VERDICT_VALIDATOR=0`. **Status:** advisory, non-blocking.
+- **Config:** knob `verdict_validator` (default on; ablation arm in
+  `runtime/features.py`, requires `hypothesis_ledger`); settable from a study's
+  `runtime:` block or `F3DASM_VERDICT_VALIDATOR=0`. **Status:** advisory, non-blocking.
 
 ### Science monitor
 - **What:** background rules that flag scientific drift and escalate repeated
@@ -80,9 +96,15 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   net-count-preservingly (old out, new in = same count, FINISHED preserved), so
   the PROTECTED-store shrink/regression guard still holds; reachable by agents as
   `get_evaluator().supersede(sample)`. The ledger is append-only otherwise.
+  A skip is also printed in-band to the campaign and counts toward the soft
+  eval-budget nudge (not the canonical store tally). The key is computed from the
+  inputs as submitted, before `execute()`, so evaluator-stamped kwargs can't
+  defeat dedup or supersede. `dedup_scope="all"` (reproduction/deliverable
+  replay) treats every store row as already seen.
 - **Where:** `science_monitor.py` (`_check_unledgered`, `_check_unstamped_rows`,
   `_check_duplicate_evaluations`); `ledger_summary.py` `unstamped_row_count`,
-  `duplicate_eval_stats`; `routing.py` `Wait()`. **Status:** core (§4 user-owned).
+  `duplicate_eval_stats`; `nodes/tools/routing/delegation.py` `Wait()`
+  (`_drain_while_waiting`, `_NOTICE_POLL_S`). **Status:** core (§4 user-owned).
 
 ### Registered criterion reaches the worker (pre-registration the experimenter can read)
 - **What:** when `Delegate` carries `hypothesis_ids`, the worker's task message
@@ -93,8 +115,8 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   the evidence will be judged against those criteria exactly as written, and
   explicitly licenses reporting a mismatch instead of substituting a
   different test.
-- **Where:** `nodes/tools/routing/` `_hypothesis_brief()`, injected in
-  `Delegate`'s task assembly beside the constraint snapshot.
+- **Where:** `nodes/tools/routing/delegation.py` `_hypothesis_brief()`,
+  injected by `_compose_task_message` beside the constraint snapshot.
 - **Why:** the criterion is immutable once registered and is the standard the
   verdict is judged by, but the only party adda showed it to was the
   delegator, and only at reconciliation time — `_falsification_checkpoint()`
@@ -117,9 +139,15 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
 - **Status:** core.
 
 ### Process milestones
-- **What:** a small backlog (assess-literature, oracle-ready, …) that gates the
-  implementer until the strategizer resolves each (complete or skip).
-- **Where:** `milestones.py`; the `Milestone*` tools in `nodes/tools/routing/ledger.py`.
+- **What:** a small backlog (`craft_pipeline` if `pipeline_deliverable`,
+  `assess_literature_need`, `oracle_gold_state` if `reproduction_gate`) that
+  gates delegating to the implementer only (never literature/datagenerator) until
+  each is resolved. Pipeline and oracle milestones auto-satisfy when their
+  condition holds; the rest close via `MilestoneSet(id, DONE|SKIPPED, note=…)`
+  (note required). The strategizer can add its own with
+  `MilestoneSet(description=…)`.
+- **Where:** `milestones.py`; `MilestoneList`/`MilestoneSet` in
+  `nodes/tools/routing/ledger.py`. **Config:** `milestones_enabled`.
   **Status:** core.
 
 ### Delegation + inter-agent messaging
@@ -127,21 +155,27 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   agents ask/answer/approve through one peer-and-human messaging tool (see
   `SendMessage` below).
 - **Where:** `nodes/tools/routing/`, `nodes/orchestration.py`.
-- **Tools:** `Delegate`*, `Wait`, `SendMessage`, `ReportEvals`.
+- **Tools:** `Delegate`*, `Wait`, `SendMessage`, `ReportEvals`, `RecallHistory`.
   (`Wait(id, block=False)` is the status poll that used to be `GetStatus`.)
-  (*Delegate is injected dynamically, not in a static `tools` set.)
+  (*`Delegate`/`Wait` are injected only on a node with ≥1 outgoing edge;
+  `SendMessage` only when `peer_interaction` is on; with it off, the entry node
+  keeps `FollowUp` as its human channel. `RecallHistory` is injected whenever a
+  delegation log exists.)
   `Confer`/`Reply`/the worker-facing `FollowUp`/`ReportProgress` are the
   pre-spec-12 surface `SendMessage` replaced; they no longer exist in either
   `peer_interaction` arm (see below).
 - **Fan-out harvesting:** `Wait()` takes an OPTIONAL delegation id. Bare
-  `Wait()` blocks until whichever delegation becomes actionable first — a
+  `Wait()` blocks until whichever delegation becomes actionable first among the
+  CALLER's own children (another delegator's are never harvested by, nor block,
+  it) — a
   finish, a worker's question, or a report OPEN FOR REVIEW (delivered, hence
   read, so it can be approved/answered while siblings still run; the reply
   names what is still in flight) — and returns that one's report (labelled
   with its ID), marking it read so N in flight are
   drained by N calls; it refuses when nothing is in flight, and refuses rather
-  than hanging when every open delegation is parked on a `FollowUp` or has
-  already died without reporting (a blocking call ends no turn, so the run's
+  than hanging when every in-flight delegation is open for review (finalize with
+  `SendMessage(id, …, approve=True)`) or has already died without reporting
+  (read with `Wait(id, block=False)`) (a blocking call ends no turn, so the run's
   time backstop cannot fire while inside it). A blocked `Wait` (bare or by id)
   also RETURNS EARLY when an operator note or a science-monitor message
   arrives — delivered in-band with a "still in flight" line, nothing harvested
@@ -165,16 +199,24 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
 
 ### Notebook authoring + reproduction gate
 - **What:** the single deliverable is a Jupyter notebook; the runtime re-executes it
-  lazily and accepts it only if it runs cleanly, adds zero new oracle evals, and
-  leaves the ledger unchanged. The printed `REPRODUCED:` headline is informational —
+  lazily and accepts it only if the store already holds ≥1 row and the notebook
+  runs cleanly within a time ceiling, adds zero new oracle evals, leaves the
+  ledger unchanged, and (when both are printed) `REPRODUCED` = `CLAIMED_HEADLINE`. The printed `REPRODUCED:` headline is informational —
   the critic checks its provenance (it must trace to a real ledger row); the runtime
   no longer machine-matches it to an objective extremum (that wrongly rejected
   constrained optima — audit 20260624T021359).
-- **Where:** `notebook_exec.py`, `nodes/tools/routing/`, `nodes/reproduction_gate.py`
-  (`_reproduction_gate`).
+- **Where:** `evaluation/notebook_exec.py`, `nodes/tools/routing/notebook.py`,
+  `nodes/reproduction_gate.py` (`_reproduction_gate`).
 - **Tools:** `WriteCell` (create / edit / delete one named cell — what were
   four tools), `ShowNotebook`, `RunNotebook(gate=True)` (the Done() gate as a
-  dry run), and `WriteDeliverable` for the study's declared extra files only.
+  dry run; uncapped since 068616c, each call shows a running count),
+  `WriteDeliverable` for the study's declared extra files only, and
+  `RunScratch(code)` (scratch snippet against a ledger copy). Both execution
+  tools hash the real store and pipeline.ipynb before and after, revert any
+  destructive change and report it as an ERROR (see **Store integrity guard**);
+  a backstop, not a filesystem sandbox.
+- **Known inconsistency (code):** `RunNotebook`'s agent-facing docstring still
+  says "Limited to 10 per run" (`notebook.py`), though the cap is off (`_BUDGET = None`).
 - **Status:** core (the live deliverable).
 
 ### Hypotheses-cell status table is generated, not hand-maintained (NOTEBOOK-LEDGER SYNC, by construction)
@@ -192,9 +234,16 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   `WriteCell`'s hypotheses-cell create/edit paths and into
   `nodes/reproduction_gate.py`'s `_reproduction_gate` (one hook covers both
   `RunNotebook(gate=True)` and `Done()`'s pre-critic check, since both funnel
-  through it). Stated to every role in `prompts/deliverable_format.py`'s
-  `DELIVERABLE_FORMAT` (shared verbatim by the strategizer, implementer, and
+  through it). A refresh that changes the table returns the cell's new rev,
+  surfaced in `RunNotebook(gate=True)`'s reply, so a following
+  `WriteCell('hypotheses', expected_rev=…)` doesn't stale-bounce; a no-op
+  refresh never touches the file. Stated to every role in
+  `prompts/deliverable_format.py`'s `DELIVERABLE_FORMAT` (gated on
+  `hypothesis_ledger`; shared verbatim by the strategizer, implementer, and
   critic).
+- **Known inconsistency (code):** the same `DELIVERABLE_FORMAT`'s RULES
+  (NOTEBOOK-LEDGER SYNC bullet) still ask for a manual hypotheses-cell rewrite
+  after every HypothesisUpdate.
 - **Status:** core (part of the deliverable contract).
 
 ### The reproduction gate is its own ablatable feature, independent of `pipeline_deliverable`
@@ -204,7 +253,7 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   from `pipeline_deliverable` (which decides only whether a notebook is
   REQUIRED at all). Off: `_reproduction_gate()` returns `None`
   unconditionally (Done()'s gate never runs; `RunNotebook(gate=True)`
-  always reports a pass), the `<reproduction_gate_contract>` prompt
+  reports a pass once a notebook exists and the store has rows), the `<reproduction_gate_contract>` prompt
   injection is withheld, and the `oracle_gold_state` process milestone
   (`epistemics/milestones.py`) is not seeded — that milestone's whole
   reason to exist is this gate's store-row precondition. A study can
@@ -216,8 +265,8 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   would not read. A study that turns the notebook off sets
   `reproduction_gate: false` too; the same holds for every `requires` pair
   (e.g. `verdict_validator` needs `hypothesis_ledger`).
-  Recorded per run in `run_config.json`'s `runtime` block like every other
-  knob, so a sweep's arms can be told apart after the fact.
+  Recorded per run in `run_config.json["arms"]` (effective value, defaults
+  included), so a sweep's arms can be told apart after the fact.
 - **Arm recording and resume drift check:** `features.arm_config()` returns the
   effective value of every ablation feature plus `max_awake_nodes`, defaults
   included. It is written to `run_config.json["arms"]` (`run_setup._init_canonical_store`),
@@ -228,8 +277,8 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
 - **`runtime.bash_timeout_s` (shell-call bound, same on every backend):** seconds a
   Bash call may run before it is moved to the background (default 120, the Claude
   SDK's). The OpenAI-compatible/Ollama shell reads it at call time; the Claude
-  backend passes it to the SDK as `BASH_DEFAULT_TIMEOUT_MS` (`claude.py::_build_session_env`)
-  only when set. The agent's own per-call `timeout` still applies, capped at 600 s.
+  backend passes it to the SDK as `BASH_DEFAULT_TIMEOUT_MS` on every session
+  (`claude.py::_build_session_env`). The agent's own per-call `timeout` still applies, capped at 600 s.
 - **`--set key=value` on both CLIs:** `python -m adda` and `python -m adda.watchdog`
   take a repeatable `--set` (`runtime/cli_overrides.py`), the command-line
   spelling of `AgenticRun(runtime=...)`: explicit precedence, validated against
@@ -239,11 +288,12 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   haiku default.
 - **`Feature.requires`:** a feature whose prerequisite is off is off —
   `features.enabled()` resolves it, `features.conflicts()` lists the cases
-  where its own knob said on, and `_init_canonical_store` logs them. Today
-  `verdict_validator` requires `hypothesis_ledger`. The pipeline/reproduction
-  knobs are deliberately NOT coupled (four studies run `pipeline_deliverable:
-  false` with the gate on), and they are now read through `features.enabled`
-  everywhere instead of `get_bool(key, True)` literals.
+  where its own knob said on, and `_init_canonical_store` refuses to start on
+  any. Today `verdict_validator` requires `hypothesis_ledger` and
+  `reproduction_gate` requires `pipeline_deliverable`. The four studies that run
+  `pipeline_deliverable: false` set `reproduction_gate: false` too. Both knobs
+  are read through `features.enabled` everywhere instead of
+  `get_bool(key, True)` literals.
 - **Feature-gated prompt text:** `[[if key]]on[[else]]off[[/if]]` inline gates
   (nesting allowed) in any prompt or tool docstring, resolved by
   `features.resolve_gates` inside `system_prompt_with_catalog`; the on branch is
@@ -312,7 +362,7 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   `SendMessage(to="human")`). Prompt text that names the channel is gated on
   the knob. `Wait` was
   also re-tightened to outgoing-edges-only in this same series (a separate
-  commit, `1d7e14c`) — see BACKLOG's spec 12 entry.
+  commit, `1d7e14c`) — see `internal/specs/12-peer-interaction.md` item 4.
 - **Cross-node lookup:** a delegation's registry entry lives in its
   DELEGATOR's Node, but a worker calls the closure bound to its OWN Node.
   `Node._delegation_entry` finds an entry across the graph's nodes
@@ -325,18 +375,15 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   worker's non-error report NEVER finalizes on its own: `WorkerSession.
   run()` calls `_open_for_review` instead of `_finish_ok`, moving the
   delegation to a new `OpenForReview` status (recording the worker's CLI
-  `last_session_id`, captured on every `ainvoke()` — the actual RESUME
-  invocation for a non-approve message is still not built, see below).
+  `last_session_id`, captured on every `ainvoke()` — used to resume the worker
+  on a non-approve message, see below).
   Only `SendMessage(id, ..., approve=True)` runs `_finish_ok`
   (`finalize_after_review`, reusing the stashed report/evals/usage
-  unchanged); any other message is recorded (queued) but says plainly
-  that it will not reach the worker until session-resumption itself
-  lands. Automatic, not opt-in — every delegation, whenever the feature
+  unchanged); any other message resumes the worker (`Revising`, below). Automatic, not opt-in — every delegation, whenever the feature
   is on. `Delegate` refuses a new dispatch while ANY delegation is
   `OpenForReview` (`_check_open_reviews`), naming every open one; an
   ERRORED delegation never counts (it has no report to review). `Wait()`
-  treats an open review the same shape as a `FollowUp` block — named in
-  its own bucket, never silently absorbed into "nothing to wait for" —
+  names an open review in its own bucket, never silently absorbed into "nothing to wait for" —
   while `Wait(id)` still returns its report text (the "read" event).
   `Delegate(wait=True)` also names an open review explicitly rather than
   misreporting a successful worker as `Errored`. If the run closes
@@ -363,13 +410,11 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   owed" stays silent indefinitely rather than firing once. Reuses the
   exact insertion point `_drain_notifications` already uses in
   `_wrap_closure`. As a DELEGATOR (`entry.get("parent") == identity` —
-  never a sibling's or a nested child's): an open review, a worker's
-  unanswered `FollowUp`, a finished delegation not yet collected, and —
+  never a sibling's or a nested child's): an open review, a finished
+  delegation not yet collected, and —
   Elvis's own first-named case, "respond [to a] delegation" — an unread
   `SendMessage` question sitting in a child's `to_delegator` queue
-  (`"D003 (implementer) asked you: ..."`, truncated to ~100 chars —
-  FollowUp's bucket alone doesn't cover this, since FollowUp is being
-  retired). As a WORKER (`identity` is itself a registry entry): an
+  (`"D003 (implementer) asked you: ..."`, truncated to ~100 chars). As a WORKER (`identity` is itself a registry entry): an
   unread `SendMessage` from its OWN delegator sitting in that entry's
   `to_worker` queue (`"your delegator sent you a message: ..."`). Every
   queue check is a PEEK under the queue's own lock (never a pop — that
@@ -442,7 +487,7 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
 ### Per-cell notebook debugger (#13)
 - **What:** run pipeline.ipynb against a *copy* of the ledger and get a per-cell
   pass/error trace, so a failing cell can be pinpointed instead of guessing.
-- **Where:** `notebook_exec.py` `diagnose_notebook`, `RunNotebook` closure.
+- **Where:** `evaluation/notebook_exec.py` `diagnose_notebook`, `RunNotebook` closure.
 - **Tools:** `RunNotebook` (its default mode). **Status:** done.
 
 ### Unified, SDK-compatible Bash surface: `Bash` + `BashOutput` + `KillShell` (#24)
@@ -454,7 +499,7 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   tool names so agents don't relearn behavior. The one deliberate deviation:
   auto-background is made **visible** (an `interrupted` notice + `bash_id`) so an
   agent never wakes up thinking a still-running job finished. Declared by the
-  implementer, datagenerator, and debugger.
+  implementer, datagenerator, and debugger; math_expert takes `Bash` alone.
 - **Two implementations, one surface** (the standard pattern here): on Claude the
   SDK executes Bash/BashOutput/KillShell natively (they are SDK built-ins — we
   now enable the two companions we had omitted from `NATIVE_TOOLS`); on
@@ -476,10 +521,13 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   repo resources (e.g. `bo/cei_core.py` for a surrogate self-check) deterministically
   instead of hand-rolling multi-candidate path search. Store isolation is unchanged —
   only the store is a copy; the study root is read-only reference code. The three
-  duplicated sandbox-env blocks are unified in one `sandbox_env()` helper.
-- **Where:** `notebook_exec.py` `sandbox_env`; call sites in `nodes/reproduction_gate.py`
-  (`_reproduction_gate`) and `nodes/tools/routing/` (`RunNotebook`, scratch).
-- **Status:** telemetry/ergonomics, not a new cap. Run 20260705T181941 friction.
+  duplicated sandbox-env blocks are unified in one `sandbox_env()` helper. It also
+  sets `F3DASM_DEDUP_SCOPE=all` (+ a synthetic `D999` delegation id) so a replay
+  dedups against every delegation's rows.
+- **Where:** `evaluation/notebook_exec.py` `sandbox_env`, `replay_sandbox` (gate
+  and viewer replay); `nodes/tools/routing/notebook.py` `_ledger_sandbox`
+  (RunNotebook, RunScratch). The copy-store logic exists twice.
+- **Status:** telemetry/ergonomics, not a new cap.
 
 ### Sandboxed Write also reaches the study's workspace/
 - **What:** `build_sandboxed_write` (a worker's `Write` tool) used to hard-reject
@@ -493,7 +541,7 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   entirely; Elvis's decision: keep Bash trusted, extend Write instead of
   sandboxing Bash). `Write` now accepts an OPTIONAL second permitted root, the
   study's `workspace/`, passed as `study_workspace=` at both call sites
-  (`node.py::_setup_sandboxed_write`, `delegation.py::_setup_worker_write`). A
+  (`node.py::_setup_sandboxed_write`, `delegation.py::_sandbox_worker_writes`). A
   bare relative path (`workspace/foo.m`, or exactly `workspace`) resolves
   against the STUDY root rather than the delegation root; an absolute path
   that already resolves under the study's workspace/ is accepted either way.
@@ -511,7 +559,7 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   reserving "workspace/" exclusively for the study folder everywhere an agent
   reads it.
 - **Where:** `nodes/tools/routing/delegation.py` (`build_sandboxed_write`,
-  `_setup_worker_write`); `nodes/node.py` (`_setup_sandboxed_write`);
+  `_sandbox_worker_writes`); `nodes/node.py` (`_setup_sandboxed_write`);
   `prompts/agent_prompts.py`; `prompts/deliverable_format.py`.
 - **Status:** done. Bash remains trusted and unsandboxed by design — not
   addressed here; see the (deferred) Bash-boundary discussion this same
@@ -521,9 +569,9 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
 - **What:** notebook guidance requires naming the objective column EXPLICITLY. The
   earlier "first non-provenance output" auto-detect was unsafe: `output_names` is
   sorted, so with multiple outputs a constraint flag (e.g. `coilable`) sorts before
-  the objective and gets silently picked (audit 20260624T021359). If derived, read
+  the objective and gets silently picked. If derived, read
   `run_config['evaluator_output_names'][0]`, not column order.
-- **Where:** `notebook_exec.py`. **Status:** done.
+- **Where:** `prompts/deliverable_format.py` (`DELIVERABLE_FORMAT`). **Status:** done.
 
 ## C. Workers & ground truth
 
@@ -547,10 +595,11 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
 - **Where:** `oracle_resolution.py` (`get_evaluator`, `_effective_oracle_config`),
   `run_setup.py` (`register_evaluator_entrypoint(namespace=…)`), `backends/base.py`
   + `backends/claude.py` (`set_namespace`/`F3DASM_NAMESPACE`), `graph_state.py`
-  (`Delegation.namespace`), `routing.py` (`Delegate` + registration handoff).
+  (`Delegation.namespace`), `nodes/tools/routing/delegation.py` (`Delegate` +
+  registration handoff, `WorkerSession._bind_backend_context` → `set_namespace`).
 - **Report-time provenance:** `QueryStore()` with no arguments (it absorbed `RecallStore` and `LedgerBreakdown`) shows per-experiment
   / per-delegation ledgered eval counts read live from the stores
-  (`ledger_summary.ledger_breakdown`), so a writeup DERIVES counts from the ledger instead
+  (`store.py` `_summary` → `RunStateSummary.from_store` per store; `_budget_line`), so a writeup DERIVES counts from the ledger instead
   of hardcoding stale plan numbers (run 20260628T001710 hardcoded 70 polar evals; the
   ledger held 90 → UNGATED). It also reads `eval_budget` from run_config and prints
   `spent of budget — N remaining`, so the agent READS that number rather than hand-
@@ -561,11 +610,12 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   (default + each design experiment, at their nested paths). A namespaced run has N
   stores and no namespace column, so the single-study `from_file` idiom silently loads
   only the default; this is the one call pipeline.ipynb uses to load them all. Wired
-  into the deliverable spec (`notebook_exec.py`) and the injected paths block
-  (`agent_prompts.py`).
+  into the deliverable spec (`prompts/deliverable_format.py`), the paths block
+  (`agent_prompts.py`) and `RunScratch`'s docstring (`notebook.py`).
 - **Tools:** `QueryStore`.
-- **Status:** plumbing complete (branch `exp/open-design-space`); gated on the 2D
-  experiment before the baseline study adopts it.
+- **Status:** on main (since `34e984c`); opt-in per delegation (`namespace`
+  unset = single-study path). The open-design-space *method* (BACKLOG #20) still
+  awaits the 2D experiment; BACKLOG #20's branch pointer is stale.
 
 ### Literature reviewer
 - **What:** a specialist agent that searches papers (arXiv / Semantic Scholar /
@@ -587,11 +637,10 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   `wait=False` / `CollectSearches` async pool the agent used to fan them out by
   hand; the per-provider calls stay as plain functions with their own tests. Its
   corpus (`runs/lit_reviewer_notes/`) is STUDY-scoped, not per-run — it
-  persists across every run of a study, since a paper's relevance to a
-  domain doesn't go stale between runs the way scientific findings can
-  (deliberately NOT extended to cross-run hypothesis/mechanism memory,
-  which was rejected as too risky — a study's actual question can drift run
-  to run). Lives under `runs/`, not the study root, to stay out of the
+  persists across every run of a study, because a paper's relevance to a
+  domain does not go stale between runs. Cross-run memory of findings
+  (hypotheses, mechanisms) is not built yet; it is planned future work
+  (BACKLOG #46, spec 13). Lives under `runs/`, not the study root, to stay out of the
   user-facing study folder; guarded by a `FileLock` (not a `threading.Lock`)
   since two runs of the same study are now real, separate processes that can
   overlap and both write to it.
@@ -643,12 +692,14 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   same neutral `fault="nudge"` classification as other environment-fact
   events, not an agent error), and prepends an `<adda-note>`-wrapped notice
   (`nodes/notices.py`) to that call's result so the agent itself learns its
-  literature coverage is reduced. One diagnostics path, fired once per run —
-  not a second writer, not a node-handle threaded into the corpus module.
+  literature coverage is reduced. One diagnostics path, fired once per corpus
+  instance (≈ once per agent adapter) — not a second writer, not a node-handle
+  threaded into the corpus module.
 - **Where:** `literature/literature_corpus.py` (`embedder_fallback_reason`,
   `pop_diagnostic_event`); `agents/literature_tools/corpus.py`
   (`build_corpus_read_closures` tagging); `nodes/orchestration.py`
-  (`_wrap_closure`). **Status:** core.
+  (`_wrap_closure`); `nodes/node.py` (re-wraps tagged build-time closures by
+  tag). **Status:** core.
 
 ### A stream ending mid-turn, and the retry it silently triggers, are now diagnostics events
 - **What:** `ainvoke()` (backends/claude.py) can reach the end of the CLI's
@@ -669,14 +720,14 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   task, with no trace anywhere of what happened or why — indistinguishable,
   after the fact, from a silent restart-from-scratch. Two new diagnostics
   events close that gap (report only; neither changes the retry/return
-  behaviour itself — that's a separate, still-open decision, see the repo's
-  private notes on report 7): `STREAM_ENDED_WITHOUT_RESULT` (`ainvoke`,
+  behaviour itself — that's a separate, still-open decision, recorded at
+  `backends/claude.py` above the `last_result is None` check): `STREAM_ENDED_WITHOUT_RESULT` (`ainvoke`,
   fault="system" — the last tool in flight and the CLI's own session id,
   when available) and `REPORT_RETRY` (`_invoke_with_report_retry`,
   fault="nudge" — the classification reason, fired every time a report-retry
   actually happens).
-- **Where:** `backends/claude.py` (`_record_stream_diagnostic`, the
-  `_deliberate_break`/`last_result is None` check in `ainvoke`);
+- **Where:** `backends/base.py` (`record_stream_diagnostic`); `backends/claude.py`
+  (the `_deliberate_break`/`last_result is None` check in `ainvoke`);
   `nodes/tools/routing/delegation.py`
   (`WorkerSession._invoke_with_report_retry`). **Status:** core — observability
   only; the underlying retry-on-a-possibly-in-flight-turn behaviour is a
@@ -698,18 +749,20 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   else — including any future/unknown subtype, which defaults to VISIBLE —
   as a `{"type": "system", "subtype": ..., "data": ...}` transcript record.
   `compact_boundary` additionally fires an unconditional `CONTEXT_COMPACTED`
-  diagnostics event (`_record_stream_diagnostic`, thread-local delegation
+  diagnostics event (`record_stream_diagnostic`, thread-local delegation
   id/run dir, the SDK's own compaction metadata verbatim) so the event shows
-  up in `debug/diagnostics.jsonl` without anyone reading transcripts.
+  up in `debug/diagnostics.jsonl` without anyone reading transcripts. The
+  OpenAI-compatible backends emit the same event when adda's own context policy
+  fires (`openai_compatible.py`), so one grep covers both backends.
 - **Where:** `backends/claude.py` (`_SYSTEM_MESSAGE_NOISE_SUBTYPES`,
   `_record()`'s new `SystemMessage` branch, the `compact_boundary` check in
-  `ainvoke`). The viewer (`viewer/app.py::_bubble_html`) already renders any
-  unrecognized event type as an empty fragment, so the new `"system"` type
-  needed no viewer change — only a regression test confirming it. **Status:**
-  core — observability only.
+  `ainvoke`). The viewer renders `compact_boundary` as a compaction event
+  (`viewer/transcript_events.py::_compaction_facts`, shared with the local
+  backends' `ContextCompaction`); other system subtypes stay unrendered.
+  **Status:** core — observability only.
 
 ### CONTEXT_COMPACTED/STREAM_ENDED_WITHOUT_RESULT now fire on every node, not just worker delegations
-- **What:** `_record_stream_diagnostic` (above) finds `debug/` through the
+- **What:** `record_stream_diagnostic` (above) finds `debug/` through the
   thread-local `run_config_path`, and `WorkerSession._bind_backend_context`
   (`nodes/tools/routing/delegation.py`) was the ONLY place that ever bound
   it — so any `ClaudeAdapter.invoke()` call OUTSIDE a worker delegation ran
@@ -727,7 +780,7 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   four call sites now wrap their `adapter.invoke()`/`worker.invoke()` with
   it, each keyed to a stand-in id (`"{node}-turn-{NNN}"`, `"critic-{n}"`,
   `"verdict-validator"`, `"problem_statement_reviewer"`) since none of these
-  calls has a real delegation id. One writer (`_record_stream_diagnostic`),
+  calls has a real delegation id. One writer (`record_stream_diagnostic`),
   no new global state — only the binding reaches more call sites.
   Separately checked: the SDK's `init` SystemMessage's `data` (now recorded
   verbatim per the entry above) was confirmed via a live probe to carry no
@@ -741,8 +794,9 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
 
 ### Delegation-bounded version control of the run workspace
 - **What:** one git repository per run, rooted at the run's own
-  `debug/delegations/` workspace, with one commit per delegation (DONE and
-  FAILED alike) and the resulting sha stamped onto that delegation's record as
+  `debug/delegations/` workspace, with one commit per delegation-log row (DONE,
+  FAILED, critic/feedback audits, and `[INTERRUPTED]` at close, so a killed
+  delegation's partial writes are not credited to the next committer) and the resulting sha stamped onto that delegation's record as
   `workspace_sha`. Answers "which files did this delegation change" from the
   record rather than from the deliverable's own prose — the reproduction gate
   proves the notebook runs, it cannot prove a delegation's account of its own
@@ -758,8 +812,9 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   a failed commit records `workspace_sha=None` and the run proceeds.
 - **Where:** `infra/workspace_vcs.py` (`init_workspace_repo`,
   `commit_workspace`), initialised in `runtime/agent_runtime.py::_prepare_run`,
-  committed in `nodes/tools/routing/delegation.py::WorkerSession._commit_workspace`
-  from both `_finish_ok` and `_finish_error`; `workspace_sha` on
+  committed via `nodes/node.py::Node._commit_workspace` (worker
+  `_finish_ok`/`_finish_error`, `orchestration.py` escalation + close-time
+  reconciliation); `workspace_sha` on
   `infra/delegation_log.py::DelegationLog.record`. Retires the `### Files
   touched` report subsection: with a mechanical record, an agent re-narrating
   the same list could only agree (noise) or disagree (a contradiction with no
@@ -805,7 +860,7 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   per execution, so the verdicts an edited-and-rerun script used to report
   survive being overwritten. Additive and write-only: the summary file
   remains the current state and the only thing a consumer reads.
-- **Where:** `math_dsl.py` (the `Workspace` library, re-exported publicly as
+- **Where:** `epistemics/math_dsl.py` (the `Workspace` library, re-exported publicly as
   `adda.Workspace`), `agents/math_expert.py` (`MathExpertAgent`),
   `knowledge/entries/0011-symbolic-derivation-patterns.md` (worked-example
   guidance, `audience: [math_expert]`). See
@@ -820,32 +875,141 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   attempt no longer burns an ID (IDs stay contiguous).
 - **Where:** `nodes/tools/routing/`. **Status:** done.
 
-## D. Resource governance (this is the big recent addition)
+### Knowledge-provider contract (`Consult<Corpus>`)
+- **What:** one call shape, dispatch, failure mode and reply cap for every
+  reference an agent consults: a description returns a menu, an exact
+  name/page id returns that entry, `source=True` returns code; an unconfigured
+  provider returns no tool at all. Five providers: `ConsultF3dasm`,
+  `ConsultAdda`, `ConsultAbaqus`, `ConsultBasilisk`, `ConsultLiterature`.
+- **Why:** retrieval is deliberately NOT uniform — rankers differ per corpus, on
+  measured r@1 (protocol docstring); only the contract is shared.
+- **Where:** `knowledge/protocol.py` (`providers()`, `clip`). **Status:** core.
+
+### f3dasm API lookup (`ConsultF3dasm`)
+- **What:** the INSTALLED f3dasm's API, introspected at run time, so it cannot
+  drift from the version the run executes. Each entry leads with the canonical
+  PUBLIC import path (`__module__` reports the private definition site for
+  public symbols); private symbols are answerable but marked "do not import".
+- **Why:** replaced guessing beyond the fixed `F3DASM_CORE_IDIOMS` excerpt.
+- **Who:** strategizer, implementer, datagenerator (`agents/*.py`
+  `build_closure_tools`).
+- **Config:** `f3dasm_api` feature (default on; off removes the tool and the
+  `f3dasm_api_lookup` prompt section — an ablation arm); no tool if f3dasm fails
+  to import.
+- **Where:** `knowledge/f3dasm_api.py` (`F3dasmApi`, `build_f3dasm_api_closures`),
+  `runtime/features.py`. Test: `tests/test_f3dasm_api.py`. **Status:** core.
+
+### Abaqus reference docs (`ConsultAbaqus`, `AbaqusDataGeneratorAgent`)
+- **What:** offline Abaqus manual lookup for the datagenerator. Hits are TOC
+  locations (book > chapter > section + page_id) built on each book's
+  `structure.xml`; a page_id returns the whole page; a miss can say "exists, not
+  held" (the media is a HotFix delta holding ~45% of the pages the TOC lists).
+- **Why:** an oracle-construction benchmark gave 4/4 solver-traceable runs with
+  the tool and 0/5 without; wrong keyword guesses get corrected
+  (`*FREQ`→`*FREQUENCY`). v1 (flat chunks + BM25) discarded the publisher's
+  structure; v2 makes the TOC the spine (`reader.py` docstring).
+- **Config:** `ADDA_ABAQUS_DOC_CORPUS` or `corpus_dir=`. The corpus is licensed
+  and NOT shipped; build it with `reader.AbaqusDocs.build` (`abaqus` extra, lxml).
+  Reading is stdlib sqlite FTS. Unconfigured = no tool.
+- **Where:** `knowledge/abaqus/` (`__init__.py`, `reader.py`, `builder.py`),
+  `agents/abaqus_datagenerator.py`. **Status:** core, opt-in by class (not in
+  `_default_graph()`).
+
+### Basilisk source lookup (`ConsultBasilisk`, `BasiliskDataGeneratorAgent`)
+- **What:** lexical index over a Basilisk checkout at authoring granularity
+  (solver header + worked case); a query returns a menu, a filename that entry.
+- **Why:** Basilisk C is a qcc DSL and its headers don't parse standalone, so an
+  AST index fails; dense retrieval did not earn its cost. Measured against
+  ripgrep (`tests/test_basilisk_vs_ripgrep.py`).
+- **Config:** `ADDA_BASILISK_SRC` (dir containing `src/`) or `corpus_dir=`.
+  Unconfigured = no tool. Not redistributed.
+- **Where:** `knowledge/basilisk/` (`extract.py`, `index.py`),
+  `agents/basilisk_datagenerator.py`. **Status:** core, opt-in by class.
+
+### adda self-lookup (`adda-docs`, `ConsultAdda`)
+- **What:** an index of the INSTALLED adda package for an outside coding agent.
+  Four unit kinds: symbol, module docstring, constant, shipped KB markdown.
+- **Why:** all four together beat ripgrep on 128 labelled queries (r@1 0.375 vs
+  0.23); symbols alone lose to it (`internal/tools/source_index_baseline.py`).
+- **Surfaces:** console script `adda-docs` (`--source`, `--overview`);
+  `adda.explain.explain()`; the viewer's `GET /api/docs`; `ConsultAdda`
+  (registered in `protocol.providers()`, given to no default agent).
+- **Where:** `src/adda/explain.py`, `knowledge/f3dasm_api.py` (`AddaApi`),
+  `knowledge/protocol.py` (`_build_adda_closures`). **Status:** core
+  (`ConsultAdda` available, unwired).
+
+### DoE playbook prompt section
+- **What:** a method prior on every implementer call (~625 tokens): space-filling
+  LHS recipe, eval-budget arithmetic, the surrogate-guided exploit loop. Split
+  out of `<f3dasm_api>` so API facts, the oracle contract (not ablatable) and the
+  method prior can be ablated separately.
+- **Why:** tests whether an explicit method prior substitutes for capability in
+  small models (`runtime/features.py` comment).
+- **Config:** `runtime: doe_playbook` (default on).
+- **Where:** `<doe_playbook>` in `agents/implementer.py`; `runtime/features.py`.
+  **Status:** core, ablatable.
+
+### DebuggerAgent
+- **What:** a specialist that reproduces a failure from the exact command,
+  traces it to root cause, and optionally applies a minimal fix. Report sections
+  `### Root cause`, `### Fix applied`, `### Conclusions`, `### Numbers`. Tools:
+  Bash/Read/Grep/Edit/Write, read-only store (`QueryStore`, `OracleStatus`,
+  `HypothesisList`), `BashOutput`/`KillShell`, `ReadProblemStatement`.
+  `role="debugger"`, so implementer-only nudges don't fire on it.
+- **Where:** `agents/debugger.py`; exported as `adda.DebuggerAgent`.
+  **Status:** available, not in `_default_graph()`.
+
+### Pre-run problem-statement review
+- **What:** an advisory check that PROBLEM_STATEMENT.md is well-posed before an
+  autonomous run, on five domain-agnostic elements (objective, design_space,
+  ground_truth, validity, deliverable). Always writes
+  `debug/problem_statement_review.md`; never blocks. Interactive runs may offer a
+  per-gap refine and append accepted clarifications. Fresh runs only (skipped on
+  resume and with an injected graph).
+- **Config:** `AgenticRun(review_statement=True)`.
+- **Known inconsistency (code):** the `cfg["review_statement"]` fallback applies
+  only when the caller passes `None`; the parameter defaults to `True`, so the
+  config key is effectively ignored (`agent_runtime.py`).
+- **Where:** `epistemics/reviewer.py` (`ProblemStatementReviewerAgent`,
+  `REVIEW_ELEMENTS`, `parse_review`), `runtime/agent_runtime.py::_review_problem_statement`.
+  **Status:** core.
+
+## D. Resource governance
 
 ### Soft eval-budget nudge
 - **What:** when the shared ledger crosses 80/100/150% of the eval budget, the
   *offender* (the running campaign) is nudged via its own output — capped at one per
   band. **Soft: never stops the campaign** (the eval budget is the agent's call).
-- **Where:** `instrumented.py` `_flush` governor; budget plumbed via `agent_runtime.py`.
-- **Config:** `eval_budget` (config.yaml / `F3DASM_EVAL_BUDGET`). **Status:** done.
+- **Where:** `evaluation/instrumented.py` `_maybe_nudge_budget` (from `_flush`;
+  bands `_NUDGE_BANDS` = 0.8/1.0/1.5); `eval_budget` reaches it via
+  run_config.json (`run_setup`) → `oracle_resolution`. Audit row: `BUDGET_WARN`
+  in diagnostics.jsonl.
+- **Config:** `eval_budget` (config.yaml or `AgenticRun(eval_budget=)`; no env
+  var). **Status:** done.
 
-### Hard memory cap (the one hard boundary)
+### Hard memory cap (host safety)
 - **What:** a 5-second watchman sums each delegation's process-tree **resident (RSS)**
   memory and kills the tree if it exceeds the cap. Real-usage based; verifies the
   process is still ours (start-time match) before killing, so a recycled PID is never
   hit. Per-delegation, absolute (not a share of system RAM), does not sum across
   delegations.
-- **Where:** `studies/.../run.py` `_memory_watcher`; `watchdog_cleanup.py`
-  (`check_memory_and_kill`, `_owned_pids`); `resource_backend.py`; the cap is
+- **Where:** out-of-repo harness `_memory_watcher`; `infra/watchdog_cleanup.py`
+  (`check_memory_and_kill`, `_owned_pids`); `infra/resource_backend.py`; the cap is
   resolved (config → env → SLURM allocation → default) by `runtime/run_setup.py`
   `resolve_mem_cap_bytes`.
 - **Config:** `mem_cap` (config.yaml / `F3DASM_MEM_CAP`); default 4 GiB. On SLURM set
-  below the job's `--mem`. **Status:** done (cgroup-native HPC backend = future seam).
+  below the job's `--mem`. **Status:** enforced only by the out-of-repo
+  harness' `_memory_watcher` (not in this repo). In-package launches
+  (`python -m adda`, `adda.watchdog`) resolve and advertise `mem_cap_bytes`, but
+  nothing calls `check_memory_and_kill`, so there is no kill and no peak-RSS
+  sample (the `Wait`/KPI-footer peak-RAM lines stay absent). `set_self_limit` is
+  a no-op on both backends. Gap: wire a watcher into `AgenticRun` or the
+  `adda.watchdog` parent. cgroup-native HPC backend = future seam.
 
 ### Resource backend (OS abstraction)
 - **What:** one interface (`set_self_limit` / `read_rss` / `kill` / `proc_start_time`)
   so memory/kill OS-specifics live in one place; psutil impl + stdlib fallback.
-- **Where:** `resource_backend.py`. **Status:** done (Linux cgroup backend = future).
+- **Where:** `infra/resource_backend.py`. **Status:** done (Linux cgroup backend = future).
 
 ### Computed cost from an explicit price table (2026-09-28)
 `infra/model_prices.yaml` holds per-model list prices (USD/MTok, sourced from
@@ -900,7 +1064,7 @@ remain `critic_consults` (count of `critic_reviews/call_NNN.md`). Tests:
 `tests/test_run_ledger_kpis.py`.
 
 ### Run report: Verdict audit (2026-10-05)
-`studies/run_ledger.py::analysis_brief` ends its ERROR_RETURN section with a "Verdict audit": one block per
+`studies/run_ledger.py::analysis_brief` adds a "## Verdict audit" section after the ERROR_RETURN section: one block per
 closing status entry (SUPPORTED / FALSIFIED / INCONCLUSIVE) in `strategizer_notes/hypotheses.json`, with the
 statement, falsification criterion, prior -> posterior, evidence numbers and validator note verbatim, and
 `N_NEW_EVALS`, the store rows stamped with the cited delegation over the canonical store and every
@@ -912,29 +1076,35 @@ no claim. A run with no ledger reads "no hypothesis ledger". Tests: `tests/test_
 - **What:** `Wait(id, block=False)` shows a delegation's eval count, current RSS, and **peak
   RSS** (the high-water across the watcher's ticks), so the strategizer can see a
   fat or fattening campaign (and tell the implementer with `SendMessage`).
-- **Where:** `nodes/tools/routing/`, `watchdog_cleanup.py`
+- **Where:** `nodes/tools/routing/`, `infra/watchdog_cleanup.py`
   `delegation_rss` / `delegation_peak_rss`.
-- **Status:** done.
+- **Status:** done; the peak is filled only where `check_memory_and_kill` runs
+  (out-of-repo harness), so in-package it stays absent (see **Hard memory cap**).
 
 ### Resource AWARENESS (telemetry, NOT enforcement)
 - **What:** primes agents to be efficient with the things models ignore — time,
   RAM, disk, parallelism width — via two surfaces:
-  - **Static envelope at delegation start:** a `<resources>`-style stanza in the
-    worker/strategizer preamble — `~N CPU cores · RAM cap X GB (HARD — exceed it
-    and your process is killed; stream/cache) · disk free Y GB · parallelize up to
-    ~N ways, sized to RAM`.
+  - **Static envelope at delegation start:** "resources: ~N CPU cores · RAM cap
+    X GB per delegation … disk free Y GB" for every role; only campaign workers
+    (`for_worker`) get a "parallelize your EVALUATIONS, sized to the RAM cap"
+    line. The strategizer is deliberately not nudged to fan out (run
+    20260628T224159).
+  - **Known inconsistency (code):** the worker line still names
+    `gen.call(mode='parallel')`, which the `mode="parallel"` hard cap refuses.
   - **Measured peak RAM in the KPI footer:** `peak RAM (this delegation): Z GB of
     X GB hard cap`, the watcher's high-water — so memory cost travels with the
     result like wall-time already does.
 - **Footprint (by design):** peak RAM rides the memory watcher's existing 5s poll
   (one `max()` per tick — no new poll/thread/I/O); the envelope is one
-  `os.cpu_count()` + one `shutil.disk_usage` (O(1) `statvfs`, **never** a recursive
+  `sched_getaffinity` (SLURM/cgroup-aware; `cpu_count` fallback off-Linux) + one
+  `shutil.disk_usage` (O(1) `statvfs`, **never** a recursive
   `du`); the per-eval hot path is untouched (no per-eval RSS/disk stamping).
-- **Where:** `watchdog_cleanup.py` `resource_envelope` / `delegation_peak_rss`
+- **Where:** `infra/watchdog_cleanup.py` `resource_envelope` / `delegation_peak_rss`
   (high-water recorded in `check_memory_and_kill`); `agent_runtime.py`
   `_resource_stanza`; `agent_prompts.py` `{resources}` placeholder;
   `ledger_summary.py` `delegation_footer` peak-RAM line.
-- **Status:** awareness only — the hard memory cap stays the one enforced boundary.
+- **Status:** awareness only — enforcement lives in the hard caps (memory,
+  parallel refusal, Delegate cutoff, USD ceiling).
 
 ### Parallel nodes: `runtime.max_awake_nodes` (2026-09-30)
 - **What:** every delegation runs on its OWN adapter (`adapter.copy()` with its
@@ -953,7 +1123,8 @@ no claim. A run with no ledger reads "no hypothesis ledger". Tests: `tests/test_
   deadlock the pool. Verdict-validator side-calls are NOT counted.
 - **Where:** `nodes/slots.py` (`AwakeSlots`), `nodes/tools/routing/delegation.py`,
   `backends/{claude,openai_compatible}.py::copy`, `runtime/graph_builder.py`.
-- **Launch guidance:** 5 awake needs `--mem >= 32G`.
+- **Launch guidance:** 5 awake needs `--mem >= 32G`. Values <2 are clamped to 2
+  (strategizer + one worker). Read via `runtime/features.py` `max_awake_nodes()`.
 - **Status:** done. Not handled: a cancelled/detached delegation still holds its slot until its thread ends.
 
 ### `mode="parallel"` host-safety hard cap
@@ -987,8 +1158,8 @@ no claim. A run with no ledger reads "no hypothesis ledger". Tests: `tests/test_
 - **What:** instead of a hosted API, the framework can own the LLM *behind the
   nodes* on a separate SLURM GPU allocation: it sizes the allocation from the
   checkpoint's own published metadata (parameter count + dtype, fetched
-  weights-free — local HF cache first, then a single `requests` GET of the HF
-  Hub model-info JSON; no `huggingface_hub`/`transformers` dependency), so a
+  weights-free — local HF cache first, then two `requests` GETs (HF Hub
+  model-info JSON + config.json for KV fields); no `huggingface_hub`/`transformers` dependency), so a
   full HF id or a short alias gets correctly-sized GPUs/mem with **zero user
   config**. GPU-count derivation uses a built-in per-GPU VRAM table keyed by the
   cluster's exact Slurm gres names (the Oscar/Brown-CCV inventory; hardware
@@ -1018,8 +1189,10 @@ no claim. A run with no ledger reads "no hypothesis ledger". Tests: `tests/test_
   through the eval-oriented `Pipeline`/`SlurmExecutor`), waits for the granted
   node, polls `/v1/models` past the cold model load, publishes `VLLM_BASE_URL`
   so the existing vLLM adapter reaches it over the cluster network, and
-  scancels the job on EVERY exit path (normal close, crash, and the watchdog's
-  `os._exit` hard-kill via `reap_run_serve_job`). A build-time, leading-order
+  scancels the job on normal close and crash (`execute()`'s `finally`).
+  **Known gap:** the hard-kill reap (`reap_run_serve_job`, reads
+  `debug/serve_job.jobid`) is called only by the out-of-repo harness;
+  `adda.watchdog` does not call it, so a watchdog timeout leaks the serve job. A build-time, leading-order
   throughput bound (decode is memory-bandwidth-bound; GPU/model-size/dtype/
   tensor-parallel are all config-known) warns loudly when a config is likely to
   choke — a nudge at config time, never a block. Same physics the token
@@ -1039,14 +1212,15 @@ no claim. A run with no ledger reads "no hypothesis ledger". Tests: `tests/test_
   else BF16/Q4. Set `fp8`/`bf16`/`fp16`/`awq`/`gptq`/`q4`/…, or `auto` for the
   checkpoint's native dtype) — the serve dtype used for both VRAM sizing and the
   `vllm serve --quantization` flag; an explicit value wins over the GPU-aware
-  default. Requires
-  `backend: vllm`. Disabled → hosted-API runs are unchanged.
-- **Where:** `agentic/slurm_llm.py` (aliases, metadata fetch, VRAM sizing,
+  default. Needs backend
+  vllm (or openai/openai_compatible); any other backend only logs a warning and
+  the served endpoint is ignored. Disabled → hosted-API runs are unchanged.
+- **Where:** `infra/slurm_llm.py` (aliases, metadata fetch, VRAM sizing,
   serve-hints, resolve, render/submit, wait, throughput bound, teardown,
   reaper); `agent_runtime.py`
   (`_maybe_start_slurm_llm` + the teardown `finally` in `execute()`);
-  `studies/*/run.py` watchdogs (serve-job reap). Reuses
-  `pipeline/resources.py` (`SlurmCluster`/`SlurmResources`) unchanged.
+  out-of-repo harness watchdog only (serve-job reap). Reuses f3dasm's
+  `SlurmCluster`/`SlurmResources` unchanged.
 - **Status:** Phase 1 done, headless-tested; validate on a real GPU cluster
   before making it a default anywhere (greenfield + cluster-specific).
 
@@ -1056,15 +1230,16 @@ no claim. A run with no ledger reads "no hypothesis ledger". Tests: `tests/test_
 - **What:** a hard wall-clock timer force-exits a stalled run; on exit it recursively
   kills every campaign process tree — including detached/new-session ones that a
   process-group kill misses.
-- **Where:** `studies/.../run.py` `_watchdog` (the out-of-repo benchmarks harness'
-  own launcher) and, in THIS repo, `python -m adda.watchdog` (BACKLOG #41 — see
-  below), both driving `watchdog_cleanup.py`'s `reap_process_group` /
+- **Where:** the out-of-repo benchmarks harness' own launcher `_watchdog`
+  (out-of-repo harness only) and, in THIS repo, `python -m adda.watchdog` (BACKLOG #41 — see
+  below), both driving `infra/watchdog_cleanup.py`'s `reap_process_group` /
   `reap_governor_pids`.
 - **Config:** watchdog = 2× the run's time budget (a floor, not a default —
   `adda.watchdog`'s `--watchdog-multiple` can only raise it). Operational
   kill-switch `F3DASM_DISABLE_WATCHDOG=1` turns the wall-clock force-exit OFF
   (the memory-cap watcher stays on) on the out-of-repo harness — for long
-  supervised runs. **Status:** done.
+  supervised runs (out-of-repo harness only; `adda.watchdog` has no disable
+  switch). **Status:** done.
 
 ### Delegate() time cutoff + escalating budget wrap-up ladder
 - **What:** two additions to the existing soft-budget/backstop ladder, both a
@@ -1092,7 +1267,8 @@ no claim. A run with no ledger reads "no hypothesis ledger". Tests: `tests/test_
 - **Where:** knobs in `nodes/_constants.py` (`delegate_cutoff_multiple`,
   `delegate_cutoff_enabled`); the refusal in
   `nodes/tools/routing/delegation.py::DelegationTools._check_delegate_cutoff`
-  (called first thing in `Delegate()`); the shared ladder
+  (called in `Delegate()` after the stop and open-review refusals, before
+  target resolution); the shared ladder
   (`budget_band_due`, `budget_wrapup_message`) in `nodes/_constants.py`,
   called from `orchestration.py::_budget_warnings` (every node's own turn —
   `_respond`/`leaf.py` are gone; every node now runs the same
@@ -1161,7 +1337,7 @@ no claim. A run with no ledger reads "no hypothesis ledger". Tests: `tests/test_
 ### Synthetic watchdog retrospective (#12)
 - **What:** a watchdog kill leaves a labelled post-mortem so the analysis protocol
   isn't blind.
-- **Where:** `watchdog_cleanup.py` `write_watchdog_retrospective`, called from
+- **Where:** `infra/watchdog_cleanup.py` `write_watchdog_retrospective`, called from
   `_src/infra/watchdog_launcher.py` on a timeout (see #41 above) and from the
   out-of-repo campaign runner's own watchdog. **Status:** done, and now has an
   in-package caller — a watchdog kill via `python -m adda.watchdog` is
@@ -1191,7 +1367,7 @@ no claim. A run with no ledger reads "no hypothesis ledger". Tests: `tests/test_
   preserved — rather than silently returning. Both close the same class of
   gap: a real reply must never be indistinguishable from one that never
   arrived.
-- **Where:** `watchdog_cleanup.py` `write_fallback_retrospective` (shares its
+- **Where:** `infra/watchdog_cleanup.py` `write_fallback_retrospective` (shares its
   disk-reading/append core with `write_watchdog_retrospective` rather than
   duplicating it); called from `agent_runtime.py`
   `AgenticRun._fallback_retrospective`, wired at both the normal close
@@ -1204,23 +1380,95 @@ no claim. A run with no ledger reads "no hypothesis ledger". Tests: `tests/test_
   watchdog kill is a SEPARATE case, covered by `write_watchdog_retrospective`
   instead (see #12 above).
 
-### KB (handbook) entries
-- **What:** curated knowledge the agents consult (incl. running on SLURM, pipeline
-  patterns). **Where:** `knowledge/entries/`. **Status:** core.
-- **Injected menu:** an audience-filtered, one-line-per-entry MENU
-  (`KnowledgeBase.menu(audience)`) is injected into every agent's system prompt
-  (`agent_runtime._kb_menu` → the `{knowledge}` placeholder in both preambles), so
-  an agent always SEES the latent chapters it can pull — the same way it always
-  sees its tool list — instead of only discovering one if it already thought to
-  call `ConsultHandbook`. The descriptor is the entry `title`, capped to one terse
-  line by a ≤100-char invariant (`test_knowledge_base.py`).
+### Handbook (knowledge base) + `ConsultHandbook`
+- **What:** a curated, on-demand handbook of DISCRETIONARY conventions (idioms,
+  how-tos, gotchas: evaluate via get_evaluator, one delegation = one experiment,
+  pipeline patterns, running on SLURM, symbolic derivation, surrogate-guided
+  optimisation). One self-contained markdown chunk per file, frontmatter
+  id/title/tags/audience (+ optional `feature`). The falsification charter is
+  always chapter 1, built from the `FALSIFICATION_CHARTER` constant (no duplicate
+  file). Two surfaces: (1) an audience-filtered MENU (`- id: title`; entries with
+  no audience shown to all) injected into every preamble's `{knowledge}` slot, so
+  agents SEE what they can pull, the same way they see their tool list;
+  (2) `ConsultHandbook(query="")` on EVERY node: no arg → TOC, exact id → full
+  chapter, else keyword search (top 3; title×3, tags×2, body×1). A chapter with
+  `feature: <key>` is absent from menu, TOC, search and get while that feature is
+  off; `[[if …]]` gates in bodies resolve per run (`features.resolve_gates`).
+  Never raises into the agent loop.
+- **Why:** "enforce invariants, retrieve conventions" (`knowledge/README.md`):
+  mandatory rules are enforced by the ScienceMonitor and the critic gate, never
+  left to optional retrieval ("a critical rule that lives only in a KB is a rule
+  that silently fails"); the long tail lives here instead of bloating every
+  prompt. The menu closes the discovery gap: a TOC is seen only if the agent
+  already thought to call the tool.
+- **Where:** `knowledge/kb.py` (`KBEntry`, `KnowledgeBase.load/menu/toc/get/search/consult`);
+  `knowledge/entries/*.md` (12 + charter); `nodes/parsing.py::_consult_handbook`;
+  injected once in `runtime/agent_runtime.py::_make_adapter`; menu via
+  `_kb_menu(role)` → `prompts/agent_prompts.py` `{knowledge}`.
+- **Config:** none; per-chapter `feature:` frontmatter (today: 0005 ←
+  `pipeline_deliverable`). Title ≤100 chars (`tests/test_knowledge_base.py`).
+  Curation is human-gated, fed by retrospectives; never auto-ingest.
+- **Status:** done; the keyword scorer is a stand-in for semantic retrieval (API
+  stable). `knowledge/README.md` and the `kb.py` docstring still say "draft" and
+  name a future `ConsultKnowledge` tool (stale).
+
+### Live constraint snapshot (`<constraints>` block)
+- **What:** one frozen dataclass, `ConstraintSnapshot` (eval_budget, evals_used,
+  wall budget/elapsed; derived remaining/EXHAUSTED), recomputed fresh at every use
+  and rendered as a `<constraints>` block ("Evaluation budget: n/N evals used",
+  "Wall-clock budget: x/y used (p%)"; "unspecified" when unset). Injected (a) on
+  every turn of every node (`_constraint_refresh` in `_compose_messages`), (b) on
+  every delegation report, (c) in critic GATE and FEEDBACK task messages.
+  `as_dict()` persists the same numbers to DelegationLog at dispatch and
+  completion. evals_used = ledger rows over all namespaces, else the sum of the
+  delegation log. Advisory only: never stops.
+- **Why:** replaced four partial, drifting computations; a frozen snapshot baked
+  into the pinned first user turn had contradicted the live ones (module
+  docstring; `_constraint_refresh` docstring).
+- **Where:** `runtime/constraint_snapshot.py` (`compute_constraint_snapshot`,
+  `snapshot_for_node`); `nodes/orchestration.py`; `nodes/tools/routing/{delegation,feedback}.py`;
+  `nodes/critic_gate.py`; `infra/delegation_log.py`.
+- **Config:** `eval_budget`, `budget`. **Status:** done (`tests/test_constraint_snapshot.py`).
+
+### LLM-call telemetry (`debug/telemetry/`)
+- **What:** one JSON row per LLM call (role, model, phase, delegation_id, ts,
+  token fields, the SDK `total_cost_usd` [None under ollama, never faked],
+  `cost_usd_computed`) written to `calls.<pid>.jsonl`. At close,
+  `Telemetry.merge` unions them into `summary.json`: totals + by_role / by_phase
+  / by_model (tokens, wall_time_s, cost, computed cost / computed_cost_calls).
+- **Why:** additive and off the decision path, for post-hoc ablation ("where did
+  the budget go"); a telemetry write never breaks a run (module docstring).
+- **Where:** `infra/telemetry.py` (`Telemetry.record_call/merge`,
+  `compute_cost_usd`); an instance per orchestrating node
+  (`nodes/orchestration.py`); merged in `AgenticRun._finalize_run`; read by
+  `studies/run_ledger.py`.
+- **Config:** none (always on); prices in `infra/model_prices.yaml`. **Status:** done.
+
+### Retrospective exit interview
+- **What:** every node ends with a first-person `### Retrospective` about the
+  SYSTEM, not the science. Strategizer, after the critic accepts: a separate
+  post-Done turn (`_EXIT_INTERVIEW`) with CONSISTENCY (ok|flagged, quote both
+  sides), DECISION, FRICTION (including recovered errors), BLOCKED (capability
+  gaps). UNGATED/FAILED closes: `_FAILED_RETROSPECTIVE` (BLOCKED, BLOCKER,
+  FRICTION). Stop/crash closes add a TIME bullet (`nodes/stop.py`). Workers: the
+  same block is part of their report contract. `_record_retrospective` appends
+  to `debug/retrospectives.jsonl` (16000-char cap; parse_failed rows kept).
+  "CONSISTENCY: flagged" writes a `CONSISTENCY_FLAG` diagnostic and a
+  notification. Missing replies are synthesized (see **Fallback retrospective**).
+- **Why:** the highest-signal first-person friction record (cap raised from
+  2000 after a truncation in run 20260624T021359; `recording.py`). Asked as a
+  separate turn so it never pollutes the working context (`feedback.py` comment).
+- **Where:** `nodes/tools/routing/feedback.py`; `nodes/recording.py`;
+  `nodes/stop.py`; viewer `/api/runs/<id>/retrospectives`.
+- **Config:** none. **Status:** done.
 
 ### Run architecture diagram
 - **What:** `AgenticRun.render_architecture(out_path=None)` renders THIS run's
   actual agent graph — every node, its role, its description, its RESOLVED
   backend/model (each node can override either independently, matching
-  `agent_runtime.py`'s own `agent.model or self._model` resolution — shown
-  per card, never as one run-wide banner), its full tool surface, and the
+  `runtime/agent_runtime.py` — shown
+  per card, never as one run-wide banner; `resolve_node_identity`, the same
+  helper that builds each adapter), its full tool surface, and the
   delegation edges between nodes — as a single self-contained, hand-laid-out
   SVG. No cap on the tool list: a card grows to fit everything rather than
   truncating with a "see agent source for the full list" cop-out. Generated
@@ -1246,279 +1494,109 @@ no claim. A run with no ledger reads "no hypothesis ledger". Tests: `tests/test_
   format: vector by construction, so any DPI or pixel size is one
   rasterization step away with zero quality loss — no separate PNG-export
   code ships here.
-- **Where:** `run_diagram.py` (the renderer); `agent_runtime.py`'s
-  `AgenticRun.render_architecture`. **Status:** done.
+- **Where:** `runtime/run_diagram.py` `render_architecture_svg`;
+  `AgenticRun.render_architecture` (default out: `run_dir/debug/architecture.svg`
+  once a run has started, else `study_dir/architecture.svg`). Tests:
+  `tests/test_run_diagram.py`. **Status:** done.
 
-### Live run viewer (read-only)
-- **What:** `python -m adda.viewer <study-dir>` (or
-  `AgenticRun.serve_viewer(host, port)`) serves a local, read-only web UI for
-  watching a run WHILE it's in progress — a live network diagram of the
-  agent graph (node positions reuse `run_diagram.py`'s own `_bfs_layers`
-  layout; a status dot per node, driven by Server-Sent Events, distinguishes
-  running/done/failed), and clicking a node opens a docked bottom panel
-  (maximizable to full-screen, VS Code's own `toggleMaximizedPanel`
-  convention) showing that node's live tool-call/conversation transcript as
-  Claude-Code-style chat bubbles with tool calls collapsed by default. Reuses
-  existing data wholesale rather than adding new instrumentation:
-  `delegation_log.jsonl`/`diagnostics.jsonl` (already live, append-only) via
-  `DelegationLog.query_all()`'s own collapse-by-id logic, and
-  `debug/transcripts/` (only present when a run was started with the debug
-  flag on — the UI says so plainly rather than showing a blank pane).
-  Explicit, honest limitation surfaced in the UI itself: the on-disk
-  delegation-status vocabulary is richer than a fixed enum (confirmed for
-  real: a Done()-gate check logs `"GATE:PASS"`, not a plain `RUNNING`/`DONE`)
-  and still lacks the in-process registry's finer states (`Working`/
-  `FollowUp`/`Cancelled` are never persisted) — a delegation blocked on a
-  human follow-up question is indistinguishable on disk from one simply
-  still running. No build step: Tailwind CDN + htmx + Alpine.js, one static
-  HTML template. Binds to `127.0.0.1`. Reads are open on the bound
-  interface; writes (note, answer) need a per-launch random token, set as an
-  HttpOnly SameSite=Strict cookie by the `/session?token=…` URL the viewer prints
-  at start, a same-origin `Origin`, no cross-site `Sec-Fetch-Site`, and
-  `Content-Type: application/json` (so a cross-origin `text/plain` "simple
-  request" is refused). `GET /api/session` reports `can_write`; the page shows
-  a read-only hint instead of failing silently.
-  Markdown (notebook, Brief, reports) renders `$…$` / `$$…$$` math with KaTeX
-  (cdnjs), lifted out before parsing so `*` and `_` in a formula are not emphasis.
-  Overview is a VERTICAL timeline (time runs down, linear, with a ruler): one
-  column per concurrent slot, assigned from the TRUE session start/end (the column
-  count is the run's peak concurrency; short delegations are compact cards at their
-  true height), a hatched gutter strip for the wait of a queued delegation,
-  mid-run critic audits as cards with a feedback chip, gate reviews as full-width rules labelled with
-  the verdict, status chips with a glyph as well as a colour, and hover linking
-  between a card and the hypotheses it carries (`hypothesis_ids`). The ledger shows
-  prior to posterior, the falsification criterion, the whole status history
-  (a verdict retracted to OPEN is visible) and open/closed/reopened filters. Header
-  Header
-  vitals add wall against the budget with 1x/1.5x/2x marks, awake worker slots
-  N/max with the queue length, and cost as a lower bound ("≥$") when any call
-  recorded none (unknown, never 0). `GET /api/runs/<id>/vitals` also serves `study`, `model` and `budget_s`
-  from the study's current config.yaml (null when undeclared or unparseable). Orchestrator RSS is not shown: no record holds it.
-  Narrow screens stack the panes instead of overlaying them. No longer read-only: see
-  **Operator channel** below for the write path (answering a `FollowUp`,
-  queueing a note, nudging a running delegation).
-  The Oracle tab draws one best-so-far chart over every store (`/api/runs/<id>/trajectory`,
-  read from output.csv `_ts` plus run_config's declared output names). The reader returns each
-  numeric/binary output column and ranks nothing. The default objective is the study's first
-  declared output; min/max, the 0/1 feasible column, the 0/1 salvaged column ("count salvaged
-  rows" toggles whether they enter the best) are the page reader's choice, with
-  `feasible`/`salvaged` pre-picked by name. One colour per namespace, circle = row, diamond =
-  salvaged, filled = feasible, hollow = not; a run copied off its machine falls back to the
-  store beside it. The linear y axis is fitted to the best-so-far lines and the counted points
-  (+15%); points beyond it are triangles pinned at the edge. The readout names what it counts
-  ("best feasible X (incl. salvaged) in <ns> at #i (Dnnn)"), hover shows flags and delegation,
-  and direction reads "(default)" until changed. No reference line: no record carries a
-  machine-readable target.
-  `GET /api/runs/<id>/funnel[?stages=a,b]` (`readers.read_funnel`) is the stage funnel as data:
-  per store, the 0/1 stage columns in order, each with `pass` (alone), `cumulative` (passed every
-  earlier stage; an unrecorded value does not pass), `dropped`, `unrecorded`; plus `binding` (the
-  stage that dropped most), `skipped` (requested but never recorded as 0/1) and `available`.
-  With no `stages`, the order is the study's declared top-level `funnel: [col, ...]` (validated
-  like `objective`, refused at start if it names a column the oracle does not produce, recorded in
-  run_config.json as `funnel`); with none declared, every 0/1 column in store order. No column
-  name is privileged. The server computes it; a front end only draws it.
-  `GET /api/runs/<id>/log[?name=run&after=<byte>&limit=<bytes>]` (`readers.read_log_tail`) tails
-  a run's log like `tail -f`: no `after` gives the last window, echoing `next_cursor` gives every
-  byte once, a file that shrank comes back from the start with `reset: true`. The log is chosen
-  by name (only `run` = `debug/run.log` today), never by path. The watchdog's own log joins once
-  the viewer starts runs (5.3) and so owns its stdout.
-  **Start / Kill (spec 14 5.3, 5.4):** `viewer/run_control.py`.
-  `GET /api/study/preflight` returns `{checks:[{name, ok, detail}], can_start, launched}`
-  (problem statement, config, budget, evaluator present and parsed without importing it, backend
-  CLI on PATH, no live run; `ok: null` = not decidable without side effects: the evaluator's
-  one-sample run and the problem statement's content are left to a person). `POST /api/study/start`
-  runs exactly `python -m adda.watchdog <study>` (budget/model from the committed config), 409
-  with the checks if any is false. One live run per study: a viewer-started process still alive,
-  or a run dir with no `run_status.json` that wrote to `debug/` in the last 600 s (`LIVE_WINDOW_S`;
-  a crashed run that stopped writing does not block forever). What it started is in
-  `runs/_viewer/registry.json` (PID + process start time, so a viewer restart still knows and a
-  recycled PID is never mistaken for ours), its output in `runs/_viewer/watchdog_<ts>.log`.
-  `POST /api/study/kill` SIGTERMs that watchdog (which reaps the run's tree), then SIGKILLs the
-  survivors among the descendants of that exact PID after 30 s; 404 if the viewer started nothing
-  alive. Every start/kill is a `viewer_actions.jsonl` line with the exact command and signal.
-  **Start via study launcher (spec 14 5.5):** `run_control.start_via_launcher` / `stop_via_launcher`.
-  A study declares `runtime.launch: {command, id_pattern, stop_command, timeout_s}` in `config.yaml`
-  (argv lists, no shell; `id_pattern` has one capture group applied to the launcher's stdout;
-  `stop_command` contains `{id}` and requires `id_pattern`). `POST /api/study/launch` runs exactly
-  `command` in the study directory, stores its output and the printed id in the registry
-  (`kind: launcher`); `POST /api/study/launch/stop` runs `stop_command` with the latest stored,
-  not-yet-stopped id and never any other. No `runtime.launch` means the control is absent
-  (`launcher: null` in the preflight, 409 on the endpoints); a malformed declaration is refused
-  with the reason, never read as "none". A second launch is refused while a run is live or the
-  viewer submitted one in the last 600 s. Every run (before, timeout, after with return code and
-  output) is a `viewer_actions.jsonl` row (`launch` / `launch_stop`) with the exact command line.
-  **Re-execute the deliverable (spec 14 5.8):** `viewer/notebook_replay.py`.
-  `POST /api/runs/<id>/notebook/reexecute` replays the run's notebook (`readers.notebook_path`:
-  the live file only if its stamp names the run, else that run's archive) through
-  `evaluation/notebook_exec.py` against a throwaway COPY of the run's `experiment_data/`
-  (`replay_sandbox`, the same sandbox the reproduction gate uses), in a child process so the
-  kernel's environment never leaks into the server. The live ledger and the notebook file are
-  never written. Returns `passed` (the gate's contract: clean exit, zero new rows, existing rows
-  unchanged), `rows_before/after`, `reproduced`, `stdout_tail`/`stderr_tail`, `timed_out`.
-  Timeout is the gate's rule (a tenth of the wall budget, at least 180 s). One replay per study
-  at a time (409), write token required, 409 when the run has no notebook or no ledger. Audited
-  as `reexecute` rows (exact command before, outcome after).
-  **Transcript events (spec 14 Phase 2):** `GET /api/runs/<id>/transcript/<key>/events?after=N&limit=M`
-  (`viewer/transcript_events.py`) returns `{events, next_cursor, total}`: both backends' transcripts
-  normalised server-side to `{ts, kind: user|assistant|tool_use|tool_result|thinking|system, role,
-  text, tool?, result?, notices?, pending?}`, so a front end renders events and never parses a
-  backend format. `after` and `next_cursor` count RAW records (most are streaming partials that emit
-  nothing); `limit` caps emitted events (default 200, max 1000). `next_cursor` is always an int, so a
-  live transcript is polled from it. Tool names and `pending` calls resolve against the whole file.
-  **Pagination (spec 14 Phase 2):** `GET /api/runs/<id>/transcript/<key>?after=N&limit=M` returns
-  `{events: <raw records>, next_cursor, total}` (limit counts raw records, default 200, max 1000).
-  `GET /api/runs/<id>/oracle?after=N&limit=M[&namespace=<name>]` pages each store's ledger rows,
-  newest first (default 400, max 5000); a store's `next_cursor` (offset into that order, `null`
-  once drained) replaces the old `truncated` flag. Cursors are per store: `namespace=<name>` pages
-  one store only (`namespace=` with no value is the canonical store), and `total_evals` still counts
-  every store. A non-integer `after`/`limit` is a 400.
-  **Retrospectives (spec 14 2.10):** `GET /api/runs/<id>/retrospectives` returns
-  `{retrospectives, missing}`. Each retrospective is split into `sections`
-  (CONSISTENCY / DECISION / FRICTION / BLOCKED / TIME; `- **X**:`, `**X**:` and `#### X:` headers
-  all parse), with unstructured text kept in `preamble` and the raw `text` always present, plus
-  `delegation_id` when `source_id` is a delegation of the run. `missing` is the run's
-  `RETROSPECTIVES_MISSING` diagnostics rows, so a node that never answered is visible.
-  **Critic reviews (spec 14 2.5):** `GET /api/runs/<id>/critic_reviews` returns `{reviews}`, one per
-  `critic_reviews/call_NNN.md`: `verdict` and `findings` come from the gate's own parsers
-  (`nodes/parsing`), `numbers` is the `findings_*` counts, `source_id` (`critic-N`) matches the
-  retrospective of the same call, and `delegation_id` names the critic delegation with
-  `delegation_id_source`: `recorded` (the delegation row's `critic_review` field, written by every
-  GATE, FEEDBACK and escalation call), `ordinal` (runs that predate the field: Nth critic delegation
-  for the Nth file, only when the counts match) or null.
-  **Diagnostics (spec 14 2.4):** `GET /api/runs/<id>/diagnostics?after&limit[&kind=]` pages
-  `diagnostics.jsonl` by line cursor (`next_cursor` is always an int, a live run keeps appending;
-  compare with `total`). `kind` filters on the row's `error_type`, else `tool`; `counts` is the whole
-  file's kind vocabulary regardless of the filter. Unparseable lines are skipped.
-  **Strategizer notes (spec 14 2.8):** `GET /api/runs/<id>/notes` returns `{notes}`: every `*.md` in
-  `debug/strategizer_notes/` (`strategy_NN_*.md`, `study_summary.md`) as `{name, mtime, text}`, oldest
-  first. Any subset, or none, is valid.
-  **Evidence (spec 14 2.6):** `GET /api/runs/<id>/evidence` returns `{index, repo, delegations}`:
-  `debug/evidence_index.md`, and per delegation its `workspace_sha`, `predecessor_sha` (the commit
-  before it in the workspace history) and the `files` that commit touched. `GET
-  /api/runs/<id>/evidence/<delegation_id>` adds `git show --stat` and `git diff --stat` against the
-  predecessor. All git goes through `viewer/safe_git.py`: fixed argv, no shell, commit ids
-  `[0-9a-f]{7,40}` only, explicit `--git-dir` (never discovers a parent repo), scrubbed env, timeout,
-  capped output; it can only read. The same module serves study history (5.10).
-  **Literature (spec 14 2.9):** `GET /api/runs/<id>/literature` returns the study-scoped corpus
-  (`corpus.csv`, shared by every run) with each paper's `in_run` (its own `added_at` inside this run's
-  start..end window; null when unparseable), `added_in_run`, `run_window`, this run's literature-tool
-  `errors` (cooldowns and other failures are the same ERROR_RETURN row, so indistinguishable) and its
-  `RETRIEVAL_DEGRADED` rows.
-  **Study history (spec 14 5.10):** `GET /api/study/history?limit=` returns the commits touching the
-  study directory (repo root = nearest ancestor with `.git`; log confined to the study path after
-  `--`, path chosen server-side), each with its changed files and +/- counts, via `safe_git`. Empty
-  with `repo: null` when the study is under no repository; 502 if git fails.
-  The viewer binds loopback only: any other `--host` needs `--allow-network` and prints a warning.
-  **Redesigned UI, build step 1 (spec 15):** `GET /ui` serves `static/ui/{index.html,ui.css,ui.js}`
-  alongside the old page (`/` is unchanged). Shell, title block (run, elapsed vs budget, cost with
-  unknown calls, delegation count, best row) and the Timeline with its inspector, all on the real
-  endpoints. View and selection live in the URL (`?run=&view=&sel=`); the inspector is resizable
-  (360-640 px, arrow keys on the grip), closable, Esc closes it; polling runs only while the tab is
-  visible and the run open. Views not yet built show their empty state. `tests/test_viewer_ui_tokens.py`
-  enforces contrast (AA), no colour literal outside the token blocks, and the type/spacing scale;
-  `internal/tools/viewer_shots.py` renders the views x widths x themes screenshot set.
-  **Build step 2, question banner (spec 15 4.4):** a pending operator question shows as a banner under
-  the title block on every view of that run, with an answer field and a dot on the run in the nav. The
-  heartbeat rule is enforced in the front end: `/api/runs/{id}/operator` is polled only by a visible
-  tab on an open run, never by a hidden tab or a closed run. Send shows "Answered, undo for 10 s" and
-  posts when the window ends (or at once if the tab is hidden or closed); Undo restores the text.
-  `viewer_shots.py --banner` builds a pending-question fixture and shoots it.
-  **Build step 3, Data view (spec 15 4.3):** best-so-far from the declared objective, scored across every
-  store that records its columns (`/figure_of_merit` + `/trajectory`); x is the evaluation number (a toggle
-  gives elapsed hours), both axes fit the data (never forced to zero), a log-y toggle appears only when
-  counted values span more than two decades. The store switcher highlights the focus store (full opacity; the other
-  stores' dots stay drawn at 30%; it follows a selected row); the best line and the "value unit · store row N" label span all stores and
-  the label selects that row. Reference lines come only from `objective.lines`; one outside the range becomes
-  an edge tag ("above/below range"), and uncounted rows outside it become edge ticks. Display scaling only
-  from `objective.unit_label` (one function, `disp`); counted dots filled in the producing role's colour,
-  infeasible hollow, click selects `sel=row:N`. The funnel (`/funnel`) is drawn only when the study declares `funnel:` (each stage's cumulative and "alone"
-  counts); without it the 0/1 columns appear as a compact sortable "0/1 columns" table (`flags`: count of ones, n). The store table sizes its columns to content and is left-aligned. The store table is virtualised, sortable, with a column picker remembered per viewer
-  (localStorage). `/trajectory` stores now also carry `inputs` and `text` (non-numeric output columns) so a
-  row inspector needs one request. The wall-clock fill turns warn past 1.5x and bad past 2x the budget.
-  `viewer_shots.py --data` shoots it on a copy of a study that declares an objective.
-  **Build step 4, Hypotheses view (spec 15 4.3):** one row per hypothesis (full statement, status mark plus word,
-  prior to posterior bar with a tick at the prior, linked delegations: the ones that carry it plus the ones its
-  evidence cites). Filter chips all / open / closed / retracted with counts; a retracted hypothesis is one whose
-  status log ever returned a closed verdict to OPEN (`read_hypotheses` marks each such entry `retraction` and
-  counts them). Selecting a row opens the falsification criterion, the prediction and the full status history in
-  the inspector, each entry with its comment, evidence delegation and validator note; a retraction is drawn as a
-  back-step (indented, with a return arrow). `viewer_shots.py --hypotheses` shoots it.
-  A statement is clamped to four lines in the list with a "more / less" toggle (the inspector always has the full
-  text). A downgrade (SUPPORTED or FALSIFIED to INCONCLUSIVE) is a revision, not a retraction: `read_hypotheses`
-  flags the entry `revision`, the history draws it with a dashed "revised" mark and no back-step, and the
-  retracted filter leaves it out.
-  **Build step 5, Deliverable view (spec 15 4.3):** the run's notebook as prose at a 75 ch measure, with figures
-  and tables up to 1000 px, code folded behind a "Show code" toggle, and notebook HTML tables rebuilt from table
-  markup only (never scripts or styles). Math ($..$, $$..$$, \\(..\\), \\[..\\]) is typeset by KaTeX, vendored under
-  `viewer/static/vendor/katex/` (woff2 fonts only, loaded on first use; no CDN at runtime). The headline strip
-  states what the notebook itself prints (`REPRODUCED:` / `CLAIMED_HEADLINE:`, parsed by
-  `notebook_exec.parse_headline`) exactly as printed, with no unit conversion and never the store's best row; a
-  stored notebook without outputs shows a dash and says why. **Re-execute** posts to the additive
-  `POST /api/runs/{run}/notebook/reexecute/stream` (NDJSON: `started`, `phase`, `cell` progress events from
-  `notebook_replay`, then a final `result`), which fills a log drawer and ends with a pass or fail mark and the
-  re-executed value next to the stored one. The earlier non-streaming endpoint is unchanged.
-  **Saved re-executions:** every re-execution writes its executed notebook as a NEW file,
-  `runs/<run>/debug/viewer_reexec/pipeline_<stamp>.ipynb`, with `reexec_<stamp>.json` (pass/fail, time, adda
-  commit, reproduced/claimed values, ledger rows before/after); the run's own `pipeline.ipynb` is never
-  modified. `GET …/notebook?reexec=` serves the latest passing re-execution by default, `stored` the run's own
-  notebook, or a listed id; the view's "Stored · Last re-execution" switch picks between them and the headline
-  strip is read from the notebook shown ("From re-execution at <time>"). Each re-execution is an audit row.
-  **Logs view:** a tail of `GET /api/runs/{id}/log` with a Run log / Monitor source switch (`name=run` is
-  `run.log`, `name=diagnostics` is `diagnostics.jsonl`, one line each), polled every 2 s while the run is open,
-  a Pause toggle that resumes without gaps (the byte cursor is kept), ids linked, stuck to the bottom unless
-  scrolled up. More sources, listed by `GET /api/runs/{id}/log_sources`: the watchdog log (when the viewer
-  started the run), one `out:<delegation>/<file>_stdout.log` per delegation (a select, labelled with the
-  delegation id, which is linked), and "Tool calls" (`GET /api/runs/{id}/tool_calls?since=`: one line per call
-  with time, delegation, tool, ok/error, parsed from the transcripts). A closed run's panel shrinks to its
-  content. `viewer_shots.py --logs [--live]` shoots it; `--live` appends to a copy's run.log meanwhile.
-  `viewer_shots.py --deliverable` shoots it, including a Re-execute.
-  **Study file editing (spec 14 §3.1/3.2, `viewer/study_edit.py`):** `GET /api/study/file/{problem_statement|config}`
-  returns the committed text, the disk text and the committed blob id (`base`); `POST .../diff` returns side-by-side
-  rows (and, for the config, its validation); `POST .../commit` (write-guarded, audited as `commit_study_file`)
-  writes the text and commits just that file with a required message, authored as the operator's git identity.
-  It refuses when `base` is stale, when the text equals the committed file, when other files of the study have
-  uncommitted changes (`runs/` and the audit log excepted), and, for `config.yaml`, when it does not parse, has an
-  unknown `runtime:` knob (with a did-you-mean) or an unparseable `budget`. A failed commit restores the file.
-  `GET /api/study/commit?sha=&file=` is one commit's patch of one of the two files. No push.
-  **UI (`/ui`, spec 15 step 7):** the Setup tab edits either file in a buffer with a debounced side-by-side diff, live
-  config validation, a required commit message and the file's history (open a commit for its patch). `Re-run study`
-  opens the Start sheet: model and budget read from the committed config (`/api/study/preflight` -> `configured`), a
-  warning for uncommitted edits, the pre-flight checklist (blocked checks link to Setup), then Start (the launcher
-  when configured, else the local runner). `Stop` on a live run opens a popover: `Stop gracefully` (writes the stop
-  request) primary, `Kill now` behind a second confirm and offered only while a process this viewer started is alive (the registry's `launched[].alive`). A read-only session shows a read-only message instead of
-  acting. `viewer_shots.py --setup` shoots Setup and the Stop popover.
-  **Downloads (spec 14 Phase 5.11):** `GET /api/runs/{id}/download?what=notebook|store|debug` (read-only, no token) returns the run's
-  pipeline notebook, a zip of its ledger tables (`input/output/jobs.csv`, `domain.json` per oracle namespace), or a zip of its `debug/`
-  folder, i.e. files that already exist on disk; 404 when the run has none, 400 for an unknown kind. The Deliverable header carries the three links (`viewer/downloads.py`). **Status:** done.
-  **Ask the docs (spec 14 Phase 5.9):** `GET /api/docs?q=<question or exact name>[&source=1]` (read-only) returns `{text}` from the same `adda.explain.explain` that
-  `adda-docs` runs; the nav's `Docs` button opens a sheet with the box and a Source toggle. **Status:** done.
-  **New / duplicate study (spec 14 Phase 5.1, 5.2):** `GET /api/studies` lists the studies beside this one; `POST /api/studies` (write-token gated, audited as `create_study`)
-  takes `{name, message (required), template?, problem_statement?, config?}`, makes `<studies>/<name>/`, validates `config.yaml` as the Setup commit does, and commits exactly the two files with the operator's message (`--only`, so staged or dirty files elsewhere are untouched; rolled back on failure; never pushes).
-  `template` copies a sibling study's two files (a duplicate); the response carries `python -m adda.viewer <path>` because one viewer serves one study. The nav's `New study` opens the sheet. **Status:** done.
-  **Launcher in the Start sheet (spec 14 Phase 5.5):** when `runtime.launch` is declared the sheet names its command, Start runs it (`POST /api/study/launch`) and shows the exact command line, the captured id and the launcher's stdout/stderr;
-  while a captured id has not been stopped (and `stop_command` is declared) a `Stop launch <id>` button runs it (`POST /api/study/launch/stop`) and shows its output. Without `runtime.launch` neither appears. **Status:** done.
-  **Note to run (spec 14 Phase 5.7, spec 15):** on a live run the title's `Note to run` opens a sheet: free text, sent to the entry node or to one running delegation (`POST /api/runs/{id}/note`, which now also writes a `note` row to `viewer_actions.jsonl`). **Status:** done.
-  **Timeline (spec 15):** any span over 30 min with no delegation running (and no gate) is drawn as a 24 px break
-  band labelled "<duration> with no delegation running"; hour ticks inside it are skipped, the ruler resumes after
-  it and the now line stays at the true end. Gate chips are laid out right to left so none overlap, each on its own
-  rule. `viewer_shots.py --timeline` shoots a long idle tail.
-- **Where:** `src/adda/_src/viewer/` (`readers.py` pure data functions,
-  `app.py` the Starlette app, `templates/graph.html` the UI);
-  `agent_runtime.py`'s `AgenticRun.serve_viewer`; `pyproject.toml`'s `viewer`
-  optional-dependency group. **Status:** done (v1, read-only).
-- **Lifecycle, event colours, fonts (2026-09-28):** the delegation panel
-  names the stage (`lifeOf`: queued / running / awaiting review / done /
-  failed / gate outcome) with one explanatory sentence, distinguishing a
-  QUEUED delegation (`session_started_at` present and null) and an
-  OPEN_FOR_REVIEW one from plain running/done. adda notices are classified
-  by their marker (`app.py::_notice_kind`: adda / science monitor / verdict
-  validator / operator), each with its own colour AND a text tag; critic
-  verdicts and review approvals colour their result block. Science-monitor
-  injections render collapsed in the transcript and are also listed run-wide,
-  behind a count badge, from `readers.read_monitor_injections`
-  (`GET /api/runs/{id}/monitor`). Light theme (Catppuccin Latte) follows the
-  OS. IBM Plex Sans/Mono are bundled under `viewer/static/fonts` (SIL OFL) and
-  served from `/static`; Alpine and marked are still CDN-loaded.
+### Live run viewer
+- **What:** `python -m adda.viewer <study-dir> [--host --port --allow-network]`
+  (or `AgenticRun.serve_viewer`) serves one study's runs, live, to a browser.
+  Two front ends, both current:
+  - `/` → `/runs/<latest>` (`templates/graph.html`; Alpine + marked + KaTeX
+    from CDN; IBM Plex bundled; Catppuccin Mocha/Latte by OS): tabs Brief,
+    Overview (vertical concurrency timeline, gate rules, hypothesis hover-link),
+    Graph (agent network, `run_diagram._bfs_layers` layout, SSE status dots;
+    click a node for its transcript as chat bubbles, tool calls collapsed,
+    adda notices tagged by kind via `app.py::_notice_kind`, compaction
+    markers, science-monitor injections), Oracle (best-so-far over every
+    store), Chat, Result. The only per-node transcript view.
+  - `/ui` (spec 15; `static/ui/{index.html,ui.css,ui.js}`; no CDN, KaTeX
+    vendored, Instrument Sans/Geist Mono, light/dark tokens): views Timeline,
+    Hypotheses, Data, Deliverable, Logs, Setup; state in the URL
+    (`?run=&view=&sel=`); polls only while the tab is visible and the run open.
+- **Watching (`/ui`):**
+  - Title block: elapsed vs budget (warn >1.5x, bad >2x), cost as "≥$" when
+    any call recorded none, delegation count, best row. Pending operator
+    question = banner with answer field (10 s undo).
+  - Timeline: one column per concurrent slot from true session start/end;
+    queued wait hatched; idle >30 min collapses to a labelled 24 px band;
+    gate chips laid out right to left.
+  - Hypotheses: prior→posterior bar, linked delegations, filters
+    all/open/closed/retracted; retraction (closed→OPEN) drawn as a back-step,
+    downgrade to INCONCLUSIVE as a dashed "revision" (`read_hypotheses`).
+  - Data: best-so-far of the declared objective across stores (x = eval # or
+    hours, log-y only past two decades); reference lines only from
+    `objective.lines`, scaling only from `objective.unit_label`; funnel drawn
+    only when the study declares `funnel:`, else a "0/1 columns" table;
+    virtualised sortable store table, column picker in localStorage.
+  - Deliverable: notebook as prose, code folded, tables rebuilt from markup
+    only; headline strip = the notebook's own `REPRODUCED:`/`CLAIMED_HEADLINE:`
+    (`notebook_exec.parse_headline`), never the store's best row; Stored /
+    Last re-execution switch; download links.
+  - Logs: tail with Pause (byte cursor kept); sources run log, Monitor
+    (diagnostics), watchdog, per-delegation stdout, Tool calls.
+  - Docs sheet (`adda.explain.explain`).
+- **Acting (write token; every action a `viewer_actions.jsonl` row in the
+  study dir):**
+  - Answer a pending question; note to the entry node or one running
+    delegation (see **Operator channel**).
+  - Stop popover: `Stop gracefully` (writes `debug/stop_request.json`, see
+    **Graceful stop**); `Kill now` behind a second confirm, offered only while
+    a viewer-started process is alive.
+  - Start sheet: preflight checklist, then the local runner
+    (`python -m adda.watchdog <study>`) or the study's `runtime.launch`
+    command; one live run per study (`LIVE_WINDOW_S` = 600 s); PID + start
+    time in `runs/_viewer/registry.json`; Kill = SIGTERM, SIGKILL survivors
+    after 30 s (`run_control.py`).
+  - Re-execute the deliverable against a throwaway copy of
+    `experiment_data/` in a child process, timeout max(budget/10, 180 s);
+    output saved as `debug/viewer_reexec/pipeline_<stamp>.ipynb` +
+    `reexec_<stamp>.json`; the run's own notebook and ledger are never written
+    (`notebook_replay.py`).
+  - Setup: edit PROBLEM_STATEMENT.md / config.yaml with diff, validation and a
+    required message; commits just that file as the operator, refuses stale
+    `base`/other dirty study files/bad config, restores on failure, never
+    pushes (`study_edit.py`). New / duplicate study commits exactly the two
+    files (`--only`).
+- **Data endpoints** (`/api/runs/{id}/…` unless noted; cursors `after`/`limit`,
+  `next_cursor` always an int on live files, non-int → 400):
+  `graph`, `delegations`, `ledger`, `stream` (SSE), `vitals` (+`study`,
+  `model`, `budget_s` from config), `oracle` (per-store paging, newest first,
+  `namespace=`), `trajectory` (+`inputs`, `text`), `figure_of_merit`,
+  `funnel[?stages=]` (`read_funnel`; order = declared `funnel:` else store
+  order), `monitor`, `diagnostics[?kind=]`, `log?name=&after=` +
+  `log_sources`, `tool_calls`, `transcript/<key>` (raw records),
+  `transcript/<key>/events` (backend-neutral events, `transcript_events.py`),
+  `node/{name}/transcripts`, `notebook[?reexec=]`, `artifacts`/`artifact`,
+  `problem_statement`, `retrospectives`, `critic_reviews`
+  (`delegation_id_source` recorded|ordinal|null), `notes`, `evidence[/<D>]`,
+  `literature`, `download?what=notebook|store|debug`, `operator`; study-level
+  `/api/study/{preflight,history,file/{name}[/diff|/commit],commit}`,
+  `/api/studies`, `/api/docs`, `/api/session`.
+  Writes: `answer`, `note`, `stop`, `notebook/reexecute[/stream]` (NDJSON),
+  `/api/study/{start,kill,launch,launch/stop}`, `/api/studies`, study-file
+  `diff`/`commit`.
+- **Security:** binds loopback; any other `--host` needs `--allow-network`
+  (prints a warning). Reads open; writes need the per-launch token set as an
+  HttpOnly SameSite=Strict cookie by the printed `/session?token=…` URL, plus
+  same-origin `Origin`, no cross-site `Sec-Fetch-Site`, and
+  `Content-Type: application/json`. `/api/session` → `can_write`; read-only
+  sessions see a message, not a failure. All git via `safe_git.py` (fixed
+  argv, no shell, `--git-dir`, sha `[0-9a-f]{7,40}`, timeout, read-only).
+- **Known limit:** on-disk delegation status lacks the registry's
+  `Working`/`FollowUp`/`Cancelled`; a delegation waiting on a human looks
+  like one still running.
+- **Known inconsistency (code):** `viewer/__main__.py`'s docstring and argparse
+  description still say "read-only".
+- **Where:** `src/adda/_src/viewer/` (`app.py`, `readers.py`,
+  `transcript_events.py`, `run_control.py`, `notebook_replay.py`,
+  `study_edit.py`, `safe_git.py`, `downloads.py`, `templates/graph.html`,
+  `static/ui/`); `runtime/agent_runtime.py::serve_viewer`; `viewer` extra.
+  Tests `tests/test_viewer_*.py` (`test_viewer_ui_tokens.py`: AA contrast,
+  token-only colours); screenshots `internal/tools/viewer_shots.py`
+  (`--banner --data --hypotheses --deliverable --logs [--live] --setup
+  --timeline`). **Status:** done.
 
 ---
 
@@ -1530,10 +1608,8 @@ no claim. A run with no ledger reads "no hypothesis ledger". Tests: `tests/test_
   result and renders them in their own band (`--surface0`, peach left rule)
   above the tool's own output (`--crust`).
 - **Where:** `nodes/notices.py` (`wrap_notice` / `split_notices` and the
-  marker); seven injection sites in `nodes/orchestration.py`
-  (`_drain_notifications`) and `nodes/tools/routing/` (worker-message
-  drains in `ReportEvals`/`FollowUp`/the status poll, the status-poll hints,
-  and the science-monitor drains in both `Wait` branches);
+  marker); injection sites in `nodes/orchestration.py` and
+  `nodes/tools/routing/delegation.py` (grep `wrap_notice(`);
   `viewer/app.py::_tool_result_html` renders them.
 - **Why marked at the source, not detected by the reader:** the pre-existing
   `[TAG …]` convention is incomplete (the status-poll hints are bare
@@ -1554,8 +1630,9 @@ no claim. A run with no ledger reads "no hypothesis ledger". Tests: `tests/test_
   terminal. Three things move across it, all as small JSON in the run's own
   `debug/` dir (the run and the viewer are separate processes, so the file
   system is the channel; it also makes the whole exchange part of the run
-  record rather than terminal scrollback): **answers** to a `FollowUp`
-  question; **notes** queued for the entry node's next tool call; and a
+  record rather than terminal scrollback): **answers** to a question the entry
+  node asks (`SendMessage(to="human")`, or `FollowUp` when `peer_interaction` is
+  off); **notes** queued for the entry node's next tool call; and a
   **watch heartbeat**, which is what lets a run tell waiting-for-an-answer
   apart from stalling on a question nobody can see.
   A note may carry the **delegation id** it is aimed at. Addressed at a
@@ -1570,11 +1647,11 @@ no claim. A run with no ledger reads "no hypothesis ledger". Tests: `tests/test_
   depends on the orchestrator taking a tool call (it drains on
   `Wait`), so a strategizer blocked in a long synchronous
   `Delegate(wait=True)` will not route a nudge until it returns.
-- **Where:** `src/adda/_src/operator_channel.py` (`ask_question`,
+- **Where:** `src/adda/_src/infra/operator_channel.py` (`ask_question`,
   `answer_question`, `queue_note`, `drain_note_rows`, `touch_watch`,
   `is_watched`); routing in `nodes/orchestration.py`'s `_drain_notifications`;
   HTTP surface in `viewer/app.py` (`/answer`, `/note`); composers in
-  `viewer/templates/graph.html`. **Status:** done.
+  `viewer/templates/graph.html` and `viewer/static/ui/ui.js`. **Status:** done.
 
 ---
 
@@ -1648,20 +1725,20 @@ node's retrospective round); the deadline and the kill do not move.
 **Viewer:**
 `POST /api/runs/{id}/stop` (write-token gated like notes) writes the same file
 with `by="viewer"`, refuses a closed run or an already-pending stop (409), and
-appends the action to `studies/<study>/viewer_actions.jsonl`. **Status:** node
-side, watchdog and the endpoint are done; the Stop button (front end) and
-Kill (needs the PID registry that Start, 5.3, creates) follow.
+appends the action to `studies/<study>/viewer_actions.jsonl`. **Status:** done
+(node, watchdog, endpoint, `/ui` Stop popover with Kill now for viewer-started
+runs).
 
 ---
 
 - **Thinking display (`runtime.thinking_display`):** `summarized` (default) or
   `omitted`, passed as `thinking={"type": "adaptive", "display": ...}` to
   `ClaudeAgentOptions` on models that support adaptive thinking (Opus/Sonnet
-  4.6+, the 5.x families); other models are untouched. Newer models default to
+  4.6+, Fable/Mythos 5+); Haiku and others untouched. Newer models default to
   `omitted`, which returns every ThinkingBlock with empty text and only a
-  signature, so transcripts and the viewer read as bare tool calls (Sonnet 5.5
-  smoke 20260928T233115: 0 of 78 assistant records carried thinking, against
-  126 of 369 on Haiku). Billing is the same either way — the full thinking
+  signature, so transcripts and the viewer read as bare tool calls (run
+  artifact: Sonnet 5.5 smoke 20260928T233115, 0 of 78 assistant records carried
+  thinking, against 126 of 369 on Haiku). Billing is the same either way — the full thinking
   tokens are charged (Anthropic docs, "Controlling thinking display"). Each
   assistant transcript record now also carries `thinking_omitted`, the count
   of thinking blocks that arrived empty, so "thought but hidden" is
@@ -1680,7 +1757,8 @@ Kill (needs the PID registry that Start, 5.3, creates) follow.
   transcript (before -> after tokens, policy, messages dropped; the summary
   collapsed), and the run-wide Monitor list shows the diagnostic. **Where:**
   `backends/openai_compatible.py` (`_context_hook`), `backends/claude.py`,
-  `viewer/app.py` (`_compaction_facts`, `_compaction_html`). **Status:** done.
+  `viewer/transcript_events.py` (`_compaction_facts`), `viewer/app.py`
+  (`_compaction_html`). **Status:** done.
 
 ### Prompt prose names tools the way the backend exposes them
 - **What:** on the Claude backend the SDK exposes closure tools only as
@@ -1691,6 +1769,8 @@ Kill (needs the PID registry that Start, 5.3, creates) follow.
   (`Wait for...`) is left alone. Other backends are unchanged. Without it the
   model called the bare name: "No such tool" (`ReportEvals`, `SendMessage`) or
   the CLI's own disabled native `Write`.
+- **Where:** `backends/claude.py` (`_CLOSURE_MCP_SERVER = "f3dasm_agent_tools"`,
+  `_qualify_closure_names`, `_render_system_prompt`). **Status:** done.
 
 ### Store integrity guard (RunScratch / RunNotebook)
 - **What:** both tools run against a sandbox copy, and a guard fingerprints the
@@ -1700,13 +1780,15 @@ Kill (needs the PID registry that Start, 5.3, creates) follow.
   keeps every old row/key and only adds rows or columns (a concurrent
   campaign's flush, including one that declares a new provenance column and so
   rewrites the header and domain.json) is an append: reported, never reverted.
+- **Where:** `nodes/tools/routing/notebook.py` (`_canonical_integrity_guard`,
+  `_integrity_error_message`). **Status:** done.
 
-## Tools (every one must be documented above; the test enforces it)
+## Tools (agent-declared names are test-enforced to appear in this file; injected closures are not)
 
 | Tool | Feature |
 |---|---|
 | `Delegate` | Delegation (dynamically injected) |
-| `Wait` · `FollowUp` (entry node: operator channel) · `ReportEvals` | Delegation + messaging + telemetry (`Wait(id, block=False)` is the status poll) |
+| `Wait` · `FollowUp` (entry node, only with `peer_interaction` off) · `ReportEvals` | Delegation + messaging + telemetry (`Wait(id, block=False)` is the status poll) |
 | `WriteCell` · `ShowNotebook` · `WriteDeliverable` | Notebook authoring (`WriteDeliverable`: the study's declared extra files only). Three markdown-cell names are RESERVED with an auto-added canonical heading (`problem`, `hypotheses`, `verdict` — the last is `<deliverable_format>` step 7, `## Verdict & result`, ahead of the analysis pillar); any other name is a free-form custom narrative cell (content used verbatim, no forced heading), mirroring the custom code-phase philosophy — the deliverable's structure must not block what an agent needs to say. Only a pillar name or `<pillar>__why` collides and is rejected |
 | `RunNotebook` | Per-cell notebook debugger (#13), and with `gate=True` the reproduction gate as a dry run |
 | `RunScratch` | Worker scratch execution against a ledger copy |
@@ -1719,6 +1801,14 @@ Kill (needs the PID registry that Start, 5.3, creates) follow.
 | `BashOutput` · `KillShell` | Bash companions: poll / stop a backgrounded shell (#24) |
 | `Read` · `Write` · `Edit` · `Bash` · `Glob` · `Grep` | Workspace file/shell primitives |
 | `Done` | Close the run for the gate |
+| `SendMessage` | Peer/human messaging (spec 12; default on). `to="human"` entry node only |
+| `RecallHistory` | Read this node's prior delegations (any node with a delegation log) |
+| `AskForFeedback` | Mid-run critic audit (entry node, critic connected) |
+| `CancelDelegation` | Opt-in only; no production agent declares it |
+| `ConsultHandbook` | Curated project handbook (every node) |
+| `ConsultF3dasm` · `ConsultAdda` | Installed-API lookup (f3dasm: strategizer, implementer, datagenerator; adda: registered, unattached) |
+| `CorpusAdd` · `ConsultLiterature` · `SearchPapers` · `PaperDetails` · `CitationGraph` | Literature reviewer (`ConsultLiterature` read-only on every node) |
+| `ConsultAbaqus` · `ConsultBasilisk` | Offline solver docs (abaqus_/basilisk_datagenerator) |
 
 ### Token usage survives a raised stream and sums over retried attempts
 - **What:** `ClaudeAdapter` folds each attempt's streamed usage
@@ -1742,7 +1832,8 @@ Kill (needs the PID registry that Start, 5.3, creates) follow.
   appends one `event: "LLM_RETRY"` row to `debug/diagnostics.jsonl` (node,
   delegation_id, attempt, max_attempts, exception type, message, delay_s). A
   retry is not an error, so it does not bump the node's error count.
-- **Why:** a run had 32 retries across 14 delegations and none was visible.
+- **Why:** run 20260928T225501 had 32 retries across 14 delegations, none
+  visible (93a8fc7). The row also carries `error_type: "LLM_RETRY"`.
 - **Where:** `backends/base.py::retry_on_transient`,
   `nodes/recording.py::_record_llm_retry`. **Status:** done.
 
