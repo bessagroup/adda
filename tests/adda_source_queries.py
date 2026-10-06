@@ -21,7 +21,7 @@ THE BASELINE IS RIPGREP, NOT NOTHING
     index should not ship.
 
 THE HELD-OUT SPLIT
-    ``DEVELOPMENT`` (31) may be looked at while building. ``HELD_OUT`` (14)
+    ``DEVELOPMENT`` (34) may be looked at while building. ``HELD_OUT`` (14)
     may not be read, reasoned about, or scored until the design is frozen.
     They are stratified by tier so the held-out set is not accidentally the
     easy third.
@@ -172,6 +172,12 @@ KNOB = [
     ("k13", "how do I turn on the new peer-messaging tool",
      [S + "runtime/features.py",
       S + "nodes/tools/routing/delegation.py"]),
+    ("k14", "how do I stop it telling the agent how much time and budget is left",
+     [S + "runtime/features.py", S + "nodes/orchestration.py"]),
+    ("k15", "can I remove the rules every worker is told to follow",
+     [S + "runtime/features.py", S + "prompts/agent_prompts.py"]),
+    ("k16", "how do I stop it pushing the agent to try again when it ends without finishing",
+     [S + "runtime/features.py", S + "nodes/orchestration.py"]),
 ]
 
 #: Which query is the way to ASK FOR each declared feature knob.
@@ -192,6 +198,9 @@ KNOB_COVERAGE = {
     "pipeline_deliverable": "k10",
     "reproduction_gate": "k12",
     "peer_interaction": "k13",
+    "budget_notes": "k14",
+    "delegation_contract": "k15",
+    "reprompt_unfinished": "k16",
 }
 
 TIERS = {"name": NAME, "concept": CONCEPT, "error": ERROR,

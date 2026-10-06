@@ -223,6 +223,32 @@ FEATURES: tuple[Feature, ...] = (
         default=True,
         tools=frozenset({"SendMessage"}),
     ),
+    Feature(
+        key="budget_notes",
+        default=True,
+        # In-band budget text only: the per-turn constraint snapshot, the
+        # budget warnings and wrap-up ladder, the snapshot a delegation report
+        # and a worker's task message carry. The budgets themselves stay SOFT
+        # and the backstop is untouched; the critic still receives the
+        # constraints it judges against.
+        behaviours=("budget_notes",),
+    ),
+    Feature(
+        key="delegation_contract",
+        default=True,
+        # The <delegation_contract> block of the worker preamble, resolved by
+        # an inline gate in WORKSPACE_PREAMBLE_TEMPLATE. The oracle sentence
+        # beside it is run substrate and stays.
+        behaviours=("delegation_contract",),
+    ),
+    Feature(
+        key="reprompt_unfinished",
+        default=True,
+        # The bounded re-prompt after a turn ends without an accepted Done(),
+        # and the UNGATED banner on the run summary. The run still ends the
+        # same way; it is only no longer pushed to try again first.
+        behaviours=("reprompt_unfinished",),
+    ),
 )
 
 FEATURE_KEYS: frozenset[str] = frozenset(f.key for f in FEATURES)

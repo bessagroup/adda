@@ -1896,3 +1896,19 @@ runs).
   cwd D036, row stamped D036).
 - **Where:** `evaluation/oracle_resolution.py::_resolve_delegation_id`.
   **Status:** done.
+
+### Runtime knobs to drop adda's own prompting: `budget_notes`, `delegation_contract`, `reprompt_unfinished`
+- **What:** three ablation knobs, all default on, so a custom graph can run
+  without adda's machinery. `budget_notes` removes the in-band budget text
+  (per-turn constraint snapshot, warnings and wrap-up ladder, the snapshot on
+  a delegation report and a worker task message). `delegation_contract`
+  removes the `<delegation_contract>` block from the worker preamble.
+  `reprompt_unfinished` removes the bounded re-prompt after an unaccepted
+  close and the UNGATED banner. Budgets stay soft; the critic still gets its
+  constraints; the oracle sentence in the preamble stays (run substrate).
+- **Where:** `runtime/features.py` (registry, so each shows in `arms` and the
+  `arm_*` ledger columns); `nodes/orchestration.py::_budget_warnings`,
+  `_constraint_refresh`, `_reprompt_unfinished`, `_banner`;
+  `routing/delegation.py::_append_budget_report`, `_budget_broadcast`, the
+  worker task message; `prompts/agent_prompts.py` inline gate.
+  **Status:** done.

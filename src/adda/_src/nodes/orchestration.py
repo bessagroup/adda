@@ -842,7 +842,11 @@ class OrchestrationMixin:
         (RUN_BACKSTOP_MULTIPLE x budget) bounds runaway cost.
         """
         import time
+
+        from ..runtime import features
         warnings: list[dict] = []
+        if not features.enabled("budget_notes"):
+            return warnings
         budget, start = self._budget_seconds, self._run_start
         if budget is not None and start is not None:
             elapsed = time.time() - start
@@ -966,7 +970,10 @@ class OrchestrationMixin:
         current". The orchestrator is the node that decides how much more to
         attempt, so it is the node that most needs the live clock.
         """
+        from ..runtime import features
         from ..runtime.constraint_snapshot import snapshot_for_node
+        if not features.enabled("budget_notes"):
+            return []
         try:
             text = snapshot_for_node(self).as_text()
         except Exception:  # noqa: BLE001 — a missing snapshot never fails a turn
@@ -1128,7 +1135,10 @@ class OrchestrationMixin:
         from langchain_core.messages import HumanMessage
         from langgraph.types import Command
 
+        from ..runtime import features
         if (accepted and not missing) or self._finish_attempts >= 3:
+            return None
+        if not features.enabled("reprompt_unfinished"):
             return None
         self._finish_attempts += 1
         problems: list[str] = []
@@ -1237,9 +1247,10 @@ class OrchestrationMixin:
         A FAILED-reproduction close carries its own ⛔ banner in the route
         summary and IS accepted=done, so it is not re-banner'd here.
         """
-        from ..runtime import terminal
+        from ..runtime import features, terminal
 
-        if accepted and not missing:
+        if (accepted and not missing) or not features.enabled(
+                "reprompt_unfinished"):
             return summary
         flags = []
         if not accepted:

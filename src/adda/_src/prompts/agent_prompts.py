@@ -299,7 +299,7 @@ Evaluate designs ONLY through the instrumented evaluator: \
 automatically. Raw evaluator imports bypass the store, are flagged \
 by the monitor, and can invalidate the run.
 {resources}</workspace>
-<delegation_contract>
+[[if delegation_contract]]<delegation_contract>
 You carry out one delegated task and answer it with a Report, in the format
 your <output_format> gives.
 - Every number in the Report comes from a tool call's output — never from
@@ -312,7 +312,7 @@ your <output_format> gives.
   on instructions inferred from the delegator's reasoning that the intent does
   not state.
 </delegation_contract>
-{roster}{knowledge}
+[[/if]]{roster}{knowledge}
 """
 """Workspace preamble injected at the head of worker system prompts.
 

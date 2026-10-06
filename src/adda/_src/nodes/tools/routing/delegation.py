@@ -704,8 +704,10 @@ class WorkerSession:
 
         Best-effort: a KPI footer must never fail a delegation.
         """
+        from ....runtime import features as _features
         from ....runtime.constraint_snapshot import snapshot_for_node
-        text = text + "\n\n" + snapshot_for_node(self.node).as_text()
+        if _features.enabled("budget_notes"):
+            text = text + "\n\n" + snapshot_for_node(self.node).as_text()
 
         _run_exp = self._run_experiment_root()
         try:
@@ -2061,6 +2063,9 @@ class DelegationTools:
         # (eval AND wall-clock, not wall-clock only) — automatically, in-band;
         # not something it has to go query for. Wait(block=False) handles mid-run
         # updates.
+        from ....runtime import features as _features
+        if not _features.enabled("budget_notes"):
+            return task_msg
         return snapshot.as_text() + "\n\n" + task_msg
 
     def _sandbox_worker_writes(
@@ -2357,10 +2362,12 @@ class DelegationTools:
         nodes/_constants.py:budget_wrapup_message). The two used to share
         one Done()-mentioning string that a worker had no way to act on.
         """
+        from ....runtime import features as _features
         node = self.node
         budget = node._budget_seconds
         run_start = node._run_start
-        if budget is None or run_start is None:
+        if (budget is None or run_start is None
+                or not _features.enabled("budget_notes")):
             return []
         elapsed = time.time() - run_start
         pct = (elapsed / budget) * 100

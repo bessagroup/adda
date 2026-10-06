@@ -1669,7 +1669,7 @@ class AgenticRun:
             # eval-parallelism nudge; the critic/datagenerator/literature get the
             # resource facts alone.
             _is_campaign = getattr(agent, "role", None) == "implementer"
-            preamble = WORKSPACE_PREAMBLE_TEMPLATE.format(
+            preamble = features.resolve_gates(WORKSPACE_PREAMBLE_TEMPLATE).format(
                 workspace_dir=workspace_dir,
                 study_dir=self.study_dir,
                 entry=getattr(self._graph_spec, "entry", None) or "the entry agent",
