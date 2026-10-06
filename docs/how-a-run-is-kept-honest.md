@@ -63,7 +63,7 @@ severe test, and does the verdict follow from the result?
 
 This is **soft** — the ruling comes back as advice attached to the update,
 and it escalates if the same hypothesis keeps getting flagged. Disable it
-with `F3DASM_VERDICT_VALIDATOR=0`.
+with `verdict_validator: false` under `runtime:`.
 
 ## During the run: the monitors
 
@@ -161,7 +161,7 @@ common causes.
 | Interactive prompting | `interactive=False` on `AgenticRun` | on |
 | Process milestones (both the delegation block and the close gate) | `runtime: milestones_enabled` | `true` |
 | Notebook deliverable + reproduction gate | `runtime: pipeline_deliverable` | `true` |
-| Verdict referee | `F3DASM_VERDICT_VALIDATOR=0` | on |
+| Verdict referee | `runtime: verdict_validator` | `true` |
 
 There is no switch for the charter refusals or the critic gate. Those are
 the system.

@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
+from adda._src.runtime import settings
 from adda._src.backends.base import Agent, Edge, Graph
 from adda._src.infra.delegation_log import DelegationLog
 from adda._src.nodes import Node
@@ -226,10 +229,10 @@ def test_repeat_flag_escalates(tmp_path):
     assert "scrutinise" in r2 and "2" in r2  # escalation on the 2nd flag
 
 
-# ── kill switch: F3DASM_VERDICT_VALIDATOR=0 fully bypasses the validator ──────
+# ── kill switch: runtime.verdict_validator=false fully bypasses the validator ──────
 
-def test_env_kill_switch_disables_validator(tmp_path, monkeypatch):
-    monkeypatch.setenv("F3DASM_VERDICT_VALIDATOR", "0")
+def test_config_kill_switch_disables_validator(tmp_path, monkeypatch):
+    settings.configure({"verdict_validator": False})
     n, critic, diag = _node(tmp_path, critic_reply="SUBSTANCE: FLAG\nCRITIQUE: x")
     h = _propose(n)
     _record_done(n, "D001", h_ids=[h])
@@ -267,16 +270,14 @@ def test_the_switch_is_reachable_from_a_studys_runtime_block():
     assert verdict_validator_enabled() is True
 
 
-def test_the_old_environment_variable_still_works(monkeypatch):
-    """Nobody's shell breaks: settings derives the env name as
-    "F3DASM_" + key.upper(), which reproduces the name this switch already
-    used, and env still outranks config.yaml exactly as it did."""
-    from adda._src.nodes.critic_gate import verdict_validator_enabled
+def test_the_old_environment_variable_is_now_an_error(monkeypatch):
+    """The environment is not a settings channel: the name this switch used to
+    read is refused at AgenticRun construction rather than silently ignored."""
     from adda._src.runtime import settings
 
-    settings.configure({"verdict_validator": True})
     monkeypatch.setenv("F3DASM_VERDICT_VALIDATOR", "0")
-    assert verdict_validator_enabled() is False
+    with pytest.raises(ValueError, match="F3DASM_VERDICT_VALIDATOR"):
+        settings.reject_stale_env()
 
 
 def test_the_knob_is_declared_and_documented():

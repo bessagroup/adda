@@ -64,7 +64,7 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   stands (the call is advisory).
 - **Config:** knob `verdict_validator` (default on; ablation arm in
   `runtime/features.py`, requires `hypothesis_ledger`); settable from a study's
-  `runtime:` block or `F3DASM_VERDICT_VALIDATOR=0`. **Status:** advisory, non-blocking.
+  `runtime:` block. **Status:** advisory, non-blocking.
 
 ### Science monitor
 - **What:** background rules that flag scientific drift and escalate repeated
@@ -1925,3 +1925,15 @@ runs).
   other two own nothing, as before.
 - **Where:** `nodes/orchestration.py::_install_epistemics`,
   `nodes/reproduction_gate.py::_missing_deliverables`. **Status:** done.
+
+### The environment sets no run knob; a stale export is an error
+- **What:** `settings` resolves explicit argument, then `config.yaml`, then
+  default. There is no `F3DASM_<KEY>` tier. `settings.reject_stale_env()` runs
+  at `AgenticRun` construction and raises if the environment holds
+  `F3DASM_<KNOWN_KEY>`, naming each variable. The variables adda itself hands
+  to subprocesses (`F3DASM_NAMESPACE`, `F3DASM_DELEGATION_ID`,
+  `F3DASM_RUN_CONFIG`, `F3DASM_CANONICAL_STORE`, `F3DASM_DEDUP_SCOPE`) are not
+  knobs and are exempt. `F3DASM_MEM_CAP` is not a knob key either and is
+  unchanged.
+- **Where:** `runtime/settings.py::reject_stale_env`,
+  `runtime/agent_runtime.py::AgenticRun.__init__`. **Status:** done.

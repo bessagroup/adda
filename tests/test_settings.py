@@ -1,6 +1,6 @@
-"""Central run-knob accessor: config.yaml is source of truth, env overrides.
+"""Central run-knob accessor: config.yaml is the source of truth.
 
-Precedence per knob: env F3DASM_<KEY> > configured config.yaml value > default.
+Precedence per knob: explicit > configured config.yaml value > default.
 """
 from __future__ import annotations
 
@@ -34,19 +34,6 @@ def test_config_value_used_over_default():
     assert settings.get_str("foo", "d") == "bar"
 
 
-def test_env_overrides_config(monkeypatch):
-    settings.configure({"n": 12, "flag": False})
-    monkeypatch.setenv("F3DASM_N", "99")
-    monkeypatch.setenv("F3DASM_FLAG", "true")
-    assert settings.get_int("n", 7) == 99       # env beats config
-    assert settings.get_bool("flag", True) is True
-
-
-def test_env_overrides_default_when_no_config(monkeypatch):
-    monkeypatch.setenv("F3DASM_X", "3.25")
-    assert settings.get_float("x", 1.0) == 3.25
-
-
 def test_bool_accepts_yaml_native_and_string_forms():
     settings.configure({"flag": True})
     assert settings.get_bool("flag", False) is True
@@ -54,11 +41,6 @@ def test_bool_accepts_yaml_native_and_string_forms():
     assert settings.get_bool("flag", False) is True
     settings.configure({"flag": "0"})
     assert settings.get_bool("flag", True) is False
-
-
-def test_blank_env_falls_back_to_default_for_numbers(monkeypatch):
-    monkeypatch.setenv("F3DASM_N", "   ")
-    assert settings.get_int("n", 5) == 5  # blank string is not a number
 
 
 def test_int_tolerates_float_like_string():

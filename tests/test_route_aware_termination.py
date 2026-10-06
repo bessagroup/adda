@@ -12,6 +12,7 @@ Covers:
 from __future__ import annotations
 
 import tempfile
+from adda._src.runtime import settings
 import threading
 import time
 from pathlib import Path
@@ -312,7 +313,7 @@ def test_repeated_errors_halt_resumable(tmp_path, monkeypatch):
     """N consecutive Errored delegations from one target → resumable halt."""
     from adda._src.nodes import Node
 
-    monkeypatch.setenv("F3DASM_MAX_CONSECUTIVE_ERRORS", "3")
+    settings.configure({"max_consecutive_errors": 3})
     study_dir = tmp_path / "study"
     study_dir.mkdir()
     (study_dir / "pipeline.ipynb").write_text("# test\n")

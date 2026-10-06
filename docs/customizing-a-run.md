@@ -267,9 +267,9 @@ runtime:
   science_monitor: false
 ```
 
-or, for a one-off, the environment channel `F3DASM_SCIENCE_MONITOR=false`.
-Precedence is explicit argument, then environment, then `config.yaml`, then
-the feature's own `default`. The switches are listed together under
+or pass it as `AgenticRun(runtime={"science_monitor": False})`.
+Precedence is explicit argument, then `config.yaml`, then the feature's own
+`default`; the environment sets no knob. The switches are listed together under
 *Ablation switches* in [Authoring a study](authoring-a-study.md).
 
 What that one line does, with no other change anywhere:

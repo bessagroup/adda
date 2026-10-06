@@ -6,6 +6,7 @@ sink is set, and it must never raise into the agent loop.
 from __future__ import annotations
 
 import json
+from adda._src.runtime import settings
 
 from adda._src.backends.base import (
     append_transcript,
@@ -16,21 +17,21 @@ from adda._src.backends.base import (
 
 
 def test_debug_disabled_by_default(monkeypatch):
-    monkeypatch.delenv("F3DASM_DEBUG", raising=False)
+    settings.configure(None)
     assert debug_enabled() is False
 
 
 def test_debug_enabled_truthy_values(monkeypatch):
     for v in ("1", "true", "TRUE", "yes", "on"):
-        monkeypatch.setenv("F3DASM_DEBUG", v)
+        settings.configure({"debug": v})
         assert debug_enabled() is True
     for v in ("", "0", "false", "no"):
-        monkeypatch.setenv("F3DASM_DEBUG", v)
+        settings.configure({"debug": v})
         assert debug_enabled() is False
 
 
 def test_append_noop_when_debug_off(tmp_path, monkeypatch):
-    monkeypatch.delenv("F3DASM_DEBUG", raising=False)
+    settings.configure(None)
     sink = tmp_path / "t.jsonl"
     set_transcript_sink(str(sink))
     append_transcript({"type": "assistant", "text": "hello"})
@@ -38,14 +39,14 @@ def test_append_noop_when_debug_off(tmp_path, monkeypatch):
 
 
 def test_append_noop_when_no_sink(monkeypatch):
-    monkeypatch.setenv("F3DASM_DEBUG", "1")
+    settings.configure({"debug": True})
     set_transcript_sink(None)
     # Must not raise even though debug is on but no sink is set.
     append_transcript({"type": "assistant", "text": "hello"})
 
 
 def test_append_writes_jsonl_when_on(tmp_path, monkeypatch):
-    monkeypatch.setenv("F3DASM_DEBUG", "1")
+    settings.configure({"debug": True})
     sink = tmp_path / "sub" / "D001.jsonl"  # parent dir auto-created
     set_transcript_sink(str(sink))
     append_transcript({"type": "assistant", "text": "thinking...",
@@ -63,7 +64,7 @@ def test_append_writes_jsonl_when_on(tmp_path, monkeypatch):
 
 
 def test_append_never_raises_on_bad_sink(monkeypatch):
-    monkeypatch.setenv("F3DASM_DEBUG", "1")
+    settings.configure({"debug": True})
     # A path under a file (cannot be a dir) — write fails, must be swallowed.
     set_transcript_sink("/dev/null/cannot/exist.jsonl")
     append_transcript({"type": "assistant", "text": "x"})  # no raise

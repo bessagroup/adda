@@ -58,6 +58,13 @@ def pytest_runtest_setup(item):
         pytest.skip(f"test skipped: requires dependency {dependency_names!r}")
 
 
+@pytest.fixture(autouse=True)
+def _reset_run_settings():
+    yield
+    from adda._src.runtime import settings
+    settings.configure(None)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def setup_logging():
     logging.getLogger("tensorflow").setLevel(logging.WARNING)

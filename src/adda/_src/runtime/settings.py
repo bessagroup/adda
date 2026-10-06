@@ -4,21 +4,19 @@ Run KNOBS (debug, recursion_limit, idle timeouts, retry, backstop, …) live in
 the ``runtime:`` block of a study's ``config.yaml``. Environment variables are
 override/secrets only. Resolution precedence, per knob:
 
-    explicit argument  >  env var (F3DASM_<UPPER_KEY>)  >  config.yaml  >  default
+    explicit argument  >  config.yaml  >  default
 
-The explicit tier is what a caller passes as ``AgenticRun(runtime={...})``. It
-outranks the environment because the docs already say that channel "is for
-secrets and one-off overrides — it is not where a study's settings belong": a
-stale ``F3DASM_MILESTONES_ENABLED`` left exported in a shell used to beat every
-caller silently, which for a sweep means an arm that ran under a label it did
-not have. An explicit argument is the most deliberate statement of intent
-there is, so it wins.
+The explicit tier is what a caller passes as ``AgenticRun(runtime={...})``.
+There is no environment tier: a knob lives in ``config.yaml`` or is passed
+explicitly, so the run's recorded condition is the one it ran under. A stale
+``F3DASM_<KEY>`` exported in a shell used to beat every caller silently, which
+for a sweep means an arm that ran under a label it did not have. It is now an
+error: :func:`reject_stale_env` runs when an ``AgenticRun`` is constructed.
 
 ``AgenticRun`` calls :func:`configure` once at run start with the parsed
 ``runtime`` mapping. Read sites call :func:`get_bool` / :func:`get_int` /
 :func:`get_float` / :func:`get_str`. Until ``configure`` runs (e.g. in a unit
-test that constructs a node directly), only env + default apply — identical to
-the old ``os.environ.get`` behaviour, so the migration is backward compatible.
+test that constructs a node directly), only the default applies.
 """
 
 from __future__ import annotations
@@ -30,6 +28,7 @@ __all__ = [
     "KNOWN_KEYS",
     "SECRET_KEYS",
     "configure",
+    "reject_stale_env",
     "get_bool",
     "resolved",
     "get_int",
@@ -157,6 +156,25 @@ def configure(config: dict | None, explicit: dict | None = None) -> None:
         _graph_nodes = None
 
 
+def reject_stale_env() -> None:
+    """Raise if the environment carries ``F3DASM_<KNOWN_KEY>``.
+
+    The environment is not a settings channel, so such a variable is a stale
+    export that would otherwise be ignored without a word. Only names that are
+    a knob's own (``F3DASM_`` + the upper-cased key) count; the variables adda
+    itself hands to its subprocesses (``F3DASM_NAMESPACE``,
+    ``F3DASM_DELEGATION_ID``, ``F3DASM_RUN_CONFIG``, ``F3DASM_CANONICAL_STORE``,
+    ``F3DASM_DEDUP_SCOPE``, …) are not knobs and are left alone."""
+    stale = sorted(f"F3DASM_{k.upper()}" for k in KNOWN_KEYS
+                   if f"F3DASM_{k.upper()}" in os.environ)
+    if stale:
+        raise ValueError(
+            f"environment variable(s) {', '.join(stale)} would set a run knob. "
+            f"The environment is not a settings channel: unset them and put the "
+            f"value under `runtime:` in config.yaml (or pass "
+            f"`AgenticRun(runtime={{...}})`).")
+
+
 def set_graph_nodes(nodes) -> None:
     """Record which nodes this run's graph contains (``build_graph`` calls it
     once). ``configure`` clears it, so it is always a property of the run that
@@ -186,14 +204,10 @@ def resolved() -> dict:
 
 
 def _raw(key: str):
-    """Resolved raw value: explicit > env > config.yaml > None."""
+    """Resolved raw value: explicit > config.yaml > None."""
     with _lock:
         if key in _explicit:
             return _explicit[key]
-    env = os.environ.get("F3DASM_" + key.upper())
-    if env is not None:
-        return env
-    with _lock:
         return _config.get(key)
 
 

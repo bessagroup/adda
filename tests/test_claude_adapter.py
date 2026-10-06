@@ -1,4 +1,5 @@
 """Tests for ClaudeAdapter — stub out claude_agent_sdk.query."""
+from adda._src.runtime import settings
 import types
 import sys
 
@@ -98,7 +99,7 @@ def test_transcript_captured_when_debug_on(tmp_path, monkeypatch):
     result records to the transcript JSONL."""
     import json
     from adda._src.backends.base import set_transcript_sink
-    monkeypatch.setenv("F3DASM_DEBUG", "1")
+    settings.configure({"debug": True})
     _install_fake_sdk(query=make_async_gen_with_messages("reasoning here"))
     ClaudeAdapter = _get_adapter()
     adapter = ClaudeAdapter("claude-3", "sys", None, [])
@@ -133,7 +134,7 @@ def test_partials_flushed_for_incomplete_turn(tmp_path, monkeypatch):
                 yield _StreamEv(f"tok{i} ")
         return _g
 
-    monkeypatch.setenv("F3DASM_DEBUG", "1")
+    settings.configure({"debug": True})
     mod = _install_fake_sdk(query=_gen_never_completes(None, None))
     mod.StreamEvent = _StreamEv  # adapter isinstance-checks this
     ClaudeAdapter = _get_adapter()
@@ -212,7 +213,7 @@ def test_max_buffer_size_is_set_and_tunable(monkeypatch):
         [{"role": "user", "content": "hi"}])
     assert cap["options"]["max_buffer_size"] == 30 * 1024 * 1024
     cap.clear()
-    monkeypatch.setenv("F3DASM_LLM_MAX_BUFFER_MB", "50")
+    settings.configure({"llm_max_buffer_mb": 50})
     _install_fake_sdk(query=_capture_options_gen(cap))
     _get_adapter()("claude-3", "sys", None, []).invoke(
         [{"role": "user", "content": "hi"}])
@@ -341,7 +342,7 @@ def test_stream_event_types_captured_for_ping_measurement(tmp_path, monkeypatch)
             yield _ResultMessage()
         return _g
 
-    monkeypatch.setenv("F3DASM_DEBUG", "1")
+    settings.configure({"debug": True})
     mod = _install_fake_sdk(query=_gen_factory(None, None))
     mod.StreamEvent = _SE
     ClaudeAdapter = _get_adapter()
@@ -359,7 +360,7 @@ def test_stream_event_types_captured_for_ping_measurement(tmp_path, monkeypatch)
 
 def test_no_transcript_when_debug_off(tmp_path, monkeypatch):
     from adda._src.backends.base import set_transcript_sink
-    monkeypatch.delenv("F3DASM_DEBUG", raising=False)
+    settings.configure(None)
     _install_fake_sdk(query=make_async_gen_with_messages("x"))
     ClaudeAdapter = _get_adapter()
     adapter = ClaudeAdapter("claude-3", "sys", None, [])
@@ -672,7 +673,7 @@ def test_compact_boundary_is_recorded_and_flagged_as_a_diagnostic(tmp_path, monk
         yield _AssistantMessage([_TextBlock("continuing after compaction")])
         yield _ResultMessage()
 
-    monkeypatch.setenv("F3DASM_DEBUG", "1")
+    settings.configure({"debug": True})
     _install_fake_sdk(query=_gen_with_compaction)
     ClaudeAdapter = _get_adapter()
     adapter = ClaudeAdapter("claude-3", "sys", None, [])
@@ -711,7 +712,7 @@ def test_thinking_tokens_system_message_is_noise_not_recorded(tmp_path, monkeypa
         yield _AssistantMessage([_TextBlock("hi")])
         yield _ResultMessage()
 
-    monkeypatch.setenv("F3DASM_DEBUG", "1")
+    settings.configure({"debug": True})
     _install_fake_sdk(query=_gen_with_heartbeat)
     ClaudeAdapter = _get_adapter()
     adapter = ClaudeAdapter("claude-3", "sys", None, [])
@@ -744,7 +745,7 @@ def test_unknown_system_subtype_defaults_to_recorded(tmp_path, monkeypatch):
         yield _AssistantMessage([_TextBlock("hi")])
         yield _ResultMessage()
 
-    monkeypatch.setenv("F3DASM_DEBUG", "1")
+    settings.configure({"debug": True})
     _install_fake_sdk(query=_gen_with_init)
     ClaudeAdapter = _get_adapter()
     adapter = ClaudeAdapter("claude-3", "sys", None, [])
@@ -815,7 +816,7 @@ def test_transcript_counts_omitted_thinking_blocks(tmp_path, monkeypatch):
         yield _AssistantMessage([_TextBlock("c")])
         yield _ResultMessage()
 
-    monkeypatch.setenv("F3DASM_DEBUG", "1")
+    settings.configure({"debug": True})
     _install_fake_sdk(query=_gen)
     sink = tmp_path / "D001.jsonl"
     set_transcript_sink(str(sink))
@@ -988,7 +989,7 @@ def test_transcript_tool_call_carries_the_id_its_result_will_cite(tmp_path, monk
         yield _UserMessage([_Res()])
         yield _ResultMessage()
 
-    monkeypatch.setenv("F3DASM_DEBUG", "1")
+    settings.configure({"debug": True})
     _install_fake_sdk(query=_gen)
     adapter = _get_adapter()("claude-3", "sys", None, [])
     sink = tmp_path / "D001.jsonl"

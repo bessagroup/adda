@@ -14,6 +14,7 @@ banner and defaulting to GATED when nothing matched:
 from __future__ import annotations
 
 import json
+from adda._src.runtime import settings
 
 from langgraph.graph import END
 
@@ -70,7 +71,7 @@ def _halted_run_dir(tmp_path, monkeypatch):
     """Drive a node into the repeated-errors halt and return its run dir."""
     from adda._src.nodes import Node
 
-    monkeypatch.setenv("F3DASM_MAX_CONSECUTIVE_ERRORS", "3")
+    settings.configure({"max_consecutive_errors": 3})
     study_dir = tmp_path / "study"
     study_dir.mkdir()
     (study_dir / "pipeline.ipynb").write_text("# test\n")

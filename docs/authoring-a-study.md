@@ -73,9 +73,9 @@ runtime:
   recursion_limit: 200   # LangGraph step ceiling for one run
 ```
 
-`config.yaml` is the source of truth for these. An `F3DASM_<KEY>` environment
-variable overrides the configured value, but that channel is for secrets and
-one-off overrides — it is not where a study's settings belong. A key this
+`config.yaml` is the source of truth for these. The environment sets no knob: an
+`F3DASM_<KEY>` variable left exported in a shell stops the run at start with an
+error naming it, so no arm runs under a label it does not have. A key this
 table does not list is ignored with a warning at startup, so a typo tells you
 rather than silently reverting to the default.
 

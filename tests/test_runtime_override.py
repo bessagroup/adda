@@ -1,4 +1,4 @@
-"""Explicit argument > env > config.yaml > default.
+"""Explicit argument > config.yaml > default; the environment sets no knob.
 
 Two defects fixed here, both of which a sweep would have run straight into.
 
@@ -31,20 +31,21 @@ def test_explicit_beats_the_study_config():
     assert settings.get_bool("debug", False) is True
 
 
-def test_explicit_beats_a_stale_environment_variable(monkeypatch):
+def test_a_stale_environment_variable_sets_nothing_and_is_refused(monkeypatch):
     """The one that matters for a sweep: a forgotten shell export must not
-    silently override an arm."""
-    monkeypatch.setenv("F3DASM_MILESTONES_ENABLED", "1")
-    settings.configure({}, {"milestones_enabled": False})
-    assert settings.get_bool("milestones_enabled", True) is False
-
-
-def test_env_still_beats_the_study_config(monkeypatch):
-    """Unchanged: env remains an override channel for anything not passed
-    explicitly."""
+    relabel an arm. It changes no value, and AgenticRun refuses to start."""
     monkeypatch.setenv("F3DASM_RECURSION_LIMIT", "7")
     settings.configure({"recursion_limit": 99})
-    assert settings.get_int("recursion_limit", 1) == 7
+    assert settings.get_int("recursion_limit", 1) == 99
+    with pytest.raises(ValueError, match="F3DASM_RECURSION_LIMIT"):
+        settings.reject_stale_env()
+
+
+def test_the_variables_adda_hands_to_subprocesses_are_not_refused(monkeypatch):
+    for name in ("F3DASM_NAMESPACE", "F3DASM_DELEGATION_ID", "F3DASM_RUN_CONFIG",
+                 "F3DASM_CANONICAL_STORE", "F3DASM_DEDUP_SCOPE", "F3DASM_MEM_CAP"):
+        monkeypatch.setenv(name, "x")
+    settings.reject_stale_env()
 
 
 def test_config_beats_the_default():
@@ -67,16 +68,16 @@ def test_an_unknown_config_knob_still_only_warns(caplog):
     assert "dbeug" in caplog.text
 
 
-def test_resolved_reports_what_the_run_actually_ran_with(monkeypatch):
+def test_resolved_reports_what_the_run_actually_ran_with():
     """The condition recorded from the run itself, rather than asserted by
     whatever launched it."""
-    monkeypatch.setenv("F3DASM_DEBUG", "1")
-    settings.configure({"recursion_limit": 42}, {"milestones_enabled": False})
+    settings.configure({"debug": True, "recursion_limit": 42},
+                       {"milestones_enabled": False})
 
     out = settings.resolved()
 
     assert out["milestones_enabled"] is False   # explicit
-    assert out["debug"] == "1"                  # env
+    assert out["debug"] is True                # config
     assert out["recursion_limit"] == 42         # config
     assert "llm_retry_max" not in out           # untouched → absent, not faked
 
@@ -118,3 +119,10 @@ def test_review_statement_follows_config_unless_the_argument_is_given(tmp_path):
     assert _review_flag(tmp_path / "b", "{}\n") is True
     assert _review_flag(tmp_path / "c", "review_statement: false\n",
                         review_statement=True) is True
+
+
+def test_constructing_a_run_with_a_stale_knob_export_fails_at_construction(
+        tmp_path, monkeypatch):
+    monkeypatch.setenv("F3DASM_SCIENCE_MONITOR", "false")
+    with pytest.raises(ValueError, match="F3DASM_SCIENCE_MONITOR"):
+        _review_flag(tmp_path, "{}\n")

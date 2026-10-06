@@ -18,7 +18,7 @@ from adda._src.runtime import settings
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
     settings.configure(None)
-    monkeypatch.delenv("F3DASM_DEBUG", raising=False)
+    settings.configure(None)
     yield
     settings.configure(None)
     base.set_delegation_id(None)
@@ -43,10 +43,10 @@ def _convo(n, size=400):
     return msgs
 
 
-def _hook(policy):
+def _hook(policy, **knobs):
     from adda._src.backends.vllm import VLLMAdapter
 
-    settings.configure({"context_policy": policy})
+    settings.configure({"context_policy": policy, **knobs})
     a = VLLMAdapter(model="m", system_prompt="s")
     a._ctx_window = (2048, "setting")
     a._summarize = lambda prompt: "THE SUMMARY"
@@ -90,11 +90,10 @@ def test_no_diagnostic_when_nothing_was_compacted(tmp_path):
 
 
 def test_compact_transcript_record_carries_the_summary(tmp_path, monkeypatch):
-    monkeypatch.setenv("F3DASM_DEBUG", "1")
     _bind(tmp_path)
     sink = tmp_path / "D003.jsonl"
     base.set_transcript_sink(str(sink))
-    _hook("compact")({"messages": _convo(200)})
+    _hook("compact", debug=True)({"messages": _convo(200)})
     recs = [json.loads(x) for x in sink.read_text().splitlines()]
     rec = [r for r in recs if r["type"] == "ContextCompaction"][0]
     assert rec["policy"] == "compact"

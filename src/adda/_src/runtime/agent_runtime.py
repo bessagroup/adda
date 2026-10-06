@@ -242,6 +242,7 @@ class AgenticRun:
         # mapping, so constructing a second AgenticRun used to silently
         # reconfigure the first. Only an unknown key in `runtime=` is rejected
         # now, at construction, where the traceback points at the caller.
+        settings.reject_stale_env()
         self._runtime_override: dict = dict(runtime or {})
         self._study_runtime: dict = dict(cfg.get("runtime") or {})
         settings.configure(self._study_runtime, self._runtime_override)
