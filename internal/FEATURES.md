@@ -1946,7 +1946,11 @@ runs).
 
 `config.yaml` takes `base_url` at top level and `nodes.<node>.base_url`.
 `AgenticRun._resolve_base_url` picks node, then top level, then the run's
-SLURM-served endpoint, else the adapter's own `*_BASE_URL`/default. A node URL on
+SLURM-served endpoint, else the adapter's default. The environment never sets an endpoint: an exported
+`VLLM_BASE_URL`, `OLLAMA_BASE_URL` or `OPENROUTER_BASE_URL` is a startup error
+(`settings.reject_stale_env`), like the `F3DASM_<KNOB>` variables; API keys stay
+in the environment. The container runner no longer forwards `OLLAMA_BASE_URL`.
+A node URL on
 a backend with no endpoint is an error; `base_url` with `llm_slurm.enabled` is
 an error. The SLURM endpoint no longer goes through `os.environ`, which removes a
 race between concurrent runs in one process. `runtime/study_config.py` lists the

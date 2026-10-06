@@ -22,3 +22,13 @@ runtime:
   # viewer's Chat tab has nothing to show (the prior run
   # 20260903T205926 has no transcripts/ for exactly this reason).
   debug: true
+
+# Uncomment to run math_expert on a local Ollama server (the other nodes stay
+# on Haiku). Put the server's own port in base_url. The model name is the
+# ctx-extended one ollama-serve-oscar.sh creates. For vLLM use
+# backend: vllm and model: Qwen/Qwen3.8-27B-FP8.
+# nodes:
+#   math_expert:
+#     backend: ollama
+#     model: qwen3.8-27b-256k
+#     base_url: http://127.0.0.1:<port>/v1

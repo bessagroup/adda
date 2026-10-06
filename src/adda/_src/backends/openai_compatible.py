@@ -4,7 +4,7 @@ All three speak the OpenAI chat-completions API, so they share one
 implementation: ChatOpenAI pointed at the backend's ``base_url`` plus
 ``create_react_agent`` for the tool-execution loop. A concrete backend is a
 thin subclass that only declares its endpoint default + auth (see the class
-attributes ``DEFAULT_BASE_URL`` / ``BASE_URL_ENV`` / ``API_KEY`` /
+attributes ``DEFAULT_BASE_URL`` / ``API_KEY`` /
 ``API_KEY_ENV``) — the invoke/tool/usage machinery is inherited verbatim.
 
 The adapter exposes the same public surface as ClaudeAdapter (a mutable
@@ -714,9 +714,7 @@ class OpenAICompatibleAdapter:
     Class attributes (override per backend)
     ---------------------------------------
     DEFAULT_BASE_URL : str
-        Endpoint used when neither an explicit base_url nor BASE_URL_ENV is set.
-    BASE_URL_ENV : str | None
-        Environment variable consulted for the base_url (env > default).
+        Endpoint used when no explicit base_url (config.yaml) is given.
     API_KEY : str | None
         Default API key when none is supplied / no API_KEY_ENV is set.
     API_KEY_ENV : str | None
@@ -726,7 +724,6 @@ class OpenAICompatibleAdapter:
     """
 
     DEFAULT_BASE_URL: str = "http://localhost:11434/v1"
-    BASE_URL_ENV: str | None = None
     API_KEY: str | None = "local"
     API_KEY_ENV: str | None = None
 
@@ -770,9 +767,8 @@ class OpenAICompatibleAdapter:
         self.use_default_tools: bool = False
         self.on_init_tools: Any = None
         self.closure_tools: dict[str, Any] = dict(closure_tools or {})
-        # Endpoint + auth: explicit arg > environment > class default.
-        if base_url is None and self.BASE_URL_ENV:
-            base_url = os.environ.get(self.BASE_URL_ENV)
+        # Endpoint: explicit arg (from config.yaml) > class default. Auth: explicit
+        # arg > environment > class default.
         self._base_url = base_url or self.DEFAULT_BASE_URL
         if api_key is None and self.API_KEY_ENV:
             api_key = os.environ.get(self.API_KEY_ENV)

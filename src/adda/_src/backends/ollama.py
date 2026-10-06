@@ -47,13 +47,12 @@ class OllamaAdapter(OpenAICompatibleAdapter):
     """Adapter for Ollama-served open-weight models.
 
     Uses ChatOpenAI pointed at Ollama's local OpenAI-compatible endpoint
-    (default ``http://localhost:11434/v1``, overridable via ``OLLAMA_BASE_URL``
-    or an explicit ``base_url``). Ollama needs no real auth, so the API key is
+    (default ``http://localhost:11434/v1``, overridable via ``base_url`` in
+    config.yaml). Ollama needs no real auth, so the API key is
     the conventional placeholder ``"local"``.
     """
 
     DEFAULT_BASE_URL = "http://localhost:11434/v1"
-    BASE_URL_ENV = "OLLAMA_BASE_URL"
     API_KEY = "local"
     API_KEY_ENV = None
 

@@ -6,3 +6,11 @@ backend: claude
 runtime:
   pipeline_deliverable: false
   reproduction_gate: false
+
+# Uncomment to run the literature reviewer on a local Ollama server
+# (strategizer stays on Haiku). Put the server's own port in base_url.
+# nodes:
+#   literature_reviewer:
+#     backend: ollama
+#     model: qwen3.8-27b-256k
+#     base_url: http://127.0.0.1:<port>/v1

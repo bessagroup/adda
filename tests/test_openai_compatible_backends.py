@@ -34,39 +34,34 @@ def _fake_agent() -> MagicMock:
 
 
 def test_openrouter_defaults(monkeypatch):
-    monkeypatch.delenv("OPENROUTER_BASE_URL", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     a = OpenRouterAdapter(model="anthropic/claude-3.5-sonnet", system_prompt="s")
     assert a._base_url == "https://openrouter.ai/api/v1"
     assert a._api_key is None  # no key baked in — must be supplied
 
 
-def test_openrouter_reads_env(monkeypatch):
+def test_openrouter_reads_key_env(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "or-secret")
-    monkeypatch.setenv("OPENROUTER_BASE_URL", "https://proxy.example/v1")
     a = OpenRouterAdapter(model="m", system_prompt="s")
-    assert a._base_url == "https://proxy.example/v1"
+    assert a._base_url == "https://openrouter.ai/api/v1"
     assert a._api_key == "or-secret"
 
 
 def test_vllm_defaults(monkeypatch):
-    monkeypatch.delenv("VLLM_BASE_URL", raising=False)
     monkeypatch.delenv("VLLM_API_KEY", raising=False)
     a = VLLMAdapter(model="meta-llama/Llama-3.1-8B-Instruct", system_prompt="s")
     assert a._base_url == "http://localhost:8000/v1"
     assert a._api_key == "EMPTY"  # vLLM usually needs no auth
 
 
-def test_vllm_reads_env(monkeypatch):
-    monkeypatch.setenv("VLLM_BASE_URL", "http://gpu-box:8001/v1")
+def test_vllm_reads_key_env(monkeypatch):
     monkeypatch.setenv("VLLM_API_KEY", "served-key")
     a = VLLMAdapter(model="m", system_prompt="s")
-    assert a._base_url == "http://gpu-box:8001/v1"
+    assert a._base_url == "http://localhost:8000/v1"
     assert a._api_key == "served-key"
 
 
-def test_explicit_args_beat_env_and_default(monkeypatch):
-    monkeypatch.setenv("OPENROUTER_BASE_URL", "https://env/v1")
+def test_explicit_args_beat_env_key_and_default(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "env-key")
     a = OpenRouterAdapter(
         model="m", system_prompt="s",

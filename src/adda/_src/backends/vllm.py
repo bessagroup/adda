@@ -2,8 +2,8 @@
 
 vLLM serves models behind an OpenAI-compatible HTTP server (``vllm serve``),
 so this is a thin subclass of ``OpenAICompatibleAdapter``. It declares vLLM's
-local-server endpoint default and the ``VLLM_BASE_URL`` / ``VLLM_API_KEY`` env
-conventions; all invoke/tool/usage machinery is inherited and shared with the
+local-server endpoint default and the ``VLLM_API_KEY`` env convention (the
+endpoint itself is ``base_url`` in config.yaml); all invoke/tool/usage machinery is inherited and shared with the
 Ollama and OpenRouter backends.
 
 Auth: a vLLM server usually needs no key, so the API key defaults to the
@@ -25,6 +25,5 @@ class VLLMAdapter(OpenAICompatibleAdapter):
     """Adapter for models served by a vLLM OpenAI-compatible server."""
 
     DEFAULT_BASE_URL = "http://localhost:8000/v1"
-    BASE_URL_ENV = "VLLM_BASE_URL"
     API_KEY = "EMPTY"  # vLLM usually needs no auth; placeholder key
     API_KEY_ENV = "VLLM_API_KEY"

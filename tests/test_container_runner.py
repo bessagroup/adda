@@ -95,38 +95,9 @@ def test_run_claude_assembles_correct_docker_run_args(tmp_path, monkeypatch):
 # 3. run — ollama backend, default URL
 # ---------------------------------------------------------------------------
 
-def test_run_ollama_host_sets_ollama_base_url(tmp_path, monkeypatch):
-    """run() with backend='ollama' must set OLLAMA_BASE_URL to the default host URL."""
-    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
-
-    from adda._src.infra.container_runner import ContainerRunner
-
-    runner = ContainerRunner(tmp_path, backend="ollama", ollama_sidecar=False,
-                             image="f3dasm:test",
-                             _docker_dir=tmp_path / "docker")
-    proc_mock = _make_proc_mock(0)
-
-    with patch("subprocess.Popen", return_value=proc_mock):
-        exit_code = runner.run()
-
-    assert exit_code == 0
-    cmd = proc_mock.call_args  # not used directly — check via Popen mock
-    # Re-capture
-    with patch("subprocess.Popen", return_value=proc_mock) as mock_popen:
-        runner.run()
-    cmd = mock_popen.call_args[0][0]
-
-    env_args = [cmd[i + 1] for i, c in enumerate(cmd) if c == "-e"]
-    assert any("OLLAMA_BASE_URL=http://host.docker.internal:11434/v1" == a
-               for a in env_args)
-
-
-# ---------------------------------------------------------------------------
-# 4. run — ollama backend, env var override
-# ---------------------------------------------------------------------------
-
-def test_run_ollama_respects_env_var_override(tmp_path, monkeypatch):
-    """run() with backend='ollama' must honour a custom OLLAMA_BASE_URL."""
+def test_run_ollama_forwards_no_endpoint_variable(tmp_path, monkeypatch):
+    """The endpoint is base_url in the study's config.yaml; the container is
+    given no *_BASE_URL variable, whatever the host exports."""
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://myhost:9999/v1")
 
     from adda._src.infra.container_runner import ContainerRunner
@@ -141,9 +112,7 @@ def test_run_ollama_respects_env_var_override(tmp_path, monkeypatch):
 
     cmd = mock_popen.call_args[0][0]
     env_args = [cmd[i + 1] for i, c in enumerate(cmd) if c == "-e"]
-    assert any("OLLAMA_BASE_URL=http://myhost:9999/v1" == a for a in env_args)
-    # Must NOT use the default
-    assert not any("11434" in a for a in env_args)
+    assert not any("BASE_URL" in a for a in env_args)
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +122,6 @@ def test_run_ollama_respects_env_var_override(tmp_path, monkeypatch):
 def test_run_adds_host_gateway_on_linux(tmp_path, monkeypatch):
     """On Linux, run() must add --add-host host.docker.internal:host-gateway."""
     monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
 
     from adda._src.infra.container_runner import ContainerRunner
 

@@ -3,7 +3,8 @@
 OpenRouter exposes an OpenAI-compatible endpoint that proxies many hosted
 models (OpenAI, Anthropic, Llama, …), so this is a thin subclass of
 ``OpenAICompatibleAdapter``. It declares OpenRouter's endpoint default and the
-``OPENROUTER_API_KEY`` / ``OPENROUTER_BASE_URL`` env conventions; all
+``OPENROUTER_API_KEY`` env convention (the endpoint is ``base_url`` in
+config.yaml); all
 invoke/tool/usage machinery is inherited and shared with the Ollama and vLLM
 backends.
 
@@ -26,6 +27,5 @@ class OpenRouterAdapter(OpenAICompatibleAdapter):
     """Adapter for models served via OpenRouter's OpenAI-compatible API."""
 
     DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
-    BASE_URL_ENV = "OPENROUTER_BASE_URL"
     API_KEY = None  # no default — a real OPENROUTER_API_KEY is required
     API_KEY_ENV = "OPENROUTER_API_KEY"

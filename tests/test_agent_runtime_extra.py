@@ -170,9 +170,7 @@ def test_make_adapter_ollama_calls_build_closure_tools(tmp_path):
             mock_instance = MagicMock()
             mock_instance.closure_tools = {}
             MockOllama.return_value = mock_instance
-            import os
-            with patch.dict(os.environ, {"OLLAMA_BASE_URL": "http://localhost:11434/v1"}):
-                result = run._make_adapter("implementer", agent)
+            result = run._make_adapter("implementer", agent)
 
     mock_build.assert_called_once()
     assert "Done" in mock_instance.closure_tools

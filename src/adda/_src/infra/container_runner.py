@@ -34,8 +34,9 @@ class ContainerRunner:
             <image> /study [--model X] [--budget N]
 
     Ollama backend — host Ollama (default):
-        same + -e OLLAMA_BASE_URL=http://host.docker.internal:11434/v1
-             + --add-host host.docker.internal:host-gateway  (Linux)
+        same + --add-host host.docker.internal:host-gateway  (Linux). The study's
+        config.yaml must carry ``base_url: http://host.docker.internal:11434/v1``;
+        the container is given no endpoint variable.
 
     Ollama backend — sidecar (ollama_sidecar=True):
         docker compose -f <compose> -f <compose_ollama> up --abort-on-container-exit
@@ -84,11 +85,6 @@ class ContainerRunner:
         if self.backend == "claude":
             cmd += self._claude_auth_args()
         elif self.backend == "ollama":
-            ollama_url = (
-                os.environ.get("OLLAMA_BASE_URL")
-                or "http://host.docker.internal:11434/v1"
-            )
-            cmd += ["-e", f"OLLAMA_BASE_URL={ollama_url}"]
             # On Linux, host.docker.internal doesn't resolve by default.
             if sys.platform.startswith("linux"):
                 cmd += ["--add-host", "host.docker.internal:host-gateway"]

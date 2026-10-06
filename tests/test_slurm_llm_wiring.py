@@ -1,7 +1,7 @@
 """AgenticRun._maybe_start_slurm_llm — the execute() wiring, fully headless.
 
 Every SLURM/HTTP call in slurm_llm is stubbed, so this needs no cluster. Covers:
-disabled -> no-op/None; enabled -> submit + wait + publish VLLM_BASE_URL +
+disabled -> no-op/None; enabled -> submit + wait + publish the served endpoint +
 persist jobid + return it for teardown.
 """
 from __future__ import annotations

@@ -261,19 +261,18 @@ def test_ollama_edit_tool_accepts_path_inside_workspace(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Endpoint env var resolution (per-backend BASE_URL_ENV)
+# Endpoint resolution (explicit argument, else the class default)
 # ---------------------------------------------------------------------------
 
 
-def test_ollama_base_url_reads_env_var(monkeypatch):
-    monkeypatch.setenv("OLLAMA_BASE_URL", "http://custom-host:9999/v1")
+def test_ollama_base_url_explicit_argument(monkeypatch):
     from adda._src.backends.ollama import OllamaAdapter
-    adapter = OllamaAdapter(model="llama3.2", system_prompt="sys")
+    adapter = OllamaAdapter(model="llama3.2", system_prompt="sys",
+                            base_url="http://custom-host:9999/v1")
     assert adapter._base_url == "http://custom-host:9999/v1"
 
 
 def test_ollama_base_url_falls_back_to_localhost(monkeypatch):
-    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
     from adda._src.backends.ollama import OllamaAdapter
     adapter = OllamaAdapter(model="llama3.2", system_prompt="sys")
     assert adapter._base_url == "http://localhost:11434/v1"
@@ -372,7 +371,7 @@ def test_bash_companions_are_at_parity():
 #: reports the SERVED num_ctx; vLLM answers on /v1/models with
 #: max_model_len). The trimming BEHAVIOUR that consumes the answer stays
 #: in OpenAICompatibleAdapter, which is what this test protects.
-_ENDPOINT_AUTH_ATTRS = {"DEFAULT_BASE_URL", "BASE_URL_ENV", "API_KEY",
+_ENDPOINT_AUTH_ATTRS = {"DEFAULT_BASE_URL", "API_KEY",
                         "API_KEY_ENV", "_probe_context_window"}
 
 

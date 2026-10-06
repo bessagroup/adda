@@ -73,7 +73,6 @@ def test_base_url_precedence_node_then_top_then_served(tmp_path):
 
 def test_endpoint_reaches_the_adapter_without_the_environment(tmp_path, monkeypatch):
     from adda._src.backends.vllm import VLLMAdapter
-    monkeypatch.setenv("VLLM_BASE_URL", "http://env:9/v1")
     run = _run(tmp_path, "backend: vllm\nbase_url: http://cfg:1/v1\n")
     assert run._resolve_base_url("a", _A(), VLLMAdapter) == "http://cfg:1/v1"
 
@@ -88,3 +87,12 @@ def test_a_node_endpoint_on_a_backend_without_one_is_refused(tmp_path):
     agent.base_url = None
     run._base_url = "http://x/v1"
     assert run._resolve_base_url("a", agent, ClaudeAdapter) is None
+
+
+@pytest.mark.parametrize("var", ["VLLM_BASE_URL", "OLLAMA_BASE_URL",
+                                 "OPENROUTER_BASE_URL"])
+def test_an_exported_endpoint_variable_is_refused(var, monkeypatch):
+    from adda._src.runtime import settings
+    monkeypatch.setenv(var, "http://env:9/v1")
+    with pytest.raises(ValueError, match="base_url"):
+        settings.reject_stale_env()

@@ -12,8 +12,8 @@ The critic is present so Done() faces a real acceptance gate. Without it
 the run 20260905T162233 closed GATED having produced nothing at all.
 
 Single-variable test of a local-model serving path: math_expert ONLY points
-at a local endpoint when either VLLM_BASE_URL or OLLAMA_BASE_URL is set in
-the environment; strategizer and literature_reviewer stay on Haiku
+at a local endpoint when config.yaml carries its `nodes.math_expert` block
+(model, backend, base_url); strategizer and literature_reviewer stay on Haiku
 regardless -- deliberately isolating "does a local-model delegation work at
 all" from "does a local model handle the full strategizer tool-calling
 surface," which is a much bigger, separate question not being tested here.
@@ -28,13 +28,12 @@ bundled runtime and already has qwen3.8:27b confirmed working on this
 cluster's L40S via agentsoscar.sh's own prior real usage.
 
 Usage:
-  uv run python studies/mathexpert_kinematic_matching_test/run.py                     # all-Haiku
-  OLLAMA_BASE_URL=http://127.0.0.1:<port>/v1 \\
-    uv run python studies/mathexpert_kinematic_matching_test/run.py                   # math_expert on Ollama
+  uv run python studies/mathexpert_kinematic_matching_test/run.py
+  # all-Haiku by default; uncomment the `nodes:` block in config.yaml to put
+  # math_expert on Ollama
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from adda import (
@@ -48,24 +47,14 @@ from adda import (
 from adda._src.agents import AdversarialCritiqueAgent
 
 STUDY_DIR = Path(__file__).parent
-VLLM_MODEL = "Qwen/Qwen3.8-27B-FP8"
-OLLAMA_MODEL = "qwen3.8-27b-256k"  # the ctx-extended model ollama-serve-oscar.sh creates
 
 
 def build_graph() -> Graph:
-    math_expert = MathExpertAgent()
-    if os.environ.get("VLLM_BASE_URL"):
-        math_expert = MathExpertAgent(model=VLLM_MODEL)
-        math_expert.backend = "vllm"
-    elif os.environ.get("OLLAMA_BASE_URL"):
-        math_expert = MathExpertAgent(model=OLLAMA_MODEL)
-        math_expert.backend = "ollama"
-
     return Graph(
         nodes={
             "strategizer": StrategizerAgent(),
             "literature_reviewer": LiteratureReviewAgent(),
-            "math_expert": math_expert,
+            "math_expert": MathExpertAgent(),
             "critic": AdversarialCritiqueAgent(),
         },
         edges=(

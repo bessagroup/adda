@@ -8,7 +8,7 @@ allocation that serves the model with vLLM, and drives its lifecycle:
                                            #   f3dasm SlurmCluster/SlurmResources)
         -> wait_until_running(jobid)       # poll squeue for the granted node
         -> wait_until_ready(base_url)      # poll /v1/models past the cold load
-        -> (publish VLLM_BASE_URL)         # the vllm adapter resolves it from env
+        -> (keep the endpoint on the run)  # AgenticRun._served_base_url
         -> cancel_job(jobid)               # scancel on EVERY exit path
 
 Design notes:

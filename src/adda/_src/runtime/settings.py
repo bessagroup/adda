@@ -105,6 +105,11 @@ def secret_key_error(key: str) -> str:
 #: ``config.yaml`` keys), refused the same way.
 _REFUSED_ENV = frozenset({"F3DASM_MEM_CAP"})
 
+#: Endpoint variables, refused for the same reason: the endpoint is
+#: ``base_url`` in config.yaml. API keys stay in the environment.
+_REFUSED_ENDPOINT_ENV = frozenset(
+    {"VLLM_BASE_URL", "OLLAMA_BASE_URL", "OPENROUTER_BASE_URL"})
+
 _lock = threading.Lock()
 _config: dict = {}
 _explicit: dict = {}
@@ -172,6 +177,13 @@ def reject_stale_env() -> None:
     ``F3DASM_DEDUP_SCOPE``, …) are not knobs and are left alone."""
     names = {f"F3DASM_{k.upper()}" for k in KNOWN_KEYS} | _REFUSED_ENV
     stale = sorted(names & os.environ.keys())
+    endpoint = sorted(_REFUSED_ENDPOINT_ENV & os.environ.keys())
+    if endpoint:
+        raise ValueError(
+            f"environment variable(s) {', '.join(endpoint)} would set an "
+            f"endpoint. The environment is not a settings channel: unset them "
+            f"and put `base_url: <url>` in config.yaml (top level, or under "
+            f"`nodes.<node>`). API keys stay in the environment.")
     if stale:
         raise ValueError(
             f"environment variable(s) {', '.join(stale)} would set a run knob. "

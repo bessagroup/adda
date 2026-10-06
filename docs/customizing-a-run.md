@@ -336,20 +336,25 @@ model: claude-haiku-4-5-20251001
 
 ### Ollama
 
-A local Ollama server. Point at it with `OLLAMA_BASE_URL` (defaults to
-`http://localhost:11434`).
+A local Ollama server. It listens on `http://localhost:11434/v1` unless
+you set `base_url`.
 
 ```yaml
 backend: ollama
 model: qwen2.5:7b
+base_url: http://localhost:11434/v1
 ```
+
+Inside the container runner, the host's server is at
+`http://host.docker.internal:11434/v1`. Put that in `base_url`.
 
 ### OpenAI-compatible endpoints (OpenRouter, vLLM, others)
 
 Any server that speaks the OpenAI API. The base URL comes from, in order:
 `nodes.<node>.base_url`, the top-level `base_url`, the endpoint of a
-SLURM-served model (`llm_slurm`), the backend's `*_BASE_URL` environment
-variable, then the backend's default. Setting both `base_url` and
+SLURM-served model (`llm_slurm`), then the backend's default. The
+environment never sets the endpoint: an exported `VLLM_BASE_URL`,
+`OLLAMA_BASE_URL` or `OPENROUTER_BASE_URL` stops the run at start-up. Setting both `base_url` and
 `llm_slurm.enabled` is an error.
 
 ```yaml
