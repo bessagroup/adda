@@ -171,7 +171,10 @@ def validate_config(text: str) -> dict[str, Any]:
         if not isinstance(runtime, dict):
             errors.append("`runtime:` must be a mapping of knob: value")
         else:
-            for key in sorted(set(runtime) - KNOWN_KEYS):
+            from ..runtime.settings import SECRET_KEYS, secret_key_error
+            for key in sorted(set(runtime) & set(SECRET_KEYS)):
+                errors.append(secret_key_error(key))
+            for key in sorted(set(runtime) - KNOWN_KEYS - set(SECRET_KEYS)):
                 close = difflib.get_close_matches(str(key), KNOWN_KEYS, n=1)
                 errors.append(
                     f"runtime.{key} is not a known knob"

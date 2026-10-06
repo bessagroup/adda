@@ -160,7 +160,7 @@ def test_ss_three_consecutive_429s_trip_shared_breaker(monkeypatch):
 
 
 def test_ss_missing_key_warns(monkeypatch, caplog):
-    """A missing semantic_scholar_api_key emits a warning, not an error."""
+    """A missing SEMANTIC_SCHOLAR_API_KEY emits a warning, not an error."""
     import logging
     import tempfile
 
@@ -178,23 +178,27 @@ def test_ss_missing_key_warns(monkeypatch, caplog):
         with caplog.at_level(logging.WARNING, logger=lit_ss.__name__):
             agent.build_closure_tools(study)
 
-    assert any("semantic_scholar_api_key" in r.message for r in caplog.records), (
-        "expected a warning about missing semantic_scholar_api_key"
+    assert any("SEMANTIC_SCHOLAR_API_KEY" in r.message for r in caplog.records), (
+        "expected a warning about missing SEMANTIC_SCHOLAR_API_KEY"
     )
 
 
-def test_ss_key_settable_via_config_yaml(monkeypatch):
-    """semantic_scholar_api_key resolves through settings (config.yaml's
-    runtime: block, or F3DASM_SEMANTIC_SCHOLAR_API_KEY), not only via the
-    bare SEMANTIC_SCHOLAR_API_KEY env var — matching every other run knob."""
-    import tempfile
-    from pathlib import Path
+def test_ss_key_in_config_yaml_is_refused():
+    """A secret is not a run knob: config.yaml is committed by the viewer."""
+    import pytest
 
     from adda._src.runtime import settings as settings_mod
 
-    monkeypatch.delenv("SEMANTIC_SCHOLAR_API_KEY", raising=False)
-    monkeypatch.delenv("F3DASM_SEMANTIC_SCHOLAR_API_KEY", raising=False)
-    settings_mod.configure({"semantic_scholar_api_key": "from-config-yaml"})
+    with pytest.raises(ValueError, match="SEMANTIC_SCHOLAR_API_KEY"):
+        settings_mod.configure({"semantic_scholar_api_key": "x"})
+
+
+def test_ss_key_settable_via_env_only(monkeypatch):
+    """The key is read from SEMANTIC_SCHOLAR_API_KEY alone."""
+    import tempfile
+    from pathlib import Path
+
+    monkeypatch.setenv("SEMANTIC_SCHOLAR_API_KEY", "from-env")
 
     captured = {}
 
@@ -215,7 +219,7 @@ def test_ss_key_settable_via_config_yaml(monkeypatch):
 
     if "search_semantic_scholar" not in tools:
         pytest.skip("semanticscholar not installed")
-    assert captured["api_key"] == "from-config-yaml"
+    assert captured["api_key"] == "from-env"
 
 
 def test_openalex_missing_key_warns(monkeypatch, caplog):

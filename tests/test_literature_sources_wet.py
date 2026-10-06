@@ -8,8 +8,7 @@ and CI shouldn't depend on live third-party APIs anyway). Run manually with:
     uv run pytest tests/test_literature_sources_wet.py -v -s --no-cov -m integration
 
 Requires network + the `arxiv`, `semanticscholar`, and `requests` packages
-(already project dependencies). A configured SEMANTIC_SCHOLAR_API_KEY (or
-semantic_scholar_api_key in config.yaml's runtime: block) is what actually
+(already project dependencies). A configured SEMANTIC_SCHOLAR_API_KEY is what actually
 exercises the authenticated path end to end — the whole reason this test
 exists is to catch a REGRESSION exactly like commits 693a971/b5e655f (S2
 either 403ing outright, or the pacing interval silently under-pacing the
@@ -69,7 +68,7 @@ def test_semantic_scholar_search_returns_real_results():
     out = tools["search_semantic_scholar"](query=QUERY, num_results=3)
     assert not out.startswith("ERROR"), (
         f"Semantic Scholar search failed: {out!r} — if this is a 403/"
-        "cooldown, check semantic_scholar_api_key is actually configured "
+        "cooldown, check SEMANTIC_SCHOLAR_API_KEY is actually configured "
         "and not being silently under-paced (regression class: 693a971, "
         "b5e655f)"
     )

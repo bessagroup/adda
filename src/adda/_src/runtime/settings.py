@@ -28,6 +28,7 @@ import threading
 
 __all__ = [
     "KNOWN_KEYS",
+    "SECRET_KEYS",
     "configure",
     "get_bool",
     "resolved",
@@ -79,11 +80,24 @@ KNOWN_KEYS: frozenset[str] = frozenset({
     "retrieval_mode",
     "run_backstop_multiple",
     "science_monitor",
-    "semantic_scholar_api_key",
     "stop_grace_s",
     "thinking_display",
     "verdict_validator",
 })
+
+#: Secrets are never run knobs: the viewer commits config.yaml to git, so a
+#: secret written there lands in history. Maps the refused key to the
+#: environment variable that carries it.
+SECRET_KEYS: dict[str, str] = {
+    "semantic_scholar_api_key": "SEMANTIC_SCHOLAR_API_KEY",
+}
+
+
+def secret_key_error(key: str) -> str:
+    return (f"runtime.{key} is a secret and cannot live in config.yaml (the "
+            f"viewer commits that file to git). Remove it and set the "
+            f"environment variable {SECRET_KEYS[key]} instead.")
+
 
 _lock = threading.Lock()
 _config: dict = {}
@@ -112,6 +126,9 @@ def configure(config: dict | None, explicit: dict | None = None) -> None:
     cfg = dict(config or {})
     exp = dict(explicit or {})
 
+    leaked = sorted((set(cfg) | set(exp)) & set(SECRET_KEYS))
+    if leaked:
+        raise ValueError(" ".join(secret_key_error(k) for k in leaked))
     bad = sorted(set(exp) - KNOWN_KEYS)
     if bad:
         raise ValueError(

@@ -186,3 +186,10 @@ def test_agentic_run_applies_config_tools_and_rejects_unknown_node(tmp_path):
     cfg.write_text(yaml.dump({"nodes": {"zzz": {"tools": ["Read"]}}}))
     with pytest.raises(ValueError, match="no such node"):
         AgenticRun(tmp_path, graph=_graph())
+
+
+def test_viewer_refuses_a_secret_in_the_runtime_block():
+    from adda._src.viewer.study_edit import validate_config
+
+    out = validate_config("runtime:\n  semantic_scholar_api_key: abc\n")
+    assert any("SEMANTIC_SCHOLAR_API_KEY" in e for e in out["errors"])

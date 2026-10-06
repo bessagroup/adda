@@ -45,19 +45,12 @@ def _s2_paper_id(paper_id: str) -> str:
 
 
 def resolve_semantic_scholar_key() -> str | None:
-    """The configured Semantic Scholar key, or None.
+    """The Semantic Scholar key from SEMANTIC_SCHOLAR_API_KEY, or None.
 
-    config.yaml's runtime: block (or F3DASM_SEMANTIC_SCHOLAR_API_KEY) is the
-    explicit-config channel; the bare SEMANTIC_SCHOLAR_API_KEY is honoured
-    too since it is Semantic Scholar's own documented convention, not ours to
-    rename out from under anyone already using it.
+    A secret is environment-only: config.yaml is committed to git by the
+    viewer, so a key there would land in history (settings refuses it).
     """
-    from ...runtime.settings import get_str
-    return (
-        get_str("semantic_scholar_api_key", "")
-        or os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
-        or None
-    )
+    return os.environ.get("SEMANTIC_SCHOLAR_API_KEY") or None
 
 
 _state_lock = threading.Lock()
@@ -80,10 +73,9 @@ class _S2Client:
         if not key:
             log.warning(
                 "no usable Semantic Scholar key — proceeding with "
-                "unauthenticated access (very low rate limit). Set "
-                "semantic_scholar_api_key in config.yaml's runtime: block (or "
-                "SEMANTIC_SCHOLAR_API_KEY / F3DASM_SEMANTIC_SCHOLAR_API_KEY) "
-                "for reliable access."
+                "unauthenticated access (very low rate limit). Set the "
+                "SEMANTIC_SCHOLAR_API_KEY environment variable for reliable "
+                "access."
             )
         self.keyed = bool(key)
         self._inner = _build_inner(key)
@@ -134,7 +126,7 @@ def reject_key() -> bool:
             "Semantic Scholar returned 403 for the configured API key, so the "
             "key is invalid or revoked. Continuing without it for the rest of "
             "this run (shared unauthenticated quota, much slower); fix "
-            "semantic_scholar_api_key for reliable access.",
+            "SEMANTIC_SCHOLAR_API_KEY for reliable access.",
             {"source": "semantic_scholar"},
         )
     for c in list(_clients):
@@ -180,8 +172,8 @@ def build_semantic_scholar_closures() -> dict:
             return (
                 "ERROR: Semantic Scholar refused the request (403 "
                 "Forbidden), with no API key in use. Retrying will not "
-                "help; use OpenAlex/arXiv instead, or set "
-                "semantic_scholar_api_key in config.yaml's runtime: block."
+                "help; use OpenAlex/arXiv instead, or set the "
+                "SEMANTIC_SCHOLAR_API_KEY environment variable."
             )
 
         def search_semantic_scholar(
