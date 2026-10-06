@@ -1028,9 +1028,9 @@ adda has not reviewed), `DEFAULT_TOOLS_EXPANDED` (non-Claude backend).
   delegations.
 - **Where:** out-of-repo harness `_memory_watcher`; `infra/watchdog_cleanup.py`
   (`check_memory_and_kill`, `_owned_pids`); `infra/resource_backend.py`; the cap is
-  resolved (config → env → SLURM allocation → default) by `runtime/run_setup.py`
+  resolved (config → SLURM allocation → default) by `runtime/run_setup.py`
   `resolve_mem_cap_bytes`.
-- **Config:** `mem_cap` (config.yaml / `F3DASM_MEM_CAP`); default 4 GiB. On SLURM set
+- **Config:** `mem_cap` (config.yaml; an exported `F3DASM_MEM_CAP` is refused); default 4 GiB. On SLURM set
   below the job's `--mem`. **Status:** enforced only by the out-of-repo
   harness' `_memory_watcher` (not in this repo). In-package launches
   (`python -m adda`, `adda.watchdog`) resolve and advertise `mem_cap_bytes`, but
@@ -1933,7 +1933,8 @@ runs).
   `F3DASM_<KNOWN_KEY>`, naming each variable. The variables adda itself hands
   to subprocesses (`F3DASM_NAMESPACE`, `F3DASM_DELEGATION_ID`,
   `F3DASM_RUN_CONFIG`, `F3DASM_CANONICAL_STORE`, `F3DASM_DEDUP_SCOPE`) are not
-  knobs and are exempt. `F3DASM_MEM_CAP` is not a knob key either and is
-  unchanged.
+  knobs and are exempt. `F3DASM_MEM_CAP` is refused the same way: the hard
+  memory cap is `mem_cap` in config.yaml, then the SLURM allocation, then the
+  4 GiB default.
 - **Where:** `runtime/settings.py::reject_stale_env`,
   `runtime/agent_runtime.py::AgenticRun.__init__`. **Status:** done.

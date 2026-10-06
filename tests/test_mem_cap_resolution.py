@@ -17,13 +17,22 @@ MB = 1024 ** 2
 
 
 def test_explicit_config_wins():
-    assert resolve_mem_cap_bytes(12 * GB, env={"F3DASM_MEM_CAP": str(8 * GB),
-                                                "SLURM_MEM_PER_NODE": "4096"}) == 12 * GB
+    assert resolve_mem_cap_bytes(12 * GB, env={"SLURM_MEM_PER_NODE": "4096"}) == 12 * GB
 
 
-def test_env_beats_slurm_and_default():
+def test_the_environment_does_not_set_the_cap():
     assert resolve_mem_cap_bytes(None, env={"F3DASM_MEM_CAP": str(8 * GB),
-                                             "SLURM_MEM_PER_NODE": "4096"}) == 8 * GB
+                                             "SLURM_MEM_PER_NODE": "4096"}) == 4096 * MB
+
+
+def test_an_exported_mem_cap_is_refused(monkeypatch):
+    import pytest
+
+    from adda._src.runtime import settings
+
+    monkeypatch.setenv("F3DASM_MEM_CAP", str(8 * GB))
+    with pytest.raises(ValueError, match="F3DASM_MEM_CAP"):
+        settings.reject_stale_env()
 
 
 def test_slurm_per_node_used_when_no_config_or_env():

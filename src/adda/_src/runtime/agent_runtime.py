@@ -257,7 +257,7 @@ class AgenticRun:
         )
         # Hard per-campaign memory cap (bytes) — the single HARD resource boundary
         # (host safety, not a science budget). config.yaml `mem_cap` wins; else
-        # env F3DASM_MEM_CAP; else the SLURM allocation (real HPC budget); else
+        # the SLURM allocation (real HPC budget); else
         # the default. See resolve_mem_cap_bytes.
         self._mem_cap_bytes = resolve_mem_cap_bytes(cfg.get("mem_cap"))
         self._required_deliverables = cfg.get("required_deliverables") or []

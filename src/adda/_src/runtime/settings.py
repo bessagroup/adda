@@ -101,6 +101,10 @@ def secret_key_error(key: str) -> str:
             f"environment variable {SECRET_KEYS[key]} instead.")
 
 
+#: Names that set a run setting held outside ``runtime:`` (top-level
+#: ``config.yaml`` keys), refused the same way.
+_REFUSED_ENV = frozenset({"F3DASM_MEM_CAP"})
+
 _lock = threading.Lock()
 _config: dict = {}
 _explicit: dict = {}
@@ -161,12 +165,13 @@ def reject_stale_env() -> None:
 
     The environment is not a settings channel, so such a variable is a stale
     export that would otherwise be ignored without a word. Only names that are
-    a knob's own (``F3DASM_`` + the upper-cased key) count; the variables adda
+    a knob's own (``F3DASM_`` + the upper-cased key), or ``F3DASM_MEM_CAP``
+    (the hard memory cap, ``mem_cap`` in config.yaml), count; the variables adda
     itself hands to its subprocesses (``F3DASM_NAMESPACE``,
     ``F3DASM_DELEGATION_ID``, ``F3DASM_RUN_CONFIG``, ``F3DASM_CANONICAL_STORE``,
     ``F3DASM_DEDUP_SCOPE``, …) are not knobs and are left alone."""
-    stale = sorted(f"F3DASM_{k.upper()}" for k in KNOWN_KEYS
-                   if f"F3DASM_{k.upper()}" in os.environ)
+    names = {f"F3DASM_{k.upper()}" for k in KNOWN_KEYS} | _REFUSED_ENV
+    stale = sorted(names & os.environ.keys())
     if stale:
         raise ValueError(
             f"environment variable(s) {', '.join(stale)} would set a run knob. "

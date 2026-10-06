@@ -30,15 +30,16 @@ __all__ = [
 # Default per-campaign-process hard memory cap (bytes) — the one HARD resource
 # boundary. 4 GiB: comfortably above a healthy GP-BO campaign, below the runaway
 # GP-on-5302-points blowup that pegged the host. See resolve_mem_cap_bytes for
-# the resolution order (config -> env -> SLURM allocation -> this default).
+# the resolution order (config -> SLURM allocation -> this default).
 DEFAULT_MEM_CAP_BYTES = 4 * 1024 ** 3
 
 
 def resolve_mem_cap_bytes(explicit, env=None) -> int:
     """Resolve the hard per-delegation RAM cap (bytes).
 
-    Precedence: an explicit config.yaml ``mem_cap`` > env ``F3DASM_MEM_CAP`` >
-    the SLURM job's memory allocation > ``DEFAULT_MEM_CAP_BYTES``. The SLURM
+    Precedence: an explicit config.yaml ``mem_cap`` > the SLURM job's memory
+    allocation > ``DEFAULT_MEM_CAP_BYTES``. ``F3DASM_MEM_CAP`` is refused at run
+    construction (``settings.reject_stale_env``), not read here. The SLURM
     step matters on real HPC: SLURM already gives the job a memory allocation,
     so without this the watchdog kept a small hardcoded ceiling and silently
     throttled worker concurrency far below what the node actually granted. This
@@ -54,8 +55,6 @@ def resolve_mem_cap_bytes(explicit, env=None) -> int:
             return None
 
     if (v := _as_int(explicit)) and v > 0:
-        return v
-    if (v := _as_int(env.get("F3DASM_MEM_CAP"))) and v > 0:
         return v
     # SLURM reports memory in MB. Prefer the per-node allocation; otherwise
     # derive it from per-CPU * CPUs (SLURM_CPUS_ON_NODE may be "16" or "16(x2)").

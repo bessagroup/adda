@@ -43,7 +43,7 @@ def test_a_stale_environment_variable_sets_nothing_and_is_refused(monkeypatch):
 
 def test_the_variables_adda_hands_to_subprocesses_are_not_refused(monkeypatch):
     for name in ("F3DASM_NAMESPACE", "F3DASM_DELEGATION_ID", "F3DASM_RUN_CONFIG",
-                 "F3DASM_CANONICAL_STORE", "F3DASM_DEDUP_SCOPE", "F3DASM_MEM_CAP"):
+                 "F3DASM_CANONICAL_STORE", "F3DASM_DEDUP_SCOPE"):
         monkeypatch.setenv(name, "x")
     settings.reject_stale_env()
 
