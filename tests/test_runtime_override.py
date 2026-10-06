@@ -101,3 +101,20 @@ def test_constructing_a_second_run_does_not_reconfigure_the_first(tmp_path):
     # last; what matters is that running the FIRST one installs its own.
     settings.configure(first._study_runtime, first._runtime_override)
     assert settings.get_int("recursion_limit", 0) == 11
+
+
+def _review_flag(tmp_path, config_text, **kw):
+    from adda._src.runtime.agent_runtime import AgenticRun
+
+    study = tmp_path / "s"
+    study.mkdir(parents=True)
+    (study / "PROBLEM_STATEMENT.md").write_text("p")
+    (study / "config.yaml").write_text(config_text)
+    return AgenticRun(study_dir=study, interactive=False, **kw)._review_statement
+
+
+def test_review_statement_follows_config_unless_the_argument_is_given(tmp_path):
+    assert _review_flag(tmp_path / "a", "review_statement: false\n") is False
+    assert _review_flag(tmp_path / "b", "{}\n") is True
+    assert _review_flag(tmp_path / "c", "review_statement: false\n",
+                        review_statement=True) is True

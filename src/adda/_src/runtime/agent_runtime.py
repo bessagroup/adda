@@ -191,9 +191,10 @@ class AgenticRun:
     resume_from : Path, optional
         A prior run directory to resume from (replays the LangGraph checkpoint).
         The run must have a ``debug/thread_id``.
-    review_statement : bool, default True
+    review_statement : bool, optional
         Run the advisory pre-run problem-statement review. Never blocks an
-        autonomous run.
+        autonomous run. ``None`` (default) defers to the top-level
+        ``review_statement`` key of ``config.yaml``, then to on.
     runtime : dict, optional
         Explicit run knobs, overriding the study's ``runtime:`` block AND the
         environment — the precedence a caller's deliberate argument deserves.
@@ -228,7 +229,7 @@ class AgenticRun:
         container: bool = False,
         container_image: str = "f3dasm-agentic:latest",
         resume_from: Path | None = None,
-        review_statement: bool = True,
+        review_statement: bool | None = None,
         runtime: dict | None = None,
     ) -> None:
         self.study_dir = Path(study_dir).resolve()
