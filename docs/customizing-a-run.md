@@ -101,6 +101,67 @@ this project exercises a graph that mixes backends: it's a real, working
 lever (as shown above), but running most of a graph on Claude and one node
 on a local model is a combination you'd be the first to try.
 
+## Changing one agent's tools: `nodes:` in `config.yaml`
+
+Each agent comes with a set of tools. To change that set for one agent
+without writing Python, name the agent in a `nodes:` block of `config.yaml`:
+
+```yaml
+nodes:
+  implementer:
+    tools: [Default, ReadNote]
+```
+
+The list **replaces** the agent's own set. It is not added to it, so a tool
+you leave out is gone. Agents you do not name keep their usual tools. `tools`
+is the only setting a node accepts here. A node name the graph does not have,
+or a `tools` that is not a list of names, stops the run at startup with a
+message that names the problem. The study editor in the viewer checks the same
+rules before it saves.
+
+### `Default`: the backend's full set of built-in tools
+
+`Default` is a tool name that means "every built-in tool this backend has".
+
+- **Claude (the default backend):** the agent gets the full tool set of the
+  Claude CLI, including web search, web fetch and sub-agents. Other agents
+  never get these: adda switches them off. `Default` removes that restriction
+  for the agent that holds it. One block stays: if the agent also has an adda
+  tool with the same name as a built-in one (for example the sandboxed
+  `Write`), the built-in one is switched off, so the sandbox still applies.
+- **Other backends (Ollama, OpenAI-compatible, vLLM):** `Default` means that
+  backend's own built-in tools: `Bash`, `BashOutput`, `KillShell`, `Read`,
+  `Write`, `Edit`, `Glob` and `Grep`.
+
+`Default` is never added for you. You can also put it in the `tools` set of
+your own agent class.
+
+A node with `Default` can step around parts of adda. Its built-in tools do not
+go through the delegation tools, the literature rate limiter and cache, the
+reproduction gate or the human follow-up channel. adda does not block this.
+It tells you.
+
+### What you will see
+
+adda never stops a run over a tool choice. It records notices in the run's
+diagnostics feed, the run log and the viewer:
+
+- **`DEFAULT_TOOLS_BYPASS`**, once per node that holds `Default`. It lists the
+  adda paths that node can bypass.
+- **`TOOLS_CONFIG_DIFFERS`**, for every node whose list in `config.yaml` is not
+  the list its class declares. It states which tools were added and which were
+  removed.
+- **`TOOLS_RESOLVED`**, once per `Default` node on the Claude backend, after
+  the Claude CLI starts. It lists the built-in tools the node really received
+  and marks any adda has not reviewed.
+
+On another backend, a `Default` node also gets **`DEFAULT_TOOLS_EXPANDED`**: it
+names the tools `Default` turned into there.
+
+The run folder keeps the result: `debug/node_tools.json` has, for every node,
+where its tools came from (class or `config.yaml`), the class set, the final
+set and the difference.
+
 ## Seeing what you built
 
 A custom graph is easy to get subtly wrong — a node with a typo'd role, an
