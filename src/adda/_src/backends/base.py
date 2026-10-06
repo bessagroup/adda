@@ -61,6 +61,21 @@ def get_delegation_id() -> str | None:
     return getattr(_transcript_tls, "delegation_id", None)
 
 
+def set_diagnostic_label(label: str | None) -> None:
+    """Bind this thread's diagnostics label (None clears it).
+
+    A label names who is speaking in ``diagnostics.jsonl``; it is NOT a
+    delegation identity. Identity readers (``SendMessage``, ``Delegate``,
+    ``Wait``, the ``F3DASM_DELEGATION_ID`` env) use ``get_delegation_id``
+    only, so a non-delegation call (the entry turn, the critic) stays unbound.
+    """
+    _transcript_tls.diagnostic_label = label
+
+
+def get_diagnostic_label() -> str | None:
+    return getattr(_transcript_tls, "diagnostic_label", None)
+
+
 def set_run_config_path(path: str | None) -> None:
     """Bind this thread's run_config.json path (None clears it).
 
@@ -105,7 +120,7 @@ def record_stream_diagnostic(event_type: str, message: str, **extra: Any) -> Non
         debug_dir = Path(rc).parent
         record: dict = {
             "ts": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
-            "node": get_delegation_id() or "",
+            "node": get_delegation_id() or get_diagnostic_label() or "",
             "tool": event_type,
             "error_type": event_type,
             "fault": "system",
@@ -119,8 +134,8 @@ def record_stream_diagnostic(event_type: str, message: str, **extra: Any) -> Non
 
 
 @contextmanager
-def bind_run_context(delegation_id: str | None, run_config_path: str | None):
-    """Bind this thread's delegation id + run_config path for one call,
+def bind_run_context(label: str | None, run_config_path: str | None):
+    """Bind this thread's diagnostics label + run_config path for one call,
     restoring whatever was bound before on exit.
 
     ``WorkerSession._bind_backend_context`` (delegation.py) is the only place
@@ -135,14 +150,14 @@ def bind_run_context(delegation_id: str | None, run_config_path: str | None):
     run). Use around any such call so the diagnostic reaches
     ``debug/diagnostics.jsonl`` regardless of which node's thread made it.
     """
-    _prev_did = get_delegation_id()
+    _prev_label = get_diagnostic_label()
     _prev_rc = get_run_config_path()
-    set_delegation_id(delegation_id)
+    set_diagnostic_label(label)
     set_run_config_path(run_config_path)
     try:
         yield
     finally:
-        set_delegation_id(_prev_did)
+        set_diagnostic_label(_prev_label)
         set_run_config_path(_prev_rc)
 
 

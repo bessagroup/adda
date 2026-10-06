@@ -149,15 +149,19 @@ def _run_async_safe(coro: Any) -> Any:
         # into it — otherwise the critic's stream/env would silently lose them.
         from .base import (
             get_delegation_id,
+            get_diagnostic_label,
             get_transcript_sink,
             set_delegation_id,
+            set_diagnostic_label,
             set_transcript_sink,
         )
         _sink, _did = get_transcript_sink(), get_delegation_id()
+        _label = get_diagnostic_label()
 
         def _runner() -> Any:
             set_transcript_sink(_sink)
             set_delegation_id(_did)
+            set_diagnostic_label(_label)
             return asyncio.run(coro)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:

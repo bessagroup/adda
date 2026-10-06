@@ -4386,6 +4386,36 @@ def test_entry_node_turn_records_compact_boundary_diagnostic(tmp_path):
     assert hits[0]["node"] == "strategizer-turn-001"
 
 
+def test_entry_node_turn_is_not_a_delegation(tmp_path):
+    """The entry turn's bind_run_context supplies a diagnostics label, not a
+    delegation id: identity readers (SendMessage-to-human, Delegate parent,
+    Wait, the F3DASM_DELEGATION_ID env) must still see "entry"."""
+    from adda._src.backends.base import (
+        bind_run_context,
+        get_delegation_id,
+        get_diagnostic_label,
+    )
+    from tests.test_claude_adapter import _AssistantMessage, _ResultMessage, _TextBlock
+
+    seen = {}
+
+    async def _gen_probe(prompt, options):
+        seen["did"] = get_delegation_id()
+        seen["label"] = get_diagnostic_label()
+        yield _AssistantMessage([_TextBlock("ok")])
+        yield _ResultMessage()
+
+    node = _make_claude_adapter_node(tmp_path, query_gen=_gen_probe)
+    node(make_state(study_dir=str(_default_study_dir())))
+    assert seen["did"] is None
+    assert seen["label"] == "strategizer-turn-001"
+
+    with bind_run_context("critic-1", None):
+        assert get_delegation_id() is None
+        assert get_diagnostic_label() == "critic-1"
+    assert get_diagnostic_label() is None
+
+
 def test_entry_node_turn_records_stream_ended_without_result_diagnostic(tmp_path):
     """Same gap, the other diagnostic: a stream that dies mid-tool with no
     ResultMessage on the entry node's OWN turn must also reach
