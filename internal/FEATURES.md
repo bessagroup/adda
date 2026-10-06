@@ -983,6 +983,13 @@ that is not a list of strings is a startup error (`runtime/node_tools.py`);
 `viewer/study_edit.py::validate_config` rejects the same. `tools` is the only
 key for now.
 
+A `tools` list from config also WITHHOLDS the always-on closures it does not name
+(`node_tools.DROPPABLE_CLOSURES`: ConsultHandbook, ConsultLiterature, ReportEvals,
+RecallHistory, sandboxed Write). `withheld_closures(agent)` is applied in
+`Node._init_capabilities`, `build_routing_tools` (RecallHistory) and the worker
+install path (ReportEvals, Write). A node with no config list is unchanged; a
+`Default` node keeps the sandboxed Write. `TOOLS_CONFIG_DIFFERS` names them.
+
 `Default` is a token (a class `tools` set may hold it too). On the Claude backend
 a node holding it gets the CLI's whole default built-in set (SDK preset
 `claude_code`) and NONE of the floor that blocks WebSearch, WebFetch, Task and

@@ -119,6 +119,14 @@ or a `tools` that is not a list of names, stops the run at startup with a
 message that names the problem. The study editor in the viewer checks the same
 rules before it saves.
 
+Every agent also gets five tools that its class does not declare:
+`ConsultHandbook`, `ConsultLiterature`, `ReportEvals`, `RecallHistory` and the
+sandboxed `Write`. A `tools` list in `config.yaml` is the agent's whole set, so
+it drops each of these five that it does not name. Name one in the list to keep
+it. An agent with no `nodes:` entry keeps all five. A `Default` agent keeps the
+sandboxed `Write`. At startup, adda logs the tools a list adds, removes or
+withholds (diagnostics row `TOOLS_CONFIG_DIFFERS`).
+
 ### `Default`: the backend's full set of built-in tools
 
 `Default` is a tool name that means "every built-in tool this backend has".

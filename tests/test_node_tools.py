@@ -193,3 +193,64 @@ def test_viewer_refuses_a_secret_in_the_runtime_block():
 
     out = validate_config("runtime:\n  semantic_scholar_api_key: abc\n")
     assert any("SEMANTIC_SCHOLAR_API_KEY" in e for e in out["errors"])
+
+
+def _live_closures(tmp_path, nodes_block):
+    import shutil
+    from pathlib import Path
+
+    import yaml
+
+    from adda._src.runtime import settings
+    from adda._src.runtime.agent_runtime import AgenticRun
+    from adda._src.runtime.graph_builder import build_graph
+
+    src = Path(__file__).resolve().parent.parent / "studies" / "example_study"
+    study = tmp_path / "study"
+    study.mkdir(parents=True)
+    shutil.copy(src / "PROBLEM_STATEMENT.md", study)
+    cfg = yaml.safe_load((src / "config.yaml").read_text()) or {}
+    if nodes_block:
+        cfg["nodes"] = nodes_block
+    (study / "config.yaml").write_text(yaml.safe_dump(cfg))
+    logging.disable(logging.CRITICAL)
+    try:
+        run = AgenticRun(study_dir=study, review_statement=False, interactive=False)
+        settings.configure(run._study_runtime, run._runtime_override)
+        ctx = run._prepare_run()
+        live: dict = {}
+        build_graph(run._graph_spec, run._make_adapter, study_dir=run.study_dir,
+                    interactive=False, notes_dir=ctx.notes_dir,
+                    workspace_dir=ctx.workspace_dir,
+                    delegation_log=ctx.delegation_log, node_registry=live)
+        return {n: set(node.adapter.closure_tools) for n, node in live.items()}
+    finally:
+        logging.disable(logging.NOTSET)
+        settings.configure(None)
+
+
+def test_a_config_tools_list_withholds_the_always_on_closures(tmp_path):
+    base = _live_closures(tmp_path / "a", None)
+    assert {"ConsultHandbook", "ReportEvals", "RecallHistory", "Write"} <= base["implementer"]
+    cut = _live_closures(tmp_path / "b", {"implementer": {"tools": ["Read", "Bash"]}})
+    assert not ({"ConsultHandbook", "ConsultLiterature", "ReportEvals",
+                 "RecallHistory", "Write"} & cut["implementer"])
+    assert cut["strategizer"] == base["strategizer"]
+    kept = _live_closures(tmp_path / "c", {"implementer": {
+        "tools": ["Read", "ReportEvals", "ConsultHandbook"]}})
+    assert {"ReportEvals", "ConsultHandbook"} <= kept["implementer"]
+    assert not {"RecallHistory", "Write"} & kept["implementer"]
+
+
+def test_default_keeps_the_sandboxed_write(tmp_path):
+    cut = _live_closures(tmp_path, {"implementer": {"tools": ["Default"]}})
+    assert "Write" in cut["implementer"]
+    assert "ConsultHandbook" not in cut["implementer"]
+
+
+def test_the_notice_names_the_withheld_closures(tmp_path):
+    g = _graph()
+    rec = nt.apply_node_config(g, {"a": {"tools": ["Read"]}})
+    assert "ConsultHandbook" in rec[0]["withheld"]
+    assert "ReportEvals" in nt.DIFF_NOTICE.format(
+        node="a", added=[], removed=[], withheld=rec[0]["withheld"])

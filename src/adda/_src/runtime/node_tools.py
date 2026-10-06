@@ -36,6 +36,12 @@ REVIEWED_BUILTINS = frozenset({
     "Skill", "SlashCommand", "ListMcpResourcesTool", "ReadMcpResourceTool",
 })
 
+#: Closures every node receives whether or not its Agent declares them. A
+#: ``nodes.<name>.tools`` list withholds those it does not name.
+DROPPABLE_CLOSURES = frozenset({
+    "ConsultHandbook", "ConsultLiterature", "ReportEvals", "RecallHistory", "Write",
+})
+
 #: What a Default node can reach that adda normally gates.
 BYPASS_NOTICE = (
     "node {node} holds Default: it receives the CLI's full built-in tool set. "
@@ -44,7 +50,21 @@ BYPASS_NOTICE = (
     "(AskUserQuestion). Informational; nothing is blocked."
 )
 DIFF_NOTICE = ("node {node}: config.yaml tools differ from the class declaration: "
-               "added {added}, removed {removed}")
+               "added {added}, removed {removed}, always-on closures withheld {withheld}")
+
+
+def withheld_closures(agent: Any) -> frozenset[str]:
+    """Always-on closures a config ``tools`` list leaves out for this agent.
+
+    Empty unless the list came from config.yaml. ``Default`` names the
+    backend's built-in set, which includes ``Write``; the sandboxed ``Write``
+    then stays, so a Default node never falls back to an unrestricted one.
+    """
+    if agent is None or not getattr(agent, "_tools_pinned", False):
+        return frozenset()
+    held = frozenset(agent.tools)
+    out = DROPPABLE_CLOSURES - held
+    return out - {"Write"} if DEFAULT in held else out
 
 
 def validate_nodes_block(nodes: Any) -> list[str]:
@@ -92,12 +112,14 @@ def apply_node_config(graph: Any, nodes_cfg: Any) -> list[dict]:
         override = ((nodes_cfg or {}).get(name) or {}).get("tools")
         resolved = frozenset(override) if override is not None else declared
         agent.tools = resolved
+        agent._tools_pinned = override is not None
         records.append({
             "node": name,
             "source": "config" if override is not None else "class",
             "declared": sorted(declared), "resolved": sorted(resolved),
             "added": sorted(resolved - declared),
             "removed": sorted(declared - resolved),
+            "withheld": sorted(withheld_closures(agent)),
         })
     return records
 
@@ -124,11 +146,13 @@ def record_resolution(debug_dir: Path, records: list[dict], log: logging.Logger)
     except OSError:
         pass
     for r in records:
-        if r["source"] == "config" and (r["added"] or r["removed"]):
-            msg = DIFF_NOTICE.format(node=r["node"], added=r["added"], removed=r["removed"])
+        if r["source"] == "config" and (r["added"] or r["removed"] or r["withheld"]):
+            msg = DIFF_NOTICE.format(node=r["node"], added=r["added"],
+                                     removed=r["removed"], withheld=r["withheld"])
             log.warning(msg)
             _append(debug_dir, {"node": r["node"], "error_type": "TOOLS_CONFIG_DIFFERS",
-                                "message": msg, "added": r["added"], "removed": r["removed"]})
+                                "message": msg, "added": r["added"], "removed": r["removed"],
+                                "withheld": r["withheld"]})
         if uses_default(r["resolved"]):
             msg = BYPASS_NOTICE.format(node=r["node"])
             log.warning(msg)

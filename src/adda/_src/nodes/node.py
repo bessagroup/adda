@@ -238,6 +238,12 @@ class Node(
             if getattr(_cfn, "_adda_diagnostic_source", None) is not None:
                 self.adapter.closure_tools[_cname] = self._wrap_closure(
                     _cfn, self._name)
+        # A config.yaml `nodes.<name>.tools` list is the whole tool set: the
+        # always-on closures it does not name are withheld.
+        from ..runtime.node_tools import withheld_closures
+        _agent = self._spec.nodes.get(self._name) if self._spec is not None else None
+        for _cname in withheld_closures(_agent):
+            self.adapter.closure_tools.pop(_cname, None)
 
     def _setup_sandboxed_write(self) -> None:
         """Replace native Write with a workspace-sandboxed closure.

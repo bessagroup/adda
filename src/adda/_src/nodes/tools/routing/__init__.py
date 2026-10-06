@@ -93,7 +93,9 @@ def build_routing_tools(node) -> dict:
     if _features.enabled("peer_interaction"):
         closures["SendMessage"] = _dele["SendMessage"]
 
-    if node._delegation_log is not None:
+    from ....runtime.node_tools import withheld_closures
+    _own = node._spec.nodes.get(node._name) if node._spec is not None else None
+    if node._delegation_log is not None and "RecallHistory" not in withheld_closures(_own):
         closures["RecallHistory"] = _dele["RecallHistory"]
 
     # Agent-declared closure tools: inject only what the subclass opted in to.

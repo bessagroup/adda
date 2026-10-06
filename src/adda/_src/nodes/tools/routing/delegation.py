@@ -354,13 +354,21 @@ class WorkerSession:
             msgs = node._pending_worker_msgs.pop(self.delegation_id, [])
         return wrap_notice("\n".join(msgs))
 
+    def _withheld_closures(self) -> frozenset:
+        from ....runtime.node_tools import withheld_closures
+        spec = self.node._spec
+        return withheld_closures(
+            spec.nodes.get(self.target) if spec is not None else None)
+
     def install_worker_tools(self) -> None:
         """Grant this delegation's worker its own per-delegation tools."""
         worker = self.worker
-        worker.closure_tools["ReportEvals"] = build_report_evals(
-            record=lambda n: setattr(self, "claimed_evals", n),
-            drain=self._drain_pending_msgs,
-        )  # never errors
+        _withheld = self._withheld_closures()
+        if "ReportEvals" not in _withheld:
+            worker.closure_tools["ReportEvals"] = build_report_evals(
+                record=lambda n: setattr(self, "claimed_evals", n),
+                drain=self._drain_pending_msgs,
+            )  # never errors
         # ConsultHandbook is injected universally at adapter construction
         # (agent_runtime._make_adapter) — every node gets it equally there.
 
@@ -2095,7 +2103,10 @@ class DelegationTools:
             scope_label=f"{delegation_id}/ ({_delegation_ws})",
             study_workspace=Path(node._study_dir) / "workspace",
         )
-        worker.closure_tools["Write"] = node._wrap_closure(Write, target)
+        from ....runtime.node_tools import withheld_closures
+        _agent = node._spec.nodes.get(target) if node._spec is not None else None
+        if "Write" not in withheld_closures(_agent):
+            worker.closure_tools["Write"] = node._wrap_closure(Write, target)
 
     # ── Polling, waiting, cancelling ─────────────────────────────────────────
 
