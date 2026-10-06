@@ -31,6 +31,16 @@ from adda._src.infra.delegation_log import DelegationLog
 from adda._src.nodes import Node
 
 
+@pytest.fixture(autouse=True)
+def _isolate_from_milestone_gate():
+    """These tests exercise delegation mechanics, not the process backlog
+    (covered in test_milestones.py)."""
+    from adda._src.runtime import settings
+    settings.configure({"milestones_enabled": False})
+    yield
+    settings.configure({})
+
+
 class _Worker:
     """Minimal worker adapter: returns a canned Report synchronously and
     records every message it was sent (for the task-message regression

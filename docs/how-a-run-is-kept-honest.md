@@ -47,10 +47,11 @@ claim by referring to work that did not happen.
 to the question it is meant to answer, which is what makes every evaluation
 traceable to a claim afterwards.
 
-**The implementer is unreachable while the process backlog is open.** The
-strategizer has a short list of process milestones — engage with the
-problem, consider where it might be wrong, get the oracle right — and cannot
-delegate experiments until each is either done or explicitly skipped with a
+**The process backlog is kept in view.** The strategizer has a short list of
+process milestones — engage with the problem, consider where it might be
+wrong, get the oracle right. While any is open, its first delegation in each
+design, to any agent, meets a one-time reminder; it re-delegates to go on. It
+cannot close the run until each is either done or explicitly skipped with a
 stated reason. Skipping is allowed; skipping silently is not.
 Turn the whole mechanism off with `runtime: milestones_enabled: false`.
 

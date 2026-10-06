@@ -140,9 +140,11 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
 
 ### Process milestones
 - **What:** a small backlog (`craft_pipeline` if `pipeline_deliverable`,
-  `assess_literature_need`, `oracle_gold_state` if `reproduction_gate`) that
-  gates delegating to the implementer only (never literature/datagenerator) until
-  each is resolved. Pipeline and oracle milestones auto-satisfy when their
+  `assess_literature_need`, `oracle_gold_state` if `reproduction_gate`). Any node
+  holding the milestone tools gets a one-time, two-shot reminder per namespace on
+  its first Delegate to ANY target while items are open (no role check; the
+  default graph's strategizer is reminded on literature/datagenerator/critic
+  delegations too); `Done` stays hard until each is resolved. Pipeline and oracle milestones auto-satisfy when their
   condition holds; the rest close via `MilestoneSet(id, DONE|SKIPPED, note=…)`
   (note required). The strategizer can add its own with
   `MilestoneSet(description=…)`.

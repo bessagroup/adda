@@ -1893,26 +1893,22 @@ class DelegationTools:
         return None
 
     def _milestone_gate(self, target: str, namespace: str | None) -> str | None:
-        """The process backlog nudge, or None to proceed.
+        """The process backlog reminder, or None to proceed.
 
-        Applies ONLY to delegations to the f3dasm implementer (the agent that
-        runs experiments) — never the literature_reviewer/datagenerator that
-        satisfy a milestone. Keyed on the resolved TARGET ROLE (reliable), not
-        the agent's self-declared phase. This is a NUDGE, not a hard block: the
-        milestones (assess-literature, oracle-ready, …) are good prompts, not a
-        safety invariant, and a new design legitimately needs its own setup.
-        Two-shot confirm, RECURRING PER NAMESPACE — nudge once per namespace,
-        proceed on a re-delegate. Closing each milestone (MilestoneSet) remains
-        the clean path.
+        Applies to any node that holds the milestone tools (``node._milestones``
+        exists only then), for a delegation to ANY target. This is a NUDGE, not
+        a hard block: the milestones (assess-literature, oracle-ready, …) are
+        good prompts, not a safety invariant, and a new design legitimately
+        needs its own setup. Two-shot confirm, RECURRING PER NAMESPACE — remind
+        once per namespace, proceed on a re-delegate. Closing each milestone
+        (MilestoneSet) remains the clean path.
         """
         node = self.node
         _ms = getattr(node, "_milestones", None)
-        _target_role = getattr(
-            node._spec.nodes.get(target), "role", "") if node._spec else ""
-        if _ms is None or _target_role != "implementer":
+        if _ms is None:
             return None
-        from ....epistemics.milestones import implementer_block
-        _pend = implementer_block(_ms, node)
+        from ....epistemics.milestones import open_milestones
+        _pend = open_milestones(_ms, node)
         if not _pend:
             return None
         _ns_key = namespace or "__default__"
@@ -1926,15 +1922,15 @@ class DelegationTools:
                          for m in _pend)
         node._record_intervention(
             "MILESTONE_BLOCK", target,
-            f"{len(_pend)} backlog item(s) precede the implementer")
+            f"{len(_pend)} backlog item(s) open")
         _scope = f"design '{namespace}'" if namespace else "this study"
         return (
             f"[CONFIRM] process backlog still open for {_scope}: "
-            f"{_ids}. The usual path is to resolve each first — "
+            f"{_ids}. Close each when its work is done — "
             "MilestoneSet(id, 'DONE', note=…), or MilestoneSet(id, "
-            "'SKIPPED', note=…) if it doesn't apply. If you mean to run the "
-            "implementer anyway, re-delegate (same target) to "
-            "confirm. (Not a tool error; a process nudge.)"
+            "'SKIPPED', note=…) if it doesn't apply. If this delegation is "
+            "that work, or you mean to proceed anyway, re-delegate (same "
+            "target) to confirm. (Not a tool error; a process reminder.)"
         )
 
     def _allocate_delegation_id(self) -> str:

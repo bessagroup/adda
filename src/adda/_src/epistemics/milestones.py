@@ -3,11 +3,10 @@
 DISTINCT from the hypothesis ledger (epistemics — what's true, closed by
 evidence). Milestones are PROCESS steps — engage with the task, assess where you
 might be wrong, get the oracle right — closed by COMPLETION. They are
-SOFT-escapable (MilestoneSet(id, "SKIPPED", note=reason)) but HARD on one thing: you cannot
-delegate to the f3dasm implementer (the agent that runs experiments) until the
-backlog is resolved. The three are independent and may be done concurrently;
-they block ONLY the implementer, never the literature_reviewer or datagenerator
-(so a delegation that SATISFIES a milestone is never itself blocked).
+SOFT-escapable (MilestoneSet(id, "SKIPPED", note=reason)). Only closing the run
+(Done) is HARD on them. A node holding the milestone tools gets a one-time
+reminder, per design, on its first Delegate to any target while items are open;
+a re-delegate proceeds. The items are independent and may be done concurrently.
 
 Auto-satisfy predicates (code, keyed by the milestone's ``key``) tick a
 milestone the moment its structural condition holds — no busywork. A milestone
@@ -27,7 +26,7 @@ from pathlib import Path
 __all__ = [
     "MilestoneLedger",
     "DEFAULT_MILESTONES",
-    "implementer_block",
+    "open_milestones",
     "render_backlog",
     "VALID_STATUSES",
 ]
@@ -253,12 +252,10 @@ class MilestoneLedger:
         )
 
 
-def implementer_block(ledger: MilestoneLedger, node) -> list[dict]:
-    """Pending milestones that block delegating to the f3dasm implementer.
+def open_milestones(ledger: MilestoneLedger, node) -> list[dict]:
+    """The still-pending milestones, after auto-satisfying the met ones.
 
-    Auto-satisfies first (a met milestone never blocks). The whole backlog
-    gates the implementer, so this is simply the still-pending set. Returns []
-    when the implementer is clear to run.
+    Returns [] when the backlog is clear.
     """
     ledger.auto_satisfy(node)
     return ledger.pending()
@@ -266,7 +263,7 @@ def implementer_block(ledger: MilestoneLedger, node) -> list[dict]:
 
 def render_backlog(ledger: MilestoneLedger) -> str:
     """The backlog announcement injected once at the start of the run, so the
-    agent cannot claim it didn't know these gate the implementer."""
+    agent cannot claim it didn't know the backlog exists."""
     items = ledger.list_all()
     if not items:
         return ""
@@ -274,17 +271,15 @@ def render_backlog(ledger: MilestoneLedger) -> str:
         f"  {m['id']} [{m['status']}]: {m['description']}" for m in items)
     return (
         "<process_backlog>\n"
-        "Before you delegate ANY work to the f3dasm implementer (the agent "
-        "that runs experiments), resolve this backlog — do each, or "
-        "close it SKIPPED with a reason (MilestoneSet) if your study genuinely "
-        "doesn't need it. "
-        "They're independent (do them in any order, even concurrently) and "
-        "block ONLY the implementer; delegating to the literature_reviewer or "
-        "datagenerator to satisfy one is never blocked. Use the proper agent "
-        "for each delegation — match the task to the role built for it (oracle "
-        "standardization belongs to a dedicated oracle/datagenerator agent when "
-        "your graph has one, not the generic implementer). Close each with "
-        "MilestoneSet(id, 'DONE', note=…).\n\n"
+        "This process backlog is open. Do each item, or close it SKIPPED with a "
+        "reason (MilestoneSet) if your study genuinely doesn't need it. They're "
+        "independent (do them in any order, even concurrently). Delegating to "
+        "the agent built for an item is the way to do it — match the task to "
+        "the role built for it (oracle standardization belongs to a dedicated "
+        "oracle/datagenerator agent when your graph has one, not the generic "
+        "implementer). Your first delegation in each design while items are "
+        "open meets a one-time reminder; re-delegate to proceed. Close each "
+        "with MilestoneSet(id, 'DONE', note=…).\n\n"
         f"{lines}\n"
         "</process_backlog>"
     )

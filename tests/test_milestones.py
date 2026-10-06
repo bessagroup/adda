@@ -1,11 +1,11 @@
-"""Milestone backlog: target-keyed gating (blocks only the implementer)."""
+"""Milestone backlog: a one-time reminder on the first Delegate to any target."""
 from __future__ import annotations
 
 from adda._src.backends.base import Agent, Edge, Graph
 from adda._src.infra.delegation_log import DelegationLog
 from adda._src.epistemics.milestones import (
     MilestoneLedger,
-    implementer_block,
+    open_milestones,
     render_backlog,
 )
 from adda._src.nodes import Node
@@ -115,9 +115,9 @@ def _node(tmp_path):
         delegation_log=DelegationLog(tmp_path / "debug" / "dlog.jsonl"))
 
 
-def test_implementer_block_lists_all_pending(tmp_path):
+def test_open_milestones_lists_all_pending(tmp_path):
     n = _node(tmp_path)
-    pend = implementer_block(n._milestones, n)
+    pend = open_milestones(n._milestones, n)
     assert {m["key"] for m in pend} == {
         "craft_pipeline", "assess_literature_need", "oracle_gold_state"}
 
@@ -125,7 +125,7 @@ def test_implementer_block_lists_all_pending(tmp_path):
 def test_craft_pipeline_auto_satisfies_when_pipeline_exists(tmp_path):
     n = _node(tmp_path)
     (tmp_path / "pipeline.ipynb").write_text("# candidate\n")
-    pend_keys = {m["key"] for m in implementer_block(n._milestones, n)}
+    pend_keys = {m["key"] for m in open_milestones(n._milestones, n)}
     assert "craft_pipeline" not in pend_keys      # auto-satisfied
     assert "assess_literature_need" in pend_keys   # manual, still pending
 
@@ -145,31 +145,41 @@ def test_milestone_propose_tool_does_not_crash(tmp_path):
     assert mid in pending_ids
 
 
-def test_delegate_to_implementer_milestone_is_two_shot_nudge(tmp_path):
-    """The milestone backlog NUDGES the implementer delegation once (not a hard
-    block): the agent re-delegates to confirm and it fires. MilestoneComplete/
-    Skip remain the clean path; literature_reviewer is never gated."""
+def test_delegate_milestone_reminder_is_two_shot_for_any_target(tmp_path):
+    """A node holding the milestone tools is reminded once, per namespace, on its
+    first Delegate to ANY target (not a hard block); a re-delegate to the same
+    target proceeds."""
+    import re
+
+    from .fixtures import approve_delegation
+
     n = _node(tmp_path)
     hid = n.adapter.closure_tools["HypothesisPropose"](
         "stmt", "crit", "pred", 0.5)
-    before = len(n._registry)
-    # First attempt → confirm nudge, NOT a hard block, nothing fired.
+    for target in ("literature_reviewer", "implementer"):
+        n._milestone_ack = set()
+        before = len(n._registry)
+        out = n.adapter.closure_tools["Delegate"](
+            target, "work", "report", hypothesis_ids=[hid], wait=True)
+        assert out.startswith("[CONFIRM]") and "backlog" in out
+        assert len(n._registry) == before  # nothing fired yet
+        out2 = n.adapter.closure_tools["Delegate"](
+            target, "work", "report", hypothesis_ids=[hid], wait=True)
+        assert not out2.startswith("[CONFIRM]")
+        assert len(n._registry) > before  # it fired
+        approve_delegation(n.adapter.closure_tools,
+                           re.search(r"\[(D\d+)\]", out2).group(1))
+
+
+def test_no_reminder_without_the_milestone_tools(tmp_path):
+    n = _node(tmp_path)
+    n._milestones = None
+    hid = n.adapter.closure_tools["HypothesisPropose"](
+        "stmt", "crit", "pred", 0.5)
     out = n.adapter.closure_tools["Delegate"](
-        "implementer", "run experiments", "report", hypothesis_ids=[hid],
-        wait=True)
-    assert out.startswith("[CONFIRM]") and "backlog" in out
-    assert len(n._registry) == before  # nothing fired yet
-    # delegating to the literature_reviewer is NEVER gated (satisfies a gate)
-    out_lit = n.adapter.closure_tools["Delegate"](
         "literature_reviewer", "survey", "report", hypothesis_ids=[hid],
         wait=True)
-    assert not out_lit.startswith("[CONFIRM]")
-    # Re-delegate to the implementer → proceeds past the soft gate (fires).
-    out2 = n.adapter.closure_tools["Delegate"](
-        "implementer", "run experiments", "report", hypothesis_ids=[hid],
-        wait=True)
-    assert not out2.startswith("[CONFIRM]")
-    assert len(n._registry) > before  # it fired
+    assert not out.startswith("[CONFIRM]")
 
 
 def test_milestone_nudge_recurs_per_namespace(tmp_path):
@@ -225,7 +235,7 @@ def test_render_backlog_announcement(tmp_path):
     n = _node(tmp_path)
     bl = render_backlog(n._milestones)
     assert "<process_backlog>" in bl
-    assert "f3dasm implementer" in bl
+    assert "one-time reminder" in bl
     assert "MilestoneSet" in bl and "SKIPPED" in bl
     # the three milestones are listed
     for kw in ("Pipeline", "literature", "oracle"):
