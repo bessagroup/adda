@@ -58,3 +58,20 @@ def test_reprompt_unfinished_off_lets_the_run_end_and_drops_the_banner():
     assert held(node, None, False, []) is None
     assert node._finish_attempts == 0
     assert orchestration.OrchestrationMixin._banner(node, "s", False, ["x"]) == "s"
+
+
+def test_an_unaccepted_close_is_still_recorded_ungated_with_reprompts_off():
+    import threading
+
+    _off("reprompt_unfinished")
+    node = SimpleNamespace(
+        _registry_lock=threading.Lock(), _delegation_seq=0, _seq_at_turn_start=0,
+        _registry={}, _route={}, _token_totals={}, _error_counts={},
+        _banner=lambda *a: orchestration.OrchestrationMixin._banner(node, *a),
+        _flush_ghost_delegations=lambda: None,
+        _ledgered_eval_total=lambda n: n)
+    state = {"total_delegations": 0, "evals_used": 0}
+    cmd = orchestration.OrchestrationMixin._terminate_run(
+        node, state, SimpleNamespace(content="done?"), False, [])
+    assert cmd.update["outcome"] == "UNGATED"
+    assert cmd.update["reviewed"] is False
