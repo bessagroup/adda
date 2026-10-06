@@ -980,8 +980,10 @@ A node's tools come from its Agent class. `config.yaml` may replace them for one
 node: `nodes: {<node>: {tools: [Default, Bash, ...]}}`. The list REPLACES the
 class set (no merge). An unknown node name, a non-mapping block, or a `tools`
 that is not a list of strings is a startup error (`runtime/node_tools.py`);
-`viewer/study_edit.py::validate_config` rejects the same. `tools` is the only
-key for now.
+`viewer/study_edit.py::validate_config` rejects the same. A node entry also takes
+`model`, `backend` and `base_url` (non-empty strings; `node_tools.NODE_KEYS`),
+which `apply_node_config` installs on the Agent; the class values come back when
+a second config is applied.
 
 A `tools` list from config also WITHHOLDS the always-on closures it does not name
 (`node_tools.DROPPABLE_CLOSURES`: ConsultHandbook, ConsultLiterature, ReportEvals,
@@ -1220,8 +1222,8 @@ no claim. A run with no ledger reads "no hypothesis ledger". Tests: `tests/test_
   raises, never silently mis-sizes. Then submits a `vllm serve` job (reusing f3dasm's
   `SlurmCluster` + the plain `sbatch` idiom — a persistent server is NOT routed
   through the eval-oriented `Pipeline`/`SlurmExecutor`), waits for the granted
-  node, polls `/v1/models` past the cold model load, publishes `VLLM_BASE_URL`
-  so the existing vLLM adapter reaches it over the cluster network, and
+  node, polls `/v1/models` past the cold model load, keeps the endpoint on the run
+  (`_served_base_url`, never `os.environ`) so the vLLM adapters reach it over the cluster network, and
   scancels the job on normal close and crash (`execute()`'s `finally`).
   **Known gap:** the hard-kill reap (`reap_run_serve_job`, reads
   `debug/serve_job.jobid`) is called only by the out-of-repo harness;
@@ -1938,3 +1940,16 @@ runs).
   4 GiB default.
 - **Where:** `runtime/settings.py::reject_stale_env`,
   `runtime/agent_runtime.py::AgenticRun.__init__`. **Status:** done.
+
+
+### The endpoint and the top-level keys are config (2026-10-06)
+
+`config.yaml` takes `base_url` at top level and `nodes.<node>.base_url`.
+`AgenticRun._resolve_base_url` picks node, then top level, then the run's
+SLURM-served endpoint, else the adapter's own `*_BASE_URL`/default. A node URL on
+a backend with no endpoint is an error; `base_url` with `llm_slurm.enabled` is
+an error. The SLURM endpoint no longer goes through `os.environ`, which removes a
+race between concurrent runs in one process. `runtime/study_config.py` lists the
+top-level keys; an unknown one is a startup error (and a viewer error) with a
+"did you mean" hint. `study:` is reserved for the study's own scripts; adda never
+reads inside it. **Status:** core.

@@ -113,8 +113,10 @@ nodes:
 ```
 
 The list **replaces** the agent's own set. It is not added to it, so a tool
-you leave out is gone. Agents you do not name keep their usual tools. `tools`
-is the only setting a node accepts here. A node name the graph does not have,
+you leave out is gone. Agents you do not name keep their usual tools. A node
+entry may also set `model`, `backend` and `base_url` for that agent alone, for
+example `model: claude-haiku-4-5`. Each is a non-empty string; a `base_url` is
+only valid on a backend that has an endpoint. Any other key is an error. A node name the graph does not have,
 or a `tools` that is not a list of names, stops the run at startup with a
 message that names the problem. The study editor in the viewer checks the same
 rules before it saves.
@@ -344,17 +346,20 @@ model: qwen2.5:7b
 
 ### OpenAI-compatible endpoints (OpenRouter, vLLM, others)
 
-Any server that speaks the OpenAI API. The adapter resolves the base URL from an
-explicit argument, then the relevant `*_BASE_URL` environment variable, then a
-default.
+Any server that speaks the OpenAI API. The base URL comes from, in order:
+`nodes.<node>.base_url`, the top-level `base_url`, the endpoint of a
+SLURM-served model (`llm_slurm`), the backend's `*_BASE_URL` environment
+variable, then the backend's default. Setting both `base_url` and
+`llm_slurm.enabled` is an error.
 
 ```yaml
 backend: openrouter        # or: vllm
 model: meta-llama/llama-3.1-70b-instruct
+base_url: http://host:8000/v1
 ```
 
 ```bash
-export OPENROUTER_API_KEY=...        # or VLLM_BASE_URL=http://host:8000/v1
+export OPENROUTER_API_KEY=...        # the key stays in the environment
 ```
 
 ### A local model on a SLURM GPU node (vLLM)

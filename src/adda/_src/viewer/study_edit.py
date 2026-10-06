@@ -166,6 +166,8 @@ def validate_config(text: str) -> dict[str, Any]:
     if not isinstance(cfg, dict):
         return {"ok": False, "errors": ["config.yaml must be a mapping of settings"],
                 "warnings": []}
+    from ..runtime.study_config import validate_top_level
+    errors.extend(validate_top_level(cfg))
     runtime = cfg.get("runtime")
     if runtime is not None:
         if not isinstance(runtime, dict):

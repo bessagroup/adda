@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
-import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -50,6 +50,7 @@ from .run_setup import (
     _parse_budget_str,
     resolve_mem_cap_bytes,
 )
+from .study_config import validate_top_level
 
 __all__ = [
     "AgenticRun",
@@ -243,6 +244,11 @@ class AgenticRun:
         # reconfigure the first. Only an unknown key in `runtime=` is rejected
         # now, at construction, where the traceback points at the caller.
         settings.reject_stale_env()
+        _cfg_errors = validate_top_level(cfg)
+        if _cfg_errors:
+            raise ValueError("config.yaml is invalid: " + "; ".join(_cfg_errors))
+        self._base_url = cfg.get("base_url")
+        self._served_base_url: str | None = None
         self._runtime_override: dict = dict(runtime or {})
         self._study_runtime: dict = dict(cfg.get("runtime") or {})
         settings.configure(self._study_runtime, self._runtime_override)
@@ -328,8 +334,8 @@ class AgenticRun:
         ``vllm serve`` job (reusing f3dasm's ``SlurmCluster`` + the plain
         ``sbatch`` submit idiom — a persistent server is not an eval array),
         waits for the granted node and a ready server, then publishes
-        ``VLLM_BASE_URL`` so the vllm/openai-compatible adapter reaches it over
-        the cluster network. Returns the SLURM job id (for teardown) or None
+        the endpoint on this run (``_served_base_url``) so the
+        vllm/openai-compatible adapters reach it over the cluster network. Returns the SLURM job id (for teardown) or None
         when disabled.
 
         No silent fallback: if the feature is enabled and the server cannot be
@@ -340,6 +346,10 @@ class AgenticRun:
         cfg = (full_cfg or {}).get("llm_slurm") or {}
         if not cfg.get("enabled"):
             return None
+        if self._base_url:
+            raise ValueError(
+                "config.yaml sets both `base_url` and `llm_slurm.enabled`: the "
+                "served endpoint would be ignored. Remove one.")
 
         from f3dasm import SlurmCluster
 
@@ -376,8 +386,8 @@ class AgenticRun:
         log.info("llm_slurm: job %s RUNNING on %s; waiting for vLLM at %s",
                  jobid, node, base_url)
         slurm_llm.wait_until_ready(base_url, serve_timeout)
-        os.environ["VLLM_BASE_URL"] = base_url
-        log.info("llm_slurm: server ready; published VLLM_BASE_URL=%s", base_url)
+        self._served_base_url = base_url
+        log.info("llm_slurm: server ready at %s", base_url)
         if self._backend not in ("vllm", "openai", "openai_compatible"):
             log.warning(
                 "llm_slurm.enabled but backend=%r (not vllm) — the served "
@@ -1624,6 +1634,19 @@ class AgenticRun:
         except Exception:  # noqa: BLE001 — a missing menu must never break a run
             return ""
 
+    def _resolve_base_url(self, name: str, agent: Agent, adapter_cls) -> str | None:
+        """The endpoint a node's adapter uses: node config, then the top-level
+        config, then this run's SLURM-served server; ``None`` leaves the
+        adapter's own env/default. A node-level URL on a backend with no
+        endpoint is an error; the run-wide ones apply only where one exists."""
+        if "base_url" not in inspect.signature(adapter_cls.__init__).parameters:
+            if agent.base_url:
+                raise ValueError(
+                    f"nodes.{name}.base_url is set but backend "
+                    f"{agent.backend or self._backend!r} has no endpoint")
+            return None
+        return agent.base_url or self._base_url or self._served_base_url
+
     def _make_adapter(self, name: str, agent: Agent):
         run_dir = self._run_dir
         _role = getattr(agent, "role", None)
@@ -1739,8 +1762,9 @@ class AgenticRun:
         # class by backend name and let it choose its own native tools. Adding
         # a backend to backends/registry.py makes it dispatchable here with no
         # change to this method. Backend-specific endpoint/auth (base_url,
-        # api_key) is resolved inside each adapter from env/defaults, so the
-        # construction kwargs are common to every backend.
+        # api_key) is resolved inside each adapter; base_url comes from
+        # config.yaml (node, then top level), else the run's SLURM-served
+        # endpoint, else the adapter's own env/default.
         from ..backends.registry import get_adapter_class
 
         adapter_cls = get_adapter_class(backend)
@@ -1749,6 +1773,7 @@ class AgenticRun:
         _mcp = dict(getattr(agent, "mcp_servers", {}))
         _allowed = list(getattr(agent, "extra_allowed_tools", frozenset()))
 
+        _endpoint = self._resolve_base_url(name, agent, adapter_cls)
         adapter = adapter_cls(
             model=model,
             system_prompt=system_prompt,
@@ -1758,6 +1783,7 @@ class AgenticRun:
             extra_allowed_tools=_allowed,
             persistent=_persistent,
             max_history_pairs=_max_history_pairs,
+            **({"base_url": _endpoint} if _endpoint else {}),
         )
         # Universal read-only handbook lookup: EVERY node's adapter gets it
         # here, equally, at construction (copy() returns self, so the

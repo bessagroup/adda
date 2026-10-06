@@ -272,6 +272,8 @@ class Agent:
     # another backend's default model id.
     model: str | None = None
     backend: str | None = None
+    #: Endpoint override (OpenAI-compatible backends); config.yaml sets it per node.
+    base_url: str | None = None
     mcp_servers: dict = {}
     extra_allowed_tools: frozenset[str] = frozenset()
     max_history_pairs: int = 5

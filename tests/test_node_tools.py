@@ -71,7 +71,7 @@ def test_unknown_node_is_a_loud_error():
 
 @pytest.mark.parametrize("bad", [
     ["a"], {"a": ["Read"]}, {"a": {"tools": "Read"}}, {"a": {"tools": [1]}},
-    {"a": {"model": "x"}},
+    {"a": {"temperature": 1}},
 ])
 def test_malformed_block_is_rejected_by_runtime_and_viewer(bad):
     with pytest.raises(ValueError):

@@ -7,6 +7,8 @@ persist jobid + return it for teardown.
 from __future__ import annotations
 
 import logging
+
+import pytest
 from pathlib import Path
 
 from adda._src.infra import slurm_llm
@@ -18,6 +20,8 @@ def _bare_run(tmp_path: Path, backend: str = "vllm") -> AgenticRun:
     run.study_dir = tmp_path
     run._model = DEFAULT_MODEL
     run._backend = backend
+    run._base_url = None
+    run._served_base_url = None
     return run
 
 
@@ -61,13 +65,23 @@ def test_enabled_submits_waits_and_publishes(tmp_path, monkeypatch):
     assert jobid == "77"
     # published endpoint points at the granted node + profile port (8000)
     import os
-    assert os.environ["VLLM_BASE_URL"] == "http://gpu007:8000/v1"
+    assert run._served_base_url == "http://gpu007:8000/v1"
+    assert "VLLM_BASE_URL" not in os.environ
     assert calls["ready_url"] == "http://gpu007:8000/v1"
     # jobid persisted for the watchdog reaper; script written
     assert (debug / "serve_job.jobid").read_text() == "77"
     assert (debug / "vllm_serve.sh").exists()
     assert "--model gemma-4-9b" in (debug / "vllm_serve.sh").read_text()
-    monkeypatch.delenv("VLLM_BASE_URL", raising=False)
+
+
+def test_a_configured_base_url_with_slurm_serving_is_refused(tmp_path):
+    run = _bare_run(tmp_path, backend="vllm")
+    run._base_url = "http://elsewhere:9/v1"
+    debug = tmp_path / "debug"
+    debug.mkdir()
+    with pytest.raises(ValueError, match="base_url"):
+        run._maybe_start_slurm_llm(
+            {"llm_slurm": {"enabled": True}}, debug, _log())
 
 
 def test_submit_failure_propagates_no_silent_fallback(tmp_path, monkeypatch):

@@ -1,11 +1,13 @@
 """Per-node tool sets: the ``Default`` token and the config.yaml ``nodes:`` block.
 
 A node's tools come from its Agent class. ``config.yaml`` may replace that set
-for one node::
+for one node, and may also set the node's ``model``, ``backend`` and
+``base_url``::
 
     nodes:
       implementer:
         tools: [Default, ReadNote]
+        model: claude-haiku-4-5
 
 The list REPLACES the class set (no merge). ``Default`` means the backend's own
 full built-in set; on the Claude backend that is the CLI default set with none
@@ -24,7 +26,7 @@ from typing import Any
 from ..backends.base import DEFAULT_TOOLS as DEFAULT
 
 #: Keys a ``nodes.<name>`` entry may hold.
-NODE_KEYS = frozenset({"tools"})
+NODE_KEYS = frozenset({"tools", "model", "backend", "base_url"})
 
 #: Built-ins that were reviewed (what each does, whether it can leave adda's
 #: paths). A built-in outside this set in the first init record is reported,
@@ -86,6 +88,9 @@ def validate_nodes_block(nodes: Any) -> list[str]:
                 not isinstance(tools, list)
                 or not all(isinstance(t, str) and t for t in tools)):
             errors.append(f"nodes.{name}.tools must be a list of tool names")
+        for key in ("model", "backend", "base_url"):
+            if key in entry and not (isinstance(entry[key], str) and entry[key]):
+                errors.append(f"nodes.{name}.{key} must be a non-empty string")
     return errors
 
 
@@ -109,7 +114,14 @@ def apply_node_config(graph: Any, nodes_cfg: Any) -> list[dict]:
     for name, agent in graph.nodes.items():
         declared = frozenset(getattr(agent, "_declared_tools", agent.tools))
         agent._declared_tools = declared
-        override = ((nodes_cfg or {}).get(name) or {}).get("tools")
+        entry = (nodes_cfg or {}).get(name) or {}
+        declared_id = getattr(agent, "_declared_identity", None) or (
+            agent.model, agent.backend, agent.base_url)
+        agent._declared_identity = declared_id
+        agent.model = entry.get("model", declared_id[0])
+        agent.backend = entry.get("backend", declared_id[1])
+        agent.base_url = entry.get("base_url", declared_id[2])
+        override = entry.get("tools")
         resolved = frozenset(override) if override is not None else declared
         agent.tools = resolved
         agent._tools_pinned = override is not None
