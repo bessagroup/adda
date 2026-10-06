@@ -190,7 +190,8 @@ def test_build_graph_routes_delegate_to_implementer():
 def _two_node_graph() -> Graph:
     class S(Agent):
         role = "strategizer"
-        tools = frozenset({"Done", "FollowUp", "WriteNote", "ReadNote"})
+        tools = frozenset({"Done", "FollowUp", "WriteNote", "ReadNote",
+                           "HypothesisList", "MilestoneList"})
         description = "Test strategizer."
 
     class I(Agent):
@@ -356,14 +357,15 @@ def _build_three_tier(monkeypatch, tmp_path):
 
 
 def test_build_graph_non_entry_orchestrating_node_gets_ledger(monkeypatch, tmp_path):
-    """A non-entry node with its own outgoing edges gets a real hypothesis
-    ledger, milestone ledger, science monitor and telemetry — not None
-    just because it isn't the entry node."""
+    """A non-entry node with its own outgoing edges gets the records whose
+    tools it holds (here the hypothesis ledger, so also the monitor) and
+    telemetry — not None just because it isn't the entry node. It holds no
+    milestone tool, so it has no milestone ledger."""
     built = _build_three_tier(monkeypatch, tmp_path)
     mid = built["mid"]
 
     assert mid._ledger is not None
-    assert mid._milestones is not None
+    assert mid._milestones is None
     assert mid._science_monitor is not None
     assert mid._telemetry is not None
 

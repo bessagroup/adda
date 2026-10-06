@@ -201,6 +201,8 @@ class Node(
         # capability closures this node is granted (read-only ledger/store
         # tools). Kept as a frozenset for membership checks.
         self._agent_tools: frozenset[str] = frozenset(agent_tools or ())
+        # A node built without a declared toolset has nothing to narrow by.
+        self._tools_declared = agent_tools is not None
         # This agent's declared report sections (e.g. the critic's
         # Findings/Verdict, not the implementer's Conclusions/Files touched).
         # Used to validate a worker's report against ITS OWN contract instead

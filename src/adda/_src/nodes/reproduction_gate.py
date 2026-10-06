@@ -70,13 +70,17 @@ class ReproductionGateMixin:
         """
         from ..evaluation.notebook_exec import required_deliverable_name
         from ..runtime import features
+        from ..runtime.features import NOTEBOOK_TOOLS
         study_dir = Path(state.get("study_dir", "."))
         # WriteDeliverable writes BARE names to study_dir/ (it rejects path
         # separators). Normalise any configured path to its basename so a stray
         # 'workspace/…' prefix in a study config can't spuriously flag a present
         # deliverable as missing.
         required = list(state.get("required_deliverables") or [])
-        if features.enabled("pipeline_deliverable"):
+        # Only a node that holds the notebook tools can author the notebook,
+        # so only it can be required to have.
+        if features.enabled("pipeline_deliverable") and (
+                not self._tools_declared or self._agent_tools & NOTEBOOK_TOOLS):
             required = [required_deliverable_name()] + required
         seen: set[str] = set()
         missing: list[str] = []

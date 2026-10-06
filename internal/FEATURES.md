@@ -1912,3 +1912,16 @@ runs).
   `routing/delegation.py::_append_budget_report`, `_budget_broadcast`, the
   worker task message; `prompts/agent_prompts.py` inline gate.
   **Status:** done.
+
+### Epistemic ownership follows the tools a node holds
+- **What:** a node with outgoing edges owns the hypothesis ledger only if it
+  holds a hypothesis tool, the milestone ledger only if it holds a milestone
+  tool, and the science monitor if it holds either. The notebook is required
+  at close (`_missing_deliverables`) only of a node that holds the notebook
+  tools. `pipeline_deliverable` and the reproduction gate stay one switch.
+  Telemetry still follows topology. Default graph: strategizer owns all;
+  datagenerator and implementer keep ledger and monitor (they hold
+  `HypothesisList`) and lose a milestone ledger nothing on them used; the
+  other two own nothing, as before.
+- **Where:** `nodes/orchestration.py::_install_epistemics`,
+  `nodes/reproduction_gate.py::_missing_deliverables`. **Status:** done.

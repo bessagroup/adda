@@ -122,7 +122,8 @@ class OrchestrationMixin:
         # monitor / hypothesis-ledger READ access matter for every role.
         # WRITE access (HypothesisPropose/Update, Milestone*) is gated
         # separately, by each Agent's own declared `tools`. Ownership is
-        # never acquired later — see _install_epistemics. Gated on `outgoing`
+        # never acquired later — see _install_epistemics, which then narrows it
+        # to the records whose tools the node holds. Gated on `outgoing`
         # (not just `notes_dir is not None`) because graph_builder passes
         # the same notes_dir to every node's constructor, including a node
         # with no outgoing edges — that node must not acquire ledger
@@ -218,20 +219,31 @@ class OrchestrationMixin:
             self._telemetry = None
             return
 
+        # A node owns an epistemic record only if it holds the tools that
+        # write to it. A ledger nobody can write is not a ledger, and a
+        # milestone gate on a node that cannot set a milestone blocks a close
+        # it has no means to unblock. The monitor watches what those tools
+        # produce, so it follows either family.
+        tools = self._agent_tools
+        holds_ledger = not self._tools_declared or bool(
+            tools & features.by_key("hypothesis_ledger").tools)
+        holds_milestones = not self._tools_declared or bool(
+            tools & features.by_key("milestones_enabled").tools)
+
         # Hypothesis ledger — persists hypotheses.json. Switchable: its tools
         # and its prompt section are withheld by the same knob (runtime.
         # features), so turning it off does not leave the agent commanded to
         # use tools that error.
         self._ledger: HypothesisLedger | None = (
-            HypothesisLedger(notes) if features.enabled("hypothesis_ledger")
-            else None
+            HypothesisLedger(notes)
+            if holds_ledger and features.enabled("hypothesis_ledger") else None
         )
 
         # Milestone ledger (process policy) — persists milestones.json.
         # Seeded with the config default gates unless disabled. DISTINCT from
         # the hypothesis ledger (epistemics): process vs what's-true.
         self._milestones: MilestoneLedger | None = None
-        if features.enabled("milestones_enabled"):
+        if holds_milestones and features.enabled("milestones_enabled"):
             self._milestones = MilestoneLedger(notes)
             # C3 switchable: the draft-pipeline gate seeds only when the
             # pipeline-deliverable knob is on (off = byte-identical to today).
@@ -248,8 +260,9 @@ class OrchestrationMixin:
         # argument it stored and never read, so disabling the ledger disabled
         # the monitor as well.
         self._science_monitor: ScienceMonitor | None = None
-        if self._delegation_log is not None and features.enabled(
-                "science_monitor"):
+        if (self._delegation_log is not None
+                and (holds_ledger or holds_milestones)
+                and features.enabled("science_monitor")):
             self._science_monitor = ScienceMonitor(
                 self._delegation_log,
                 diagnostics_writer=self._record_science_drift,
