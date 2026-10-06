@@ -207,6 +207,10 @@ def append_transcript(record: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
+#: Tool-set token: "this backend's whole built-in set" (see runtime/node_tools.py).
+DEFAULT_TOOLS = "Default"
+
+
 class Agent:
     """Base class for all agentic nodes in a Graph.
 

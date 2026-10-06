@@ -176,6 +176,8 @@ def validate_config(text: str) -> dict[str, Any]:
                 errors.append(
                     f"runtime.{key} is not a known knob"
                     + (f" (did you mean {close[0]}?)" if close else ""))
+    from ..runtime.node_tools import validate_nodes_block
+    errors.extend(validate_nodes_block(cfg.get("nodes")))
     if "budget" in cfg:
         try:
             if _parse_budget_str(cfg["budget"]) is None:

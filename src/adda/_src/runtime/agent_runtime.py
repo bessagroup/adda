@@ -34,6 +34,13 @@ from ..prompts.agent_prompts import (
 from . import features, settings, terminal
 from .graph_builder import build_graph
 from .graph_state import AgenticState, Delegation, Report, StudyConfig, Task
+from .node_tools import (
+    apply_node_config,
+    record_builtins,
+    record_native_expansion,
+    record_resolution,
+    uses_default,
+)
 from .run_setup import (
     AgenticRunError,
     _archive_prior_pipeline_notebook,
@@ -268,6 +275,10 @@ class AgenticRun:
         )
 
         self._graph_spec = graph or _default_graph()
+        # config.yaml `nodes:` replaces a node's class tool set; a bad block or
+        # an unknown node fails here, at startup, not mid-run.
+        self._node_tool_records = apply_node_config(
+            self._graph_spec, cfg.get("nodes"))
         # `interactive` requires a real terminal: a headless/background run (no
         # TTY) has a stdin that blocks on read but never EOFs, so any input()
         # would hang the whole run forever. The in-graph FollowUp path already
@@ -513,6 +524,8 @@ class AgenticRun:
 
         thread_id = self._resolve_thread_id(debug_dir, resume)
         self._record_node_models(debug_dir)
+        self._run_log = log
+        record_resolution(debug_dir, getattr(self, "_node_tool_records", []), log)
 
         # Pre-run problem-statement review (advisory; interactive-refine when
         # enabled). Fresh runs only — a resume replays the checkpoint and must
@@ -724,6 +737,27 @@ class AgenticRun:
         except OSError:
             pass                            # anchor is best-effort, never fatal
         return start_time
+
+    def _watch_default_node(self, name: str, adapter: Any, backend: str) -> None:
+        """Report what a Default node really received (informational only)."""
+        debug_dir = self._run_dir / "debug" if self._run_dir is not None else None
+        if debug_dir is None:
+            return
+        if backend == "claude":
+            seen: set[str] = getattr(self, "_default_init_seen", set())
+            self._default_init_seen = seen
+
+            def _on_init(tools: list[str]) -> None:
+                if name in seen:
+                    return
+                seen.add(name)
+                record_builtins(debug_dir, name, tools)
+
+            adapter.on_init_tools = _on_init
+        else:
+            record_native_expansion(
+                debug_dir, name, backend, adapter.native_tools,
+                getattr(self, "_run_log", logging.getLogger("adda")))
 
     def _record_node_models(self, debug_dir: Path) -> None:
         """Record which model/backend each node actually runs on.
@@ -1738,4 +1772,6 @@ class AgenticRun:
         )
         if extra_closures:
             adapter.closure_tools.update(extra_closures)
+        if uses_default(agent.tools):
+            self._watch_default_node(name, adapter, backend)
         return adapter

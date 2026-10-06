@@ -974,6 +974,32 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   `REVIEW_ELEMENTS`, `parse_review`), `runtime/agent_runtime.py::_review_problem_statement`.
   **Status:** core.
 
+### Per-node tools from config: the `Default` token and `nodes.<node>.tools`
+
+A node's tools come from its Agent class. `config.yaml` may replace them for one
+node: `nodes: {<node>: {tools: [Default, Bash, ...]}}`. The list REPLACES the
+class set (no merge). An unknown node name, a non-mapping block, or a `tools`
+that is not a list of strings is a startup error (`runtime/node_tools.py`);
+`viewer/study_edit.py::validate_config` rejects the same. `tools` is the only
+key for now.
+
+`Default` is a token (a class `tools` set may hold it too). On the Claude backend
+a node holding it gets the CLI's whole default built-in set (SDK preset
+`claude_code`) and NONE of the floor that blocks WebSearch, WebFetch, Task and
+ExitPlanMode for other nodes. Two blocks stay, as correctness: the bare built-in
+name of every closure the node declares (the sandboxed `Write` replaces the
+native one). On other backends it is that adapter's native set
+(`DEFAULT_NATIVE_TOOLS`: Bash, BashOutput, KillShell, Read, Write, Edit, Glob,
+Grep). `Default` is never inherited or injected; the critic keeps its explicit set.
+
+Records, all informational and never blocking: `debug/node_tools.json` (source
+class|config, class set, resolved set, diff); diagnostics rows (fault `nudge`)
+`TOOLS_CONFIG_DIFFERS` (config differs from the class), `DEFAULT_TOOLS_BYPASS`
+(once per Default node: it can bypass Delegate, the literature rate limiter and
+cache, the reproduction gate via NotebookEdit, FollowUp via AskUserQuestion),
+`TOOLS_RESOLVED` (the built-ins the CLI init record really listed, and those
+adda has not reviewed), `DEFAULT_TOOLS_EXPANDED` (non-Claude backend).
+
 ## D. Resource governance
 
 ### Soft eval-budget nudge

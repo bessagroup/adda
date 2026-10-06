@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .base import record_stream_diagnostic
+from .base import DEFAULT_TOOLS, record_stream_diagnostic
 
 __all__ = ["ClaudeAdapter"]
 
@@ -458,7 +458,10 @@ class ClaudeAdapter:
         Mirror of OpenAICompatibleAdapter.select_native_tools so the runtime
         can choose native tools generically for any backend (forward-compatible
         dispatch)."""
-        return [t for t in agent_tools if t in cls.NATIVE_TOOLS]
+        picked = [t for t in agent_tools if t in cls.NATIVE_TOOLS]
+        if DEFAULT_TOOLS in agent_tools:
+            picked.append(DEFAULT_TOOLS)
+        return picked
 
     def __init__(
         self,
@@ -475,7 +478,13 @@ class ClaudeAdapter:
         self.model = model
         self.system_prompt = system_prompt
         self.study_dir = Path(study_dir) if study_dir else None
-        self.native_tools = list(native_tools or [])
+        # "Default" is a marker, not a tool name: the node takes the CLI's
+        # whole default built-in set (see node_tools.py).
+        self.use_default_tools: bool = DEFAULT_TOOLS in (native_tools or [])
+        self.native_tools = [t for t in (native_tools or []) if t != DEFAULT_TOOLS]
+        # Called once per init record with the tool names the CLI really
+        # loaded; set by the runtime, never required.
+        self.on_init_tools: Any = None
         self.closure_tools = dict(closure_tools or {})
         self.extra_mcp_servers: dict = dict(extra_mcp_servers or {})
         self.extra_allowed_tools: list[str] = list(extra_allowed_tools or [])
@@ -639,6 +648,11 @@ class ClaudeAdapter:
         _ungranted_native = [
             t for t in self.NATIVE_TOOLS if t not in self.native_tools
         ]
+        if self.use_default_tools:
+            # Default has no floor. Only computed additions stay: a built-in
+            # that shares its bare name with a closure this node declares
+            # (the sandboxed Write replaces the native one) must not run.
+            _base_disallowed, _ungranted_native = [], list(self.closure_tools)
         _effective_disallowed = [
             t for t in dict.fromkeys([*_base_disallowed, *_ungranted_native])
             if t not in self.extra_allowed_tools
@@ -702,7 +716,8 @@ class ClaudeAdapter:
             system_prompt=self._render_system_prompt(),
             model=self.model,
             cwd=str(self.study_dir) if self.study_dir else None,
-            tools=self.native_tools or [],
+            tools=({"type": "preset", "preset": "claude_code"}
+                   if self.use_default_tools else self.native_tools or []),
             mcp_servers=mcp_servers if mcp_servers else {},
             allowed_tools=self._compute_allowed_tools(qualified_mcp_tools),
             disallowed_tools=_effective_disallowed,
@@ -927,6 +942,14 @@ class ClaudeAdapter:
                         _rec = _record(msg)
                         if _rec is not None:
                             append_transcript(_rec)
+                if (isinstance(msg, SystemMessage) and msg.subtype == "init"
+                        and self.on_init_tools is not None):
+                    # Unconditional like the compaction record below: which
+                    # tools the CLI really loaded is a run-level fact.
+                    try:
+                        self.on_init_tools(list((msg.data or {}).get("tools") or []))
+                    except Exception:  # noqa: BLE001 — a notice never fails a turn
+                        pass
                 if isinstance(msg, SystemMessage) and msg.subtype == "compact_boundary":
                     # Unconditional (not gated on _capture/debug mode): a
                     # compaction is a run-level fact an analyst should never

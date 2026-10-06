@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from . import context_budget, context_compaction
+from .base import DEFAULT_TOOLS
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +33,12 @@ __all__ = ["OpenAICompatibleAdapter"]
 # OpenAI-compatible backends pass everything ELSE through as a native tool.
 _CLOSURE_TOOL_NAMES = frozenset(
     {"Done", "FollowUp", "WriteNote", "ReadNote", "ReportEvals"}
+)
+
+
+#: What the token "Default" expands to on this backend: the native tools below.
+DEFAULT_NATIVE_TOOLS = (
+    "Bash", "BashOutput", "KillShell", "Read", "Write", "Edit", "Glob", "Grep",
 )
 
 
@@ -731,7 +738,11 @@ class OpenAICompatibleAdapter:
         is native unless it is one of the Python closure tools the node injects
         separately. (ClaudeAdapter overrides this with its own CLI-tool set.)
         """
-        return [t for t in agent_tools if t not in _CLOSURE_TOOL_NAMES]
+        picked = [t for t in agent_tools
+                  if t not in _CLOSURE_TOOL_NAMES and t != DEFAULT_TOOLS]
+        if DEFAULT_TOOLS in agent_tools:
+            picked += [t for t in DEFAULT_NATIVE_TOOLS if t not in picked]
+        return picked
 
     def __init__(
         self,
@@ -754,6 +765,10 @@ class OpenAICompatibleAdapter:
         # sandboxed-Write setup can find it by the same attribute name as
         # ClaudeAdapter.
         self.native_tools: list[str] = list(native_tools or [])
+        # Parity with ClaudeAdapter: "Default" is already expanded to the
+        # native set by select_native_tools, and there is no init record.
+        self.use_default_tools: bool = False
+        self.on_init_tools: Any = None
         self.closure_tools: dict[str, Any] = dict(closure_tools or {})
         # Endpoint + auth: explicit arg > environment > class default.
         if base_url is None and self.BASE_URL_ENV:

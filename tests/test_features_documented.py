@@ -45,3 +45,9 @@ def test_every_declared_tool_is_documented():
         "Tools declared by an agent but ABSENT from docs/agentic/FEATURES.md: "
         f"{missing}. Add each to the catalog (contract at the top of FEATURES.md)."
     )
+
+
+def test_default_token_is_documented():
+    from adda._src.backends.base import DEFAULT_TOOLS
+
+    assert f"`{DEFAULT_TOOLS}`" in _FEATURES.read_text(encoding="utf-8")
