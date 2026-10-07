@@ -28,15 +28,14 @@ from pathlib import Path
 
 import pytest
 
-# OpenRouter's own free-tier meta-router: it auto-selects among whichever
-# free models are currently healthy, rather than pinning to one specific
-# `:free` model that can have a bad day (a single pinned model, gpt-oss-20b:
-# free, failed 2 of 3 scheduled runs here for infra reasons — rate limits/
-# outages — attributable to that one model, not this test or the docs).
-# Override via WET_TEST_MODEL for a specific model (e.g. to reproduce a
-# failure against one exact model), confirmed live against
-# https://openrouter.ai/api/v1/models at the time this was written.
-_FREE_MODEL = os.environ.get("WET_TEST_MODEL", "openrouter/free")
+# One pinned free model, so two wet runs compare like with like. The router
+# `openrouter/free` picks a different model per call, which made timings
+# between runs incomparable. This id lists `tools` and `tool_choice` in
+# supported_parameters and has no expiry date in
+# https://openrouter.ai/api/v1/models (checked 2026-10-07). Override via
+# WET_TEST_MODEL to reproduce a failure against another exact model.
+_FREE_MODEL = os.environ.get(
+    "WET_TEST_MODEL", "nvidia/nemotron-3-ultra-550b-a55b:free")
 
 # Wall-clock and eval caps sized for a free-tier model on a trivial problem —
 # tight enough that a stuck/looping run doesn't burn the whole scheduled slot.
