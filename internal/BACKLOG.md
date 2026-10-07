@@ -43,6 +43,7 @@ before. Until one is answered or closed, treat it as known, not news.
 - [ ] **#51** Rows from a superseded oracle revision still count in `evals_used` and in best-row ranking — *open, separate step after real mixed-revision stores exist* — see §51 below
 - [ ] **#52** An in-band harness notice that guards data integrity travels inside a tool output that can be truncated — *open, investigate first, report before fixing* — see §52 below
 - [ ] **#54** Per-call input-token size on small studies — *open, investigate first, no work yet* — see §54 below
+- [ ] **#55** Derive the non-Default built-in floor from the CLI init record — *future-proofing, no work yet* — see §55 below
 - [ ] **#47** Computed cost sits 0-8% below the SDK's `total_cost_usd` on validator/critic calls — *open, low (telemetry column, not correctness)* — see §47 below
 
 ## Parked — deferred on purpose
@@ -757,3 +758,16 @@ row (`debug/telemetry/calls.<pid>.jsonl`, from the 2026-10-06 wet docs test,
 cost for a toy study. Investigate: is the input figure cumulative context across
 the delegation's turns, or repeated tool output? Check whether the row sums
 turns or counts one call. No work until then.
+
+## 55. Derive the non-Default built-in floor from the CLI init record
+
+`backends/claude.py` (`_base_disallowed`, `NATIVE_TOOLS`) disallows the
+sub-agent built-in by the literal name `Task`. The headless init records of the
+pinned bundled CLI (2.1.209) and of 2.1.292 both list `Task`, so the floor is
+correct today. A future CLI that renames it would leave every non-Default node
+able to spawn sub-agents that bypass `Delegate()`, with no signal. Fix when it
+matters: build the floor from the built-ins the first init record lists (the
+`TOOLS_RESOLVED` row already reads that list for Default nodes) instead of a
+fixed name list, with a test that a renamed built-in is still disallowed. No
+work until a CLI rename is seen. Evidence note: the init records were read by a
+probe that Elvis had not approved (see the 2026-10-07 exchange with the PM).
