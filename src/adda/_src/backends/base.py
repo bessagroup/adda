@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 # ---------------------------------------------------------------------------
-# Debug / transcript capture — master switch F3DASM_DEBUG, OFF by default.
+# Debug / transcript capture — master switch `runtime: debug`, OFF by default.
 # When on, agents stream their full reasoning + tool-calls + tool-results to
 # per-delegation / per-strategizer-turn JSONL transcripts so we can see what
 # the workers are actually thinking. Capture is thread-local: each worker
@@ -32,7 +32,8 @@ _transcript_tls = threading.local()
 def debug_enabled() -> bool:
     """Master debug switch. Off unless the `debug` knob is truthy.
 
-    Source of truth is config.yaml's runtime block; F3DASM_DEBUG overrides it."""
+    Source of truth is the `debug` knob (config.yaml's runtime block or
+    `--set debug=true`); no environment variable is read."""
     from ..runtime.settings import get_bool
     return get_bool("debug", False)
 
@@ -197,7 +198,7 @@ def oracle_registered() -> bool:
 def append_transcript(record: dict) -> None:
     """Best-effort append one JSON record to the active transcript.
 
-    No-op unless F3DASM_DEBUG is on and a sink is set on this thread.
+    No-op unless the `debug` knob is on and a sink is set on this thread.
     Never raises into the agent loop.
     """
     if not debug_enabled():

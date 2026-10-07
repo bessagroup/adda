@@ -95,7 +95,7 @@ def test_single_text_block():
 
 
 def test_transcript_captured_when_debug_on(tmp_path, monkeypatch):
-    """With F3DASM_DEBUG on and a sink set, ainvoke streams assistant text +
+    """With `runtime: debug` on and a sink set, ainvoke streams assistant text +
     result records to the transcript JSONL."""
     import json
     from adda._src.backends.base import set_transcript_sink

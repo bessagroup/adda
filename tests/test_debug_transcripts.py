@@ -1,6 +1,6 @@
-"""DEBUG flag + transcript capture (F3DASM_DEBUG, off by default).
+"""DEBUG flag + transcript capture (the `debug` knob, off by default).
 
-The capture must be a strict no-op unless F3DASM_DEBUG is on AND a per-thread
+The capture must be a strict no-op unless the `debug` knob is on AND a per-thread
 sink is set, and it must never raise into the agent loop.
 """
 from __future__ import annotations

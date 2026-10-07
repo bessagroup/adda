@@ -181,7 +181,7 @@ class CriticGateMixin:
         """Synchronously invoke the connected critic; returns its
         text or an ERROR string.
 
-        The critic is a worker too: under F3DASM_DEBUG its full transcript is
+        The critic is a worker too: under `runtime: debug` its full transcript is
         streamed to disk, its verdict/review is ALWAYS persisted (the PASS
         branch doesn't echo it to the strategizer, so this is the only place
         the deciding verdict is auditable), and its ### Retrospective is
