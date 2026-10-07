@@ -309,7 +309,10 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   (it reads whatever corpus exists) and says the corpus may be empty.
   `tests/test_prompt_arms.py` assembles both topology arms. Handbook chapter
   bodies are resolved the same way when served (`KnowledgeBase._live`), so a
-  chapter can carry `[[if node:<name>]]` text too.
+  chapter can carry `[[if node:<name>]]` text too, and its `feature:` key may be
+  `node:<name>`, which hides the whole chapter while that node is absent. Tool
+  examples are resolved the same way; an example whose gate is off is dropped.
+  `tests/test_feature_arms.py` builds every arm through the real run path.
 - **Grounded in code, not paraphrased:** what the gate mechanically checks
   (the canonical store must hold ≥1 row before it will even run the
   notebook; zero new evals on replay; no modified/deleted rows; headline
