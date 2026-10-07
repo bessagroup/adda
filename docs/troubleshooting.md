@@ -53,12 +53,12 @@ first. Note the nesting: run knobs go **inside** `runtime:`, while `model`,
    blocks for `runtime: followup_wait_s` (default 600s) before proceeding on
    its own. If the run has no TTY and nobody is watching in the viewer, it
    will simply wait out the timeout. See
-   [Watching a run](watching-a-run.md#when-the-run-asks-you-something), or
+   [Watching a run](watching-a-run.md#answer-a-question), or
    pass `interactive=False` for a fully unattended run.
 2. Is a model call stalled? `runtime: llm_stream_idle_timeout` (default
    600s) abandons a call after that much stream silence.
 3. Is it just working? Long delegations are normal. Open the
-   [viewer](watching-a-run.md#the-live-viewer) and look, rather than
+   [viewer](watching-a-run.md#start-the-viewer) and look, rather than
    guessing — that is what it is for.
 
 **The run halted on cost.** `budget_usd` is a hard ceiling and it is

@@ -37,7 +37,7 @@ also drives Ollama, any OpenAI-compatible endpoint, and vLLM: see
 
 ## Optional extras
 
-- `adda[viewer]` adds the read-only live run viewer
+- `adda[viewer]` adds the live run viewer
   (`python -m adda.viewer <study-dir>`), for watching a run as it works.
   See [Watching a run](watching-a-run.md).
 - `adda[extra]` adds `docling` for layout-aware PDF parsing in the literature
