@@ -512,3 +512,14 @@ def test_an_explicit_stop_grace_at_the_deadline_is_still_refused(
     monkeypatch.setattr(wl, "run_under_watchdog", lambda *a, **k: 1 / 0)
     assert wl.main([str(study_dir)]) == 2
     assert "stop_grace_s" in capsys.readouterr().err
+
+
+def test_help_renders_every_option(capsys):
+    """`--help` must print, not crash: a help string that is not a str breaks
+    argparse's formatter."""
+    from adda._src.infra.watchdog_launcher import main
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--help"])
+    assert exit_info.value.code == 0
+    assert "--entrypoint" in capsys.readouterr().out

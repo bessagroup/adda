@@ -348,7 +348,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "went unwatched). Incompatible with --model/--budget: an "
             "arbitrary entrypoint script takes no CLI arguments of its own "
             "to forward them to, so the watchdog deadline is derived from "
-            "the study's config.yaml `budget:` only.",
+            "the study's config.yaml `budget:` only."
         ),
     )
     from ..runtime.cli_overrides import add_set_argument
