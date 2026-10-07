@@ -680,6 +680,7 @@ class OrchestrationMixin:
 
         @_functools.wraps(fn)
         def _wrapped(*args, **kwargs):
+            node._raise_if_abandoned()
             # Coerce string args before calling the real function.
             try:
                 bound = _inspect.signature(fn).bind_partial(

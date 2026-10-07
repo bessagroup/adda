@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -78,6 +79,8 @@ DEFAULT_OLLAMA_MODEL = "qwen2.5:1.5b"
 # failure and not a bug in the agent's reasoning) that deserves its own
 # stop_reason and explicit resume guidance rather than being silently
 # folded into an ordinary UNGATED close (BACKLOG #34).
+_ABANDON_GRACE_S = 30.0
+
 _EXTERNAL_STOP_SIGNATURES = {
     "org_spend_limit": "org's monthly spend limit",
 }
@@ -881,7 +884,7 @@ class AgenticRun:
                 if ctx.resuming and graph_input is None:
                     self._ask_crashed_run_for_retrospective(ctx)
                 try:
-                    return graph.invoke(graph_input, config=ctx.graph_config)
+                    return self._invoke_abandonable(graph, graph_input, ctx)
                 except BaseException as _exc:  # noqa: BLE001
                     # Any unhandled crash (GraphRecursionError,
                     # KeyboardInterrupt, OOM, …): record a resumable status so
@@ -934,6 +937,76 @@ class AgenticRun:
                     log.info("llm_slurm: scancel'd serve job %s", _serve_jobid)
                 except Exception:  # noqa: BLE001
                     log.warning("llm_slurm: teardown failed", exc_info=True)
+
+    def _invoke_abandonable(self, graph: Any, graph_input: Any,
+                            ctx: _RunContext) -> Any:
+        """``graph.invoke`` on a worker thread, so an interrupt still returns.
+
+        LangGraph joins its node threads while an exception unwinds out of
+        ``invoke``. A node stuck in a call nobody can cancel (the strategizer
+        in Wait, joined on a delegation inside an LLM read) then held the run
+        open until that call came back. Here the calling thread only waits,
+        so Ctrl-C or a timeout reaches it at once.
+        """
+        box: dict[str, Any] = {}
+        finished = threading.Event()
+
+        def _go() -> None:
+            try:
+                box["out"] = graph.invoke(graph_input, config=ctx.graph_config)
+            except BaseException as exc:  # noqa: BLE001
+                box["exc"] = exc
+            finally:
+                finished.set()
+
+        try:
+            threading.Thread(target=_go, name="adda-graph", daemon=True).start()
+            while not finished.wait(timeout=0.5):
+                pass
+        except BaseException:
+            self._abandon_graph(finished, ctx)
+            raise
+        if "exc" in box:
+            raise box["exc"]
+        return box["out"]
+
+    def _abandon_graph(self, finished: threading.Event,
+                       ctx: _RunContext) -> None:
+        """Tell every node thread to stop, wait a bounded time, record the rest.
+
+        A thread cannot be killed safely. Each one ends itself at its next
+        tool call or wait loop (``RunAbandoned``); one stuck inside a model
+        call ends when that call returns.
+        """
+        nodes = getattr(self, "_live_nodes", None) or {}
+        for node in nodes.values():
+            node._abandon.set()
+        finished.wait(timeout=_ABANDON_GRACE_S)
+        left: list[str] = []
+        for name, node in nodes.items():
+            with node._registry_lock:
+                left += [f"{name}:{did}" for did, e in node._registry.items()
+                         if e.get("status") == "Working"]
+        if finished.is_set() and not left:
+            return
+        rec = {
+            "ts": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
+            "node": "run", "tool": "RUN_ABANDONED",
+            "error_type": "RUN_ABANDONED", "fault": "nudge",
+            "message": (
+                "the run stopped waiting for its nodes after "
+                f"{_ABANDON_GRACE_S:.0f}s; graph thread "
+                f"{'ended' if finished.is_set() else 'still running'}; "
+                f"delegations left Working: {left or 'none'}"),
+            "detail": {"graph_thread_alive": not finished.is_set(),
+                       "delegations_left": left},
+        }
+        try:
+            with (ctx.debug_dir / "diagnostics.jsonl").open(
+                    "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec) + "\n")
+        except Exception:  # noqa: BLE001
+            pass
 
     def _ask_crashed_run_for_retrospective(self, ctx: _RunContext) -> bool:
         """Resuming a run whose process was lost (its checkpoint is mid-flight):

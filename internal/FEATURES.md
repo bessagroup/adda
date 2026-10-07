@@ -240,6 +240,13 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   on `Wait` predicted serial execution (r=-0.54 vs mean concurrent
   delegations, controlling for delegation duration) against a measured mean
   concurrency of 1.21 on a median 15 delegations per run.
+  **An interrupted run returns** (`AgenticRun._invoke_abandonable`,
+  `nodes/abandon.py`): `graph.invoke` runs on a worker thread, so Ctrl-C or a
+  timeout reaches the run at once. It sets every node's abandon flag and waits
+  a bounded 30 s. Each node thread then raises `RunAbandoned` at its next tool
+  call or `Wait` loop. A thread stuck in a model call ends when the call
+  returns. A `RUN_ABANDONED` diagnostics row records the graph thread state
+  and the delegations left Working.
 - **Status:** core.
 
 ## B. The deliverable (pipeline.ipynb)

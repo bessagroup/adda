@@ -2566,6 +2566,7 @@ class DelegationTools:
         cond = node._get_delegator_cond(my_identity)
         _tick, _n = 1.0, 0
         while True:
+            node._raise_if_abandoned()
             with node._registry_lock:
                 ready = [
                     (i, e) for i, e in node._registry.items()
@@ -2713,6 +2714,7 @@ class DelegationTools:
                     f"still working -- Wait({delegation_id!r}) again to "
                     "keep waiting]")
             while t.is_alive():
+                node._raise_if_abandoned()
                 t.join(timeout=_NOTICE_POLL_S)
                 text, woke = self._drain_while_waiting()
                 prefix += text

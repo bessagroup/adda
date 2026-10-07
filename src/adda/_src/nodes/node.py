@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     from ..runtime.graph_state import AgenticState
 
 from ..infra.delegation_log import DelegationLog
+from .abandon import RunAbandoned
 from .critic_gate import CriticGateMixin
 from .lifecycle import LifecycleMixin
 from .orchestration import OrchestrationMixin
@@ -143,6 +144,11 @@ class Node(
         """Take one turn. Every node runs the same delegate-or-close loop."""
         return self._orchestrate(state)
 
+    def _raise_if_abandoned(self) -> None:
+        """End the calling thread once the run has stopped waiting for it."""
+        if self._abandon.is_set():
+            raise RunAbandoned(self._name)
+
     def _init_recording(self) -> None:
         """Establish the state ``RecordingMixin`` writes to, on EVERY node.
 
@@ -156,6 +162,7 @@ class Node(
         itself, to the same values, so an orchestrating node is unchanged.
         """
         self._registry_lock = threading.Lock()
+        self._abandon = threading.Event()
         self._notifications: list[str] = []
         self._notifications_lock = threading.Lock()
         self._error_counts: dict[str, int] = {}
