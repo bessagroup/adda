@@ -427,7 +427,7 @@ class AgenticRun:
         self, host: str = "127.0.0.1", port: int = 8765,
         allow_network: bool = False,
     ) -> None:
-        """Launch the read-only live web viewer for this study's runs
+        """Launch the live web viewer for this study's runs
         (blocking — run in a separate terminal/process from ``execute()``,
         the same way ``render_architecture()`` is a separate opt-in step,
         never called automatically). Requires the ``viewer``

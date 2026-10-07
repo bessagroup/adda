@@ -1,4 +1,4 @@
-"""Public entry point for the read-only live run viewer.
+"""Public entry point for the live run viewer.
 
     python -m adda.viewer <study-dir>
 

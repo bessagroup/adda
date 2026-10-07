@@ -1,4 +1,4 @@
-"""Read-only live web viewer for adda agentic runs.
+"""Live web viewer for adda agentic runs.
 
 Optional feature — requires the ``viewer`` extra (``pip install
 adda[viewer]``). Deliberately NO eager imports here: ``readers.py`` (pure

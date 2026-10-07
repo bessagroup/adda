@@ -1,4 +1,4 @@
-"""Starlette app for the read-only live run viewer.
+"""Starlette app for the live run viewer.
 
 Requires the ``viewer`` extra (``pip install adda[viewer]``) — imported
 lazily by every caller (``agent_runtime.py``'s ``serve_viewer()``,

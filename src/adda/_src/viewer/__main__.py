@@ -1,4 +1,4 @@
-"""CLI entry point for the read-only live run viewer.
+"""CLI entry point for the live run viewer.
 
 Usage
 -----
@@ -29,7 +29,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m adda.viewer",
         description=(
-            "Serve a read-only live web viewer for adda agentic runs."
+            "Serve a live web viewer for adda agentic runs."
         ),
     )
     parser.add_argument(
