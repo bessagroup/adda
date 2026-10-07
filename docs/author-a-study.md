@@ -41,126 +41,17 @@ unverifiable answer. Cover:
 
 ## `config.yaml` (optional)
 
-Every setting has a default, so you can omit this file entirely. The settings you
-can set:
-
-| key | meaning | default |
-|---|---|---|
-| `model` | which language model to use | the backend's default |
-| `backend` | `claude`, `ollama`, `openrouter`, or `vllm` | `claude` |
-| `budget` | soft wall-clock limit, `"HH:MM:SS"` or seconds (a nudge, not a hard stop) | none |
-| `eval_budget` | soft cap on how many real evaluations the run may spend | none |
-| `budget_usd` | **hard** cost ceiling — halts the run when spend reaches it (resumable: raise it and resume). Inactive on a backend with no per-call cost data (e.g. Ollama) | none |
-| `required_deliverables` | extra files that must exist before the run can finish | none |
-| `evaluator` | how a design gets scored, see below | honor-system |
-| `objective` | which output is optimised, in which direction, and which 0/1 column marks a design feasible; see below | undeclared |
-| `funnel` | the 0/1 outputs the viewer's stage funnel counts, in order; see below | none |
-| `training_data` | a precomputed pool used only as training data, with no live oracle (for a surrogate-only study) | none |
-| `base_url` | the model server's endpoint, on a backend that has one; see [Customizing a run](customizing-a-run.md#openai-compatible-endpoints-openrouter-vllm-others) | the backend's default |
-| `nodes` | per-agent `tools`, `model`, `backend` and `base_url`; see [Customizing a run](customizing-a-run.md#changing-one-agents-tools-nodes-in-configyaml) | each agent's own |
-| `llm_slurm` | serve the model on a SLURM GPU allocation; see [Customizing a run](customizing-a-run.md#a-local-model-on-a-slurm-gpu-node-vllm) | off |
-| `mem_cap` | hard memory cap per delegation, in bytes. Absent: the SLURM job's memory allocation, else a built-in default | see description |
-| `review_statement` | review `PROBLEM_STATEMENT.md` before the run; advisory only. `false` skips it | `true` |
-| `runtime` | run knobs — debug capture, timeouts, retry, limits; see below | all defaulted |
-| `study` | settings for your own scripts. adda never reads inside it | none |
-
-adda reads exactly the keys above. Any other top-level key stops the run at
-start with an error that suggests the closest known key, so a typo cannot pass
-silently. Put your own settings under `study:`.
-
-See [Customizing a run](customizing-a-run.md#reference-the-available-backends) for the
-`backend`/`model` details, including setting them per agent instead of for
-the whole run.
-
-### `runtime:` — the run knobs
-
-Everything that tunes *how the run executes* rather than *what it is asked to
-do* lives in one nested block. Every knob has a working default, so the block
-is optional; set one only when you have a reason to.
+Every setting has a default, so you can omit this file entirely. The
+[config reference](config-reference.md) lists every key, its meaning, and its
+default. The keys you set most often are:
 
 ```yaml
-runtime:
-  debug: true            # write transcripts/diagnostics under runs/<ts>/debug/
-  recursion_limit: 200   # LangGraph step ceiling for one run
+model: claude-haiku-4-5-20251001   # which language model to use
+eval_budget: 200                   # soft cap on real evaluations
+budget: "01:00:00"                 # soft wall-clock limit
 ```
 
-`config.yaml` is the source of truth for these. The environment sets no knob: an
-`F3DASM_<KEY>` variable left exported in a shell stops the run at start with an
-error naming it, so no arm runs under a label it does not have. A key this
-table does not list is ignored with a warning at startup, so a typo tells you
-rather than silently reverting to the default.
-
-| key | meaning | default |
-|---|---|---|
-| `context_window` | tokens the backend will accept. `0` asks the server (Ollama's served `num_ctx`, vLLM's `max_model_len`); set it to pin the value or to sweep it. The resolved number AND its source are recorded | `0` |
-| `context_policy` | how one agent turn is kept inside the served context window (OpenAI-compatible backends only — the Claude SDK does its own and does it better). `compact` summarises the middle of the conversation, so a delegation's RESULT survives even when its prose does not; `trim` drops those messages instead — free and deterministic, but blind to what it discards. There is no "off": an unmanaged context is the crash this exists to stop | `compact` |
-| `max_output_tokens` | tokens ONE model reply may generate. `0` derives it from the context window (a quarter of it, capped at 65536) — the same share the trim reserves for the reply; `-1` removes the cap. Bounds a looping turn that would otherwise generate for hours on a large-window server | `0` |
-| `debug` | capture full transcripts, diagnostics and per-delegation logs under `runs/<ts>/debug/`. Required for the run-analysis workflow | `false` |
-| `recursion_limit` | LangGraph step ceiling for one run | `2000` |
-| `max_awake_nodes` | how many nodes may be awake at once, the strategizer included (it always holds one reserved slot; workers share the rest). A delegation over the cap is reported `QUEUED: too many nodes working (N/N)` and starts, first come first served, when a slot frees. A node that blocks in `Wait` on its own queued child, or whose report awaits review, hands its slot back meanwhile. A critic call runs inside its caller's slot. **Memory scales with it: 5 awake nodes needs `--mem >= 32G` on Slurm** (run 20260928T225501 peaked at 16.76 of 16 GB with three awake) | `5` |
-| `max_consecutive_errors` | consecutive failures to one target before the run halts | `12` |
-| `run_backstop_multiple` | multiple of the wall budget after which the run is asked to wind down and closes `backstop_time` (force-closed only if the wind-down overruns) | `2.0` |
-| `delegate_cutoff_multiple` | multiple of the wall budget past which NEW delegations are refused (in-flight ones are never touched); must stay below `run_backstop_multiple` or it can never fire. `0` disables | `1.5` |
-| `followup_wait_s` | how long a `FollowUp` waits for a human answer | `600` |
-| `stop_grace_s` | only with the watchdog launcher: seconds BEFORE its deadline at which it asks the run to wind down (a stop request in `debug/`) instead of waiting to kill it, so agents hand over real retrospectives. On unless you change it: unset means a tenth of the deadline, at most 900 s. The deadline does not move. Must be shorter than the deadline; `0` disables | `min(900, deadline/10)` |
-| `resume_close_with_retrospectives` | on a resume whose process was lost (crash, SIGKILL, OOM), wind the run down at once instead of continuing it, so the entry node gives the retrospective the crash cost it (TIME bullet included); closes `crashed`. Workers that died in flight are logged as missing (`RETROSPECTIVES_MISSING`, "process lost"); nothing is invented for them | `false` |
-| `allow_arm_drift` | a resume under different ablation arms than the run started with is refused, since a run measured under two arms belongs to neither. Set this to accept the mix; the arms the run started with stay recorded as `arms_initial` in `run_config.json` | `false` |
-| `peer_message_wait_s` | how long `SendMessage(wait_for_reply=True)` waits for a peer's reply before returning (spec 12, behind `peer_interaction`) | `300` |
-| `llm_retry_max` | retry attempts for a failed model call | `5` |
-| `llm_retry_base` | base seconds for retry backoff | `2.0` |
-| `llm_stream_idle_timeout` | seconds of stream silence before a call is abandoned (`0` disables) | `600.0` |
-| `llm_tool_idle_timeout` | seconds a single tool call may stall (`0` disables) | `0.0` |
-| `bash_timeout_s` | seconds a shell command may run before it is moved to the background instead of blocking the agent (the agent can still pass its own `timeout`, capped at 600 s). Same default on every backend | `120.0` |
-| `llm_max_buffer_mb` | cap on a single response buffered in memory | `30.0` |
-| `thinking_display` | `summarized` or `omitted`: whether Claude's thinking comes back as a readable summary (visible in transcripts and the viewer) or empty. Newer models default to `omitted`. Billing is identical either way. Applies only to models that support adaptive thinking (Opus/Sonnet 4.6+ and the 5.x families); others are untouched | `summarized` |
-| `llm_metadata_fetch` | look up model metadata (context window, pricing) at startup | `true` |
-| `llm_metadata_timeout_s` | seconds to wait for that lookup | `8.0` |
-| `llm_quantization` | quantization hint for a locally-served model | none |
-
-**Literature retrieval.** Only relevant when the graph has a literature
-reviewer.
-
-| key | meaning | default |
-|---|---|---|
-| `retrieval_mode` | corpus ranking strategy: `auto` (RRF when BM25+dense are available, else BM25, else substring), `hybrid`, `bm25`, `substring`. Only `auto` degrades — an explicitly requested mode that cannot be satisfied errors rather than silently falling back to a different one | `auto` |
-| `citation_weighting` | multiply BM25 scores by `1 + log10(citations+1)` before rank fusion. A popularity prior on the lexical side only; untested | `true` |
-| `launch` | how the viewer starts a run for a study that has its own launcher (an `sbatch` wrapper, say): a mapping with `command` (argument list, run in the study directory), `id_pattern` (regex with one group, matched against the launcher's output to capture the job id), `stop_command` (argument list containing `{id}`; needs `id_pattern`) and `timeout_s` (default 120). The viewer runs only these commands and stops only an id it captured. Absent: the viewer offers no launcher control. Read by the viewer, not by the run | none |
-
-#### Ablation switches — leave these alone unless you are running an experiment
-
-These are the switchable parts of the scaffolding, and they are here to be
-*measured*, not tuned: every one defaults to on, and turning one off makes a
-normal run worse by construction. They are the arms of an ablation — the
-question "does this machinery earn its cost" — so an experiment sweeps them
-and a study author leaves them alone.
-
-To run an arm without editing the committed study, pass it on the command line: `python -m adda studies/example_study --set hypothesis_ledger=false --set verdict_validator=false` (repeatable; `python -m adda.watchdog` takes the same flag and forwards it). A `--set` outranks `config.yaml` (the environment sets no knob), an unknown knob is an error, and the value lands in `run_config.json` like any explicit knob. For a replicate sweep, launch each replicate from a clean copy of the study (no `runs/`, no `workspace/`, no archived `pipeline_*.ipynb`), because the literature notes under `runs/lit_reviewer_notes` and the archives are study-scoped and would otherwise carry one arm's work into the next.
-
-Each one withholds everything it owns at once: its runtime object, the tools
-that exist only because of it, and the prompt section that tells the agent to
-use them. An agent in an arm is never left calling a tool that is gone. How
-that is wired — and how to declare a new one — is in
-[Customizing a run](customizing-a-run.md#turning-a-piece-of-the-scaffolding-off-feature).
-
-(`pipeline_deliverable` is the exception that is also an ordinary study
-choice: a study with no notebook deliverable legitimately turns it off.)
-
-| key | meaning | default |
-|---|---|---|
-| `hypothesis_ledger` | the run's falsifiable-hypothesis record. Off withholds its three tools and its prompt section too, so the agent is never told to use a tool that is gone. PARTIAL: the Popperian workflow is argued throughout the strategizer's method, which stays | `true` |
-| `milestones_enabled` | run the process-milestone gate | `true` |
-| `science_monitor` | the runtime drift monitor that flags unledgered evals and unstamped rows, and escalates repeats to the critic | `true` |
-| `f3dasm_api` | let the implementer and datagenerator look up the INSTALLED f3dasm's API (`ConsultF3dasm`): signatures, docstrings and source, read off the package the run actually executes against, so it cannot go stale. Off withholds the tool and the one prompt section that instructs its use; the CI-verified `<f3dasm_api>` excerpt stays, so the arm is "excerpt only" — the state before the tool existed | `true` |
-| `verdict_validator` | an independent judge reviews each `HypothesisUpdate` verdict against the falsification charter and appends a concern when it disagrees. Advisory — it annotates, never blocks. Off, `HypothesisUpdate` behaves as it did before the judge existed: no judge call, no note, no diagnostics. It judges nothing without the ledger, so `hypothesis_ledger: false` requires `verdict_validator: false` too: a run that leaves it on refuses to start | `true` |
-| `doe_playbook` | the implementer's DoE method prior: the space-filling recipe, the eval-budget arithmetic and the surrogate-guided exploit loop. Off leaves the f3dasm API and the oracle contract intact and makes the agent choose its own method | `true` |
-| `pipeline_deliverable` | require `pipeline.ipynb` as the deliverable; turn off for a study with no notebook | `true` |
-| `reproduction_gate` | enforce Done()'s reproduction gate: before a run can close GATED, the deliverable must reproduce lazily against the canonical store (zero new evals, no modified rows). Requires `pipeline_deliverable` — that knob decides whether a notebook is required at all; this one decides whether an authored notebook must additionally prove it reproduces. A study with `pipeline_deliverable: false` must set `reproduction_gate: false` too, or the run refuses to start | `true` |
-| `peer_interaction` | the `SendMessage` peer/human messaging tool (spec 12): every delegation report opens for the delegator's review instead of finalizing on delivery, which replaces the old `Confer`/`Reply`/worker-`FollowUp`/`ReportProgress` surface. Off is the "no peer messaging" arm: no `SendMessage`, reports finalize on delivery, and only the entry node keeps a human channel (`FollowUp`) | `true` |
-| `budget_notes` | the in-band budget text an agent reads: the per-turn constraint snapshot, the budget warnings and wrap-up ladder, and the snapshot on a delegation report and a worker's task message. Budgets stay soft and the cost backstop and the critic's constraints are unchanged | `true` |
-| `delegation_contract` | the `<delegation_contract>` rules in every worker's preamble (numbers come from tool output, report failures, do not extend the task) | `true` |
-| `reprompt_unfinished` | the bounded re-prompt (up to 3) after a turn ends without an accepted `Done()`, and the UNGATED banner on the run summary. Off, the run ends at the first such turn | `true` |
-
-Every run records the arms it ran under, defaults included, in `run_config.json` (`arms`), in `run_status.json` and in the `arm_*` columns of `studies/run_ledger.csv`; `runtime` there lists only the knobs somebody set, so read `arms` to tell an all-defaults baseline from a run nobody labelled.
+Put settings for your own scripts under `study:`, which adda never reads.
 
 ## How designs get evaluated (the evaluator)
 

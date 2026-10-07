@@ -21,3 +21,6 @@ config
 repo
 subclassing
 docstrings
+implementer
+delegator
+substring

@@ -289,7 +289,7 @@ runtime:
 or pass it as `AgenticRun(runtime={"science_monitor": False})`.
 Precedence is explicit argument, then `config.yaml`, then the feature's own
 `default`; the environment sets no knob. The switches are listed together under
-*Ablation switches* in [Authoring a study](author-a-study.md).
+*Ablation switches* in the [config reference](config-reference.md#ablation-switches).
 
 What that one line does, with no other change anywhere:
 
