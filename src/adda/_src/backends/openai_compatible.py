@@ -22,7 +22,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from ..infra.telemetry import normalized_usage
+from ..infra.telemetry import call_shape, normalized_usage
 from . import context_budget, context_compaction
 from .base import DEFAULT_TOOLS
 
@@ -1364,7 +1364,5 @@ class OpenAICompatibleAdapter:
             "total_cost_usd": None,  # not available from open-weight/self-hosted
             # input_tokens above is a sum over the turn's model calls; these
             # show what one call read: how many calls, the first, the largest.
-            "n_calls": len(call_inputs),
-            "first_call_input": call_inputs[0] if call_inputs else 0,
-            "max_call_input": max(call_inputs, default=0),
+            **call_shape(call_inputs),
         }

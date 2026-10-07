@@ -1037,3 +1037,42 @@ def test_claude_retry_attempts_sum_in_the_schema():
     out = _combine_attempt_usage([a, b])
     assert (out["fresh_input"], out["cache_read"], out["cache_write"],
             out["output"]) == (5, 30, 2, 8)
+
+
+def test_claude_and_openai_backends_write_the_same_call_shape():
+    """Both backends report n_calls / first_call_input / max_call_input, and
+    "input" means the whole prompt of one call, cache included."""
+    from types import SimpleNamespace
+
+    from adda._src.backends.ollama import OllamaAdapter
+
+    _install_fake_sdk(query=None)
+    claude = _get_adapter()("claude-3", "sys", None, [])
+    claude._settle_usage(None, {
+        "m1": {"input_tokens": 10, "cache_read_input_tokens": 90,
+               "cache_creation_input_tokens": 0, "output_tokens": 5},
+        "m2": {"input_tokens": 50, "cache_read_input_tokens": 300,
+               "cache_creation_input_tokens": 50, "output_tokens": 5},
+    }, None)
+
+    def ai(n_in):
+        return SimpleNamespace(usage_metadata={
+            "input_tokens": n_in, "output_tokens": 5,
+            "input_token_details": {}})
+
+    openai = OllamaAdapter(model="m", system_prompt="s")
+    seed = [SimpleNamespace(usage_metadata=None)]
+    openai._capture_usage(seed, {"messages": seed + [ai(100), ai(400)]})
+
+    shape = ("n_calls", "first_call_input", "max_call_input")
+    assert [claude.last_usage[k] for k in shape] == [2, 100, 400]
+    assert [openai.last_usage[k] for k in shape] == [2, 100, 400]
+
+
+def test_claude_retry_attempts_combine_the_call_shape():
+    from adda._src.backends.claude import _combine_attempt_usage
+    out = _combine_attempt_usage([
+        {"n_calls": 2, "first_call_input": 100, "max_call_input": 400},
+        {"n_calls": 3, "first_call_input": 90, "max_call_input": 700}])
+    assert (out["n_calls"], out["first_call_input"],
+            out["max_call_input"]) == (5, 100, 700)

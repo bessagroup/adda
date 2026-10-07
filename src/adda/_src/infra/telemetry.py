@@ -142,6 +142,17 @@ _TOKEN_FIELDS = (
 _CALL_SHAPE_FIELDS = ("n_calls", "first_call_input", "max_call_input")
 
 
+def call_shape(call_inputs: list[int]) -> dict:
+    """The per-call shape of a turn from each model call's WHOLE prompt size
+    (cached tokens included, whatever the backend's own ``input_tokens``
+    means). Both backends call this, so the three fields mean the same."""
+    return {
+        "n_calls": len(call_inputs),
+        "first_call_input": call_inputs[0] if call_inputs else 0,
+        "max_call_input": max(call_inputs, default=0),
+    }
+
+
 class Telemetry:
     """Per-run telemetry writer.  One instance per orchestrating node."""
 

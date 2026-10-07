@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ..infra.telemetry import normalized_usage
+from ..infra.telemetry import call_shape, normalized_usage
 from .base import DEFAULT_TOOLS, record_stream_diagnostic
 
 __all__ = ["ClaudeAdapter"]
@@ -272,7 +272,7 @@ def _combine_attempt_usage(attempts: list[dict] | None) -> dict:
     out: dict = {}
     for a in attempts:
         for k, v in a.items():
-            if k == "total_cost_usd":
+            if k in ("total_cost_usd", "first_call_input", "max_call_input"):
                 continue
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 out[k] = out.get(k, 0) + v
@@ -283,6 +283,10 @@ def _combine_attempt_usage(attempts: list[dict] | None) -> dict:
                         d[kk] = d.get(kk, 0) + vv
             else:
                 out[k] = v
+    shaped = [a for a in attempts if "max_call_input" in a]
+    if shaped:
+        out["first_call_input"] = shaped[0]["first_call_input"]
+        out["max_call_input"] = max(a["max_call_input"] for a in shaped)
     costs = [a.get("total_cost_usd") for a in attempts]
     out["total_cost_usd"] = (
         None if any(c is None for c in costs) else sum(costs))
@@ -1097,6 +1101,14 @@ class ClaudeAdapter:
             cache_read=u.get("cache_read_input_tokens"),
             cache_write=u.get("cache_creation_input_tokens"),
             output=u.get("output_tokens"))}
+        if _msg_usage:
+            # Claude's input_tokens excludes cache, so a call's whole prompt
+            # is the three input counts together.
+            self.last_usage.update(call_shape([
+                (m.get("input_tokens") or 0)
+                + (m.get("cache_read_input_tokens") or 0)
+                + (m.get("cache_creation_input_tokens") or 0)
+                for m in _msg_usage.values()]))
 
         self.last_session_id = (
             getattr(last_result, "session_id", None)
