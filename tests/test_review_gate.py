@@ -437,7 +437,8 @@ def test_wait_by_id_still_returns_the_open_reports_text():
 
     out = dt.Wait(did)
 
-    assert "OpenForReview" in out
+    assert "OPEN FOR REVIEW" in out
+    assert "approve=True" in out
     assert "A fine report." in out
 
 

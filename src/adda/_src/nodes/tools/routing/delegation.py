@@ -76,6 +76,17 @@ _MCP_ERROR_PATTERNS = (
 # (not node name) keeps it forward-compatible across node renames.
 
 
+def open_for_review_message(delegation_id: str, result: str) -> str:
+    """The one message every path gives for a report that is ready but not
+    yet approved (Delegate(wait=True), a status poll, a bare or named
+    Wait)."""
+    return (
+        f"[{delegation_id}] report ready but OPEN FOR REVIEW -- {result}"
+        f"\n\nSendMessage({delegation_id!r}, ..., approve=True) to "
+        "finalize it, or ask a question first."
+    )
+
+
 def _norm_target(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", (s or "").lower())
 
@@ -1740,12 +1751,8 @@ class DelegationTools:
                     _live = node._registry.get(delegation_id)
                     if _live is not None:
                         _live["waited"] = True
-                return (
-                    f"[{delegation_id}] report ready but OPEN FOR REVIEW "
-                    f"-- {entry.get('result', '')}\n\nSendMessage("
-                    f"{delegation_id!r}, ..., approve=True) to finalize "
-                    "it, or ask a question first."
-                )
+                return open_for_review_message(
+                    delegation_id, entry.get("result", ""))
             return f"Errored:\n{entry.get('result', '(no details)')}"
 
         if queue_reason:
@@ -2167,10 +2174,8 @@ class DelegationTools:
             # Delivering the full report text IS a "read" event (design
             # item 3's open question 3) -- mark it.
             entry["waited"] = True
-            return (
-                f"[{delegation_id}] report ready but OPEN FOR REVIEW -- "
-                f"{entry['result']}"
-            ) + _tail
+            return open_for_review_message(
+                delegation_id, entry["result"]) + _tail
         if status == "Revising":
             return (
                 f"[{delegation_id}] resuming its session to revise its "
@@ -2587,8 +2592,8 @@ class DelegationTools:
                     entry["waited"] = True
                     cp = entry.get("checkpoint", "")
                     if entry["status"] == "OpenForReview":
-                        body = (f"[{did}] report ready but OPEN FOR REVIEW "
-                                f"-- {entry.get('result', '')}")
+                        body = open_for_review_message(
+                            did, entry.get("result", ""))
                     else:
                         body = (f"[{did}] {entry['status']}\n\n"
                                 f"{entry.get('result', '')}")
@@ -2732,7 +2737,12 @@ class DelegationTools:
             if entry:
                 entry["waited"] = True
         cp = entry.get("checkpoint", "")
-        body = f"{entry.get('status', 'Unknown')}\n\n{entry.get('result', '')}"
+        if entry.get("status") == "OpenForReview":
+            body = open_for_review_message(
+                delegation_id, entry.get("result", ""))
+        else:
+            body = (f"{entry.get('status', 'Unknown')}\n\n"
+                    f"{entry.get('result', '')}")
         return prefix + body + (("\n\n" + cp) if cp else "")
 
     def _woken_early_note(self, my_identity: str) -> str:

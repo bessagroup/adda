@@ -15,6 +15,7 @@ waiting cannot make progress.
 """
 from __future__ import annotations
 
+import re
 import threading
 import time
 from pathlib import Path
@@ -293,3 +294,24 @@ def test_note_arriving_mid_wait_wakes_a_named_wait(tmp_path, monkeypatch):
         assert "mid-wait correction" in out and "still Working" in out, out
     finally:
         gate.set()
+
+
+def test_every_wait_path_gives_the_same_open_for_review_message(tmp_path):
+    """One state, one message: a bare Wait, a named Wait and a status poll
+    all tell the delegator how to approve an OPEN_FOR_REVIEW report."""
+    from adda._src.nodes.tools.routing.delegation import (
+        open_for_review_message,
+    )
+
+    def wait(i, *args, **kwargs):
+        _, Wait = _wait(tmp_path / str(i), {
+            "D001": {"status": "OpenForReview", "result": "the report"}})
+        out = Wait(*args, **kwargs)
+        # An <adda-note> is a separate pending-items notice, not the report.
+        return re.sub(r"<adda-note>.*?</adda-note>\s*", "", out, flags=re.S)
+
+    expected = open_for_review_message("D001", "the report")
+    assert "approve=True" in expected
+    assert wait(0) == expected
+    assert wait(1, "D001") == expected
+    assert wait(2, "D001", block=False) == expected

@@ -127,7 +127,7 @@ def test_past_cutoff_wait_and_done_still_work():
     wait_out = n.adapter.closure_tools["Wait"](delegation_id=did)
     assert "refused" not in wait_out
     assert "it worked" in wait_out
-    assert "OpenForReview" in wait_out
+    assert "OPEN FOR REVIEW" in wait_out
 
     # Approving it (not a new Delegate) must work past the cutoff too.
     approve_out = approve_delegation(n.adapter.closure_tools, did)
