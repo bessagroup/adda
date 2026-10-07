@@ -15,8 +15,9 @@ jobs:
   wet-docs-smoke:
     runs-on: ubuntu-latest
     # Backstop above the runtime's own watchdog/wall-clock budget, in case a
-    # free-tier model gets stuck rather than erroring cleanly.
-    timeout-minutes: 45
+    # free-tier model gets stuck rather than erroring cleanly. Two tests at
+    # 25 min each (20 min budget + 5 min margin) plus install fit in 60.
+    timeout-minutes: 60
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

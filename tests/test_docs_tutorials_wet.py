@@ -26,8 +26,6 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.integration
-
 # OpenRouter's own free-tier meta-router: it auto-selects among whichever
 # free models are currently healthy, rather than pinning to one specific
 # `:free` model that can have a bad day (a single pinned model, gpt-oss-20b:
@@ -42,6 +40,13 @@ _FREE_MODEL = os.environ.get("WET_TEST_MODEL", "openrouter/free")
 # tight enough that a stuck/looping run doesn't burn the whole scheduled slot.
 _EVAL_BUDGET = 60
 _WALLCLOCK_BUDGET_S = 20 * 60
+
+# The run's own wall-clock budget decides, not the repo-wide 120 s unit-test
+# bound; the margin covers startup and teardown.
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.timeout(_WALLCLOCK_BUDGET_S + 5 * 60),
+]
 
 
 def _require_openrouter_key() -> None:
