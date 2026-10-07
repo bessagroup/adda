@@ -13,7 +13,9 @@ daily + manual dispatch), not the regular push/PR `Tests` workflow.
 The bar this enforces is deliberately narrow: does the tutorial, followed
 literally, crash? Whether the run closes GATED or UNGATED is NOT asserted —
 a free/weaker model may legitimately not clear the full science gate, and
-that is a model-capability signal, not a docs or runtime bug. Run this
+that is a model-capability signal, not a docs or runtime bug. Likewise a
+run still working when the clock ends passes only if its records show it
+alive (see _assert_timed_out_while_healthy); the output says so. Run this
 manually with:
     OPENROUTER_API_KEY=... uv run pytest tests/test_docs_tutorials_wet.py \
         -v -s --no-cov -m integration
@@ -54,6 +56,38 @@ def _require_openrouter_key() -> None:
         pytest.skip("OPENROUTER_API_KEY not set — wet docs-tutorial smoke test skipped")
 
 
+def _assert_timed_out_while_healthy(study_dir: Path) -> None:
+    """A free model may still be working when the clock ends. That is not a
+    crash, but only a run the records show alive may pass this way: the stop
+    reason is the timeout itself, the store exists, at least one delegation
+    finished, and nothing in the run's own log is a traceback."""
+    import json
+
+    run_dirs = sorted((study_dir / "runs").iterdir())
+    assert run_dirs, "timed out and no runs/<timestamp>/ directory exists"
+    run_dir = run_dirs[-1]
+    debug = run_dir / "debug"
+    status = json.loads((debug / "run_status.json").read_text())
+    reason = str(status.get("reason", ""))
+    assert reason.startswith("Failed: Timeout"), (
+        f"the run stopped for a reason other than the clock: {reason!r}")
+    assert (run_dir / "experiment_data").exists(), (
+        "timed out and the run has no experiment store")
+    rows: dict[str, dict] = {}
+    for line in (debug / "delegation_log.jsonl").read_text().splitlines():
+        if line.strip():
+            row = json.loads(line)
+            rows[row["id"]] = row
+    done = [i for i, r in rows.items() if r.get("status") == "DONE"]
+    assert done, f"timed out with no delegation DONE (rows: {sorted(rows)})"
+    log = (debug / "run.log").read_text(encoding="utf-8", errors="replace")
+    assert "Traceback (most recent call last)" not in log, (
+        "timed out, but the run log holds a traceback")
+    print(f"\n[wet docs smoke] {study_dir.name}: timed out while healthy "
+          f"after {status.get('wall_s')}s; the run did not close "
+          f"({len(done)} delegation(s) DONE: {', '.join(sorted(done))})")
+
+
 def _run_and_check(study_dir: Path) -> None:
     """Execute study_dir through a real AgenticRun and assert it didn't crash.
 
@@ -64,13 +98,20 @@ def _run_and_check(study_dir: Path) -> None:
     """
     from adda import AgenticRun
 
-    report = AgenticRun(
+    run = AgenticRun(
         study_dir=study_dir,
         model=_FREE_MODEL,
         eval_budget=_EVAL_BUDGET,
         budget=_WALLCLOCK_BUDGET_S,
         interactive=False,
-    ).execute()
+    )
+    try:
+        report = run.execute()
+    except pytest.fail.Exception as exc:
+        if "Timeout" not in str(exc):
+            raise
+        _assert_timed_out_while_healthy(study_dir)
+        return
 
     assert report, "AgenticRun.execute() returned an empty report"
     assert (study_dir / "pipeline.ipynb").exists(), (
