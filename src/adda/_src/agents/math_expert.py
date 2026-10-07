@@ -4,7 +4,7 @@ See internal/specs/10-math-expert-agent.md for the design rationale and
 src/adda/_src/knowledge/entries/0011-symbolic-derivation-patterns.md for
 worked-example guidance (consultable via ConsultHandbook). Not part of
 _default_graph() — like DebuggerAgent, this is exported and available, and
-a study opts into it by building its own Graph (docs/customizing-a-run.md).
+a study opts into it by building its own Graph (docs/customize-agents-and-tools.md).
 """
 from __future__ import annotations
 

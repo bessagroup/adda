@@ -23,9 +23,9 @@ reads.
 | `objective` | Which output is optimized, in which direction, and which 0/1 column marks a design feasible. See [Declaring the objective](author-a-study.md#declaring-the-objective). | Undeclared. |
 | `funnel` | The 0/1 outputs that the viewer's stage funnel counts, in order. See [Declaring the objective](author-a-study.md#declaring-the-objective). | none |
 | `training_data` | A precomputed pool used only as training data, with no live oracle. Use it for a surrogate-only study. | none |
-| `base_url` | The model server's endpoint, on a backend that has one. See [Customize a run](customizing-a-run.md#openai-compatible-endpoints-openrouter-vllm-others). | The backend's default. |
-| `nodes` | Per-agent `tools`, `model`, `backend`, and `base_url`. See [Customize a run](customizing-a-run.md#changing-one-agents-tools-nodes-in-configyaml). | Each agent's own. |
-| `llm_slurm` | Serve the model on a Slurm GPU allocation. See [Customize a run](customizing-a-run.md#a-local-model-on-a-slurm-gpu-node-vllm). | Off. |
+| `base_url` | The model server's endpoint, on a backend that has one. See [Use a different model or backend](use-a-different-model-or-backend.md#openai-compatible-endpoints-openrouter-vllm-others). | The backend's default. |
+| `nodes` | Per-agent `tools`, `model`, `backend`, and `base_url`. See [Customize agents and tools](customize-agents-and-tools.md#changing-one-agents-tools-nodes-in-configyaml). | Each agent's own. |
+| `llm_slurm` | Serve the model on a Slurm GPU allocation. See [Use a different model or backend](use-a-different-model-or-backend.md#a-local-model-on-a-slurm-gpu-node-vllm). | Off. |
 | `mem_cap` | Hard memory cap per delegation, in bytes. When absent, the cap is the Slurm job's memory allocation, else a built-in default. | See meaning. |
 | `review_statement` | Review `PROBLEM_STATEMENT.md` before the run. The review is advisory only. `false` skips it. | `true` |
 | `runtime` | Run knobs: debug capture, timeouts, retry, and limits. See the [Runtime reference](runtime-reference.md). | All defaulted. |
@@ -33,6 +33,6 @@ reads.
 
 For the `backend` and `model` details, including how to set them per agent
 instead of for the whole run, see
-[Customize a run](customizing-a-run.md#reference-the-available-backends).
+[Use a different model or backend](use-a-different-model-or-backend.md#the-available-backends).
 
 The `runtime:` block has its own page: the [Runtime reference](runtime-reference.md).

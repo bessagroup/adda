@@ -20,7 +20,7 @@ export ANTHROPIC_API_KEY=sk-...
 ```
 
 See [Installation](install.md). For a non-Claude backend, see
-[Customizing a run](customizing-a-run.md#reference-the-available-backends).
+[Use a different model or backend](use-a-different-model-or-backend.md#the-available-backends).
 
 **The evaluator entrypoint doesn't resolve.** `evaluator.entrypoint` is
 `path/to/file.py:attribute`, relative to the study directory — a path and a

@@ -276,7 +276,7 @@ to `_default_graph()`'s standard topology. Checked the actual precedent for
 (`adda.__init__.__all__`) but never instantiated inside `_default_graph()`
 — confirmed by grep, it appears nowhere else in `_src`. A user opts into it
 by building their own `Graph`, the documented pattern in
-`docs/customizing-a-run.md`. Silently adding a 6th node to the default
+`docs/customize-agents-and-tools.md`. Silently adding a 6th node to the default
 topology would change every existing study's graph without anyone asking
 for it — the literal opposite of "opt-in." `MathExpertAgent` follows the
 same precedent: exported from `adda.__init__`, never added to

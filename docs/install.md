@@ -33,7 +33,7 @@ export ANTHROPIC_API_KEY=sk-...
 
 Don't have Claude access at all, or want to use a different model? adda
 also drives Ollama, any OpenAI-compatible endpoint, and vLLM: see
-[Customizing a run](customizing-a-run.md#reference-the-available-backends).
+[Use a different model or backend](use-a-different-model-or-backend.md#the-available-backends).
 
 ## Optional extras
 

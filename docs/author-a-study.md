@@ -144,7 +144,7 @@ in there and how to read it.
 Everything above is `config.yaml` and `PROBLEM_STATEMENT.md`; the graph itself
 (which agents exist, how they delegate), each agent's system prompt, and each
 agent's backend/model are Python-level extension points instead. See
-[Customizing a run](customizing-a-run.md) if the built-in strategizer and
+[Customize agents and tools](customize-agents-and-tools.md) if the built-in strategizer and
 four specialists aren't the shape your problem needs.
 
 ## Before a long run, check

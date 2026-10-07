@@ -61,6 +61,7 @@ plugins:
             'watching-a-run.md': 'watch-and-steer-a-run.md'
             'reading-a-run.md': 'read-a-runs-output.md'
             'troubleshooting.md': 'troubleshoot.md'
+            'customizing-a-run.md': 'customize-agents-and-tools.md'
     - mkdocstrings:
         handlers:
             python:
@@ -90,11 +91,13 @@ nav:
         - 'Author a study': 'author-a-study.md'
         - 'Watch and steer a run': 'watch-and-steer-a-run.md'
         - "Read a run's output": 'read-a-runs-output.md'
-        - 'Customize a run': 'customizing-a-run.md'
+        - 'Use a different model or backend': 'use-a-different-model-or-backend.md'
+        - 'Customize agents and tools': 'customize-agents-and-tools.md'
         - 'Troubleshoot': 'troubleshoot.md'
     - Concepts:
         - 'The permission graph': 'permission-graph.md'
         - 'How a run is kept honest': 'how-a-run-is-kept-honest.md'
+        - 'Features': 'features.md'
     - Reference:
         - 'Configuration reference': 'config-reference.md'
         - 'Runtime reference': 'runtime-reference.md'

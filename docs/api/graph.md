@@ -1,7 +1,7 @@
 # Graph and state
 
 The agent topology: nodes wired by edges, entered at a hub. See
-[Customizing a run](../customizing-a-run.md) for the narrative version.
+[Customize agents and tools](../customize-agents-and-tools.md) for the narrative version.
 
 ::: adda.Graph
 

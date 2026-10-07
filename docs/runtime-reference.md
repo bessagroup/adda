@@ -85,7 +85,7 @@ Each switch withholds everything it owns at once: its runtime object, the tools
 that exist only because of it, and the prompt section that tells the agent to
 use them. An agent in an arm is never left calling a tool that is gone. For how
 that is wired, and how to declare a new switch, see
-[Customize a run](customizing-a-run.md#turning-a-piece-of-the-scaffolding-off-feature).
+[Features](features.md).
 
 `pipeline_deliverable` is the exception that is also an ordinary study choice.
 A study with no notebook deliverable can legitimately turn it off.
