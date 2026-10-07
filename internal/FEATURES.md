@@ -134,6 +134,18 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   best-rows table shows it only when revisions are mixed. Replay scope stays
   revision-blind. Run 20261007T002015 stored 150 rows of a broken oracle and
   skipped 1050 corrected re-evaluations before this existed.
+  **Oracle edit notice** (`evaluation/oracle_edits.py`, called by
+  `get_evaluator` under delegation-scope dedup): the run keeps the last revision
+  it saw per oracle in `debug/oracle_revisions.json`. A new revision is reported
+  once as `[ORACLE EDITED — D00x]`, to the evaluating delegation (pending-notice
+  bridge) and to the entry node (`Node._drain_entry_notices`, at its next
+  tool call), plus an `ORACLE_EDITED` diagnostics row (owner, editor, candidates,
+  both revisions). The owner is the delegation whose registration set the
+  entrypoint (`run_config.evaluator_owner`, written by
+  `register_evaluator_entrypoint(owner=)`). The editor is the one delegation the
+  delegation log shows running when the oracle files last changed, else "editor
+  unknown" with the candidates listed. Silent when the editor is the owner (or
+  the evaluator, for an oracle nobody registered). Never blocks.
 - **Where:** `science_monitor.py` (`_check_unledgered`, `_check_unstamped_rows`,
   `_check_duplicate_evaluations`); `ledger_summary.py` `unstamped_row_count`,
   `duplicate_eval_stats`; `nodes/tools/routing/delegation.py` `Wait()`

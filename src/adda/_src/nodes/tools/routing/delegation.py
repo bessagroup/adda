@@ -1193,6 +1193,7 @@ class WorkerSession:
                     _m["attr"],
                     output_names=_m.get("output_names"),
                     namespace=_ns,
+                    owner=delegation_id,
                 )
             self._check_objective_columns(
                 _run_dir, _m.get("output_names"), _ns, delegation_id)

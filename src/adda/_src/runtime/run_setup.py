@@ -246,6 +246,7 @@ def _init_canonical_store(
             "evaluator_output_names", eval_cfg.get("output_names")),
         "evaluator_lookup": existing.get(
             "evaluator_lookup", eval_cfg.get("lookup")),
+        "evaluator_owner": existing.get("evaluator_owner"),
         # Resource-governor knobs read by the in-process governor at the eval
         # boundary (get_evaluator/InstrumentedDataGenerator). eval_budget is a
         # SOFT cap (nudge only); mem_cap_bytes is the one HARD cap (host safety).
@@ -280,6 +281,7 @@ def register_evaluator_entrypoint(
     attr: str,
     output_names: list | None = None,
     namespace: str | None = None,
+    owner: str | None = None,
 ) -> str:
     """Register an agent-authored DataGenerator as an oracle.
 
@@ -303,6 +305,10 @@ def register_evaluator_entrypoint(
         Name of the callable or ``DataGenerator`` subclass inside that file.
     output_names : list or None, optional
         Output column names — required when ``attr`` is a bare callable.
+    owner : str or None, optional
+        The delegation whose registration this is. Recorded as
+        ``evaluator_owner``: the delegation an oracle edit by someone else is
+        reported against (see ``evaluation.oracle_edits``).
     namespace : str or None, optional
         The design namespace this oracle serves (Axis 3a). ``None`` (the
         default) registers the canonical single-study oracle as before. A
@@ -353,6 +359,7 @@ def register_evaluator_entrypoint(
             "evaluator_entrypoint": entrypoint,
             "evaluator_output_names": output_names,
             "evaluator_lookup": None,  # entrypoint takes precedence
+            "evaluator_owner": owner,
         }
     else:
         prior_ep = config.get("evaluator_entrypoint")
@@ -383,6 +390,7 @@ def register_evaluator_entrypoint(
         config["evaluator_entrypoint"] = entrypoint
         config["evaluator_output_names"] = output_names
         config["evaluator_lookup"] = None  # entrypoint takes precedence
+        config["evaluator_owner"] = owner
 
     tmp = run_config_path.with_suffix(".json.tmp")
     tmp.write_text(_json.dumps(config, indent=2), encoding="utf-8")

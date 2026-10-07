@@ -423,6 +423,19 @@ class OrchestrationMixin:
                 text = "\n\n".join(mine) + "\n\n" + text
         return text
 
+    def _drain_entry_notices(self) -> str:
+        """Notices a campaign process queued for the entry node (the oracle
+        was edited, say); "" for any other node or when none. The entry
+        node holds no delegation id, so the backends' post-tool hook never
+        reaches its queue; its next tool call does."""
+        run_dir = self._current_run_dir
+        entry = getattr(self._spec, "entry", None)
+        if run_dir is None or entry is None or entry != self._name:
+            return ""
+        from ..infra.pending_notices import drain
+        queued = drain(run_dir / "debug", "entry")
+        return "\n".join(queued) + "\n\n" if queued else ""
+
     def _drain_notifications(self) -> str:
         """Return and clear any pending push notifications, or empty
         string."""
@@ -433,6 +446,7 @@ class OrchestrationMixin:
                 msgs = list(self._notifications)
                 self._notifications.clear()
                 text = "\n".join(msgs) + "\n\n"
+        text = self._drain_entry_notices() + text
         text = self._drain_operator_notes() + text
         text = self._stop_tick() + text
         if self._science_monitor is not None:

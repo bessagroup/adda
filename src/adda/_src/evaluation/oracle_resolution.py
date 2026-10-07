@@ -174,6 +174,29 @@ def load_inner_evaluator(
 # ==========================================================================
 
 
+def _oracle_source_files(run_config: dict, study_dir: Path) -> list[Path]:
+    """The files whose bytes make up the oracle's revision: the entrypoint
+    file and every study-local module the entrypoint imported. The run
+    directory is left out. Empty for a lookup oracle or none registered."""
+    import sys
+
+    entry = run_config.get("evaluator_entrypoint")
+    if run_config.get("evaluator_lookup") or not entry:
+        return []
+    study = Path(study_dir).resolve()
+    file_part, _, _ = entry.rpartition(":")
+    files = {(study / file_part).resolve()}
+    run_dir = Path(run_config.get("store_dir", study)).resolve().parent
+    for mod in list(sys.modules.values()):
+        f = getattr(mod, "__file__", None)
+        if not f or not str(f).endswith(".py") or mod.__name__ == "__main__":
+            continue
+        p = Path(f).resolve()
+        if study in p.parents and run_dir not in p.parents:
+            files.add(p)
+    return sorted(files)
+
+
 def oracle_revision(run_config: dict, study_dir: Path) -> str:
     """A short fingerprint of the registered oracle's SOURCE.
 
@@ -185,7 +208,6 @@ def oracle_revision(run_config: dict, study_dir: Path) -> str:
     hash.
     """
     import hashlib
-    import sys
 
     h = hashlib.sha256()
     study = Path(study_dir).resolve()
@@ -194,18 +216,8 @@ def oracle_revision(run_config: dict, study_dir: Path) -> str:
     if lookup:
         h.update(json.dumps(lookup, sort_keys=True).encode())
     elif entry:
-        file_part, _, attr = entry.rpartition(":")
-        files = {(study / file_part).resolve()}
-        run_dir = Path(run_config.get("store_dir", study)).resolve().parent
-        for mod in list(sys.modules.values()):
-            f = getattr(mod, "__file__", None)
-            if not f or not str(f).endswith(".py") or mod.__name__ == "__main__":
-                continue
-            p = Path(f).resolve()
-            if study in p.parents and run_dir not in p.parents:
-                files.add(p)
-        h.update(attr.encode())
-        for p in sorted(files):
+        h.update(entry.rpartition(":")[2].encode())
+        for p in _oracle_source_files(run_config, study):
             try:
                 h.update(str(p.relative_to(study)).encode())
                 h.update(p.read_bytes())
@@ -287,13 +299,13 @@ def _effective_oracle_config(run_config: dict, namespace: str | None) -> dict:
     # Oracle + store keys come wholesale from the namespace block (None if absent).
     for key in (
         "store_dir", "lock_path", "evaluator_entrypoint",
-        "evaluator_output_names", "evaluator_lookup", "source",
-        "fidelity_column", "provenance",
+        "evaluator_output_names", "evaluator_lookup", "evaluator_owner",
+        "source", "fidelity_column", "provenance",
     ):
         if key in block:
             eff[key] = block[key]
         elif key in ("evaluator_entrypoint", "evaluator_output_names",
-                     "evaluator_lookup"):
+                     "evaluator_lookup", "evaluator_owner"):
             eff[key] = None  # don't let a base oracle leak into the namespace
     return eff
 
@@ -407,6 +419,12 @@ def get_evaluator(namespace: str | None = None) -> InstrumentedDataGenerator:
     # set this, so they keep the default "delegation" scope.
     dedup_scope = os.environ.get("F3DASM_DEDUP_SCOPE", "delegation")
 
+    oracle_rev = oracle_revision(cfg, Path(study_dir_str)) or None
+    if oracle_rev and dedup_scope == "delegation":
+        from .oracle_edits import check_oracle_edit
+        check_oracle_edit(
+            cfg, Path(study_dir_str), namespace, oracle_rev, delegation_id)
+
     return InstrumentedDataGenerator(
         inner=inner,
         store_dir=store_dir,
@@ -417,7 +435,7 @@ def get_evaluator(namespace: str | None = None) -> InstrumentedDataGenerator:
         extra_provenance=extra_provenance,
         eval_budget=cfg.get("eval_budget"),
         dedup_scope=dedup_scope,
-        oracle_rev=oracle_revision(cfg, Path(study_dir_str)) or None,
+        oracle_rev=oracle_rev,
     )
 
 
