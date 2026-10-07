@@ -54,8 +54,19 @@ can set:
 | `required_deliverables` | extra files that must exist before the run can finish | none |
 | `evaluator` | how a design gets scored, see below | honor-system |
 | `objective` | which output is optimised, in which direction, and which 0/1 column marks a design feasible; see below | undeclared |
-
+| `funnel` | the 0/1 outputs the viewer's stage funnel counts, in order; see below | none |
+| `training_data` | a precomputed pool used only as training data, with no live oracle (for a surrogate-only study) | none |
+| `base_url` | the model server's endpoint, on a backend that has one; see [Customizing a run](customizing-a-run.md#openai-compatible-endpoints-openrouter-vllm-others) | the backend's default |
+| `nodes` | per-agent `tools`, `model`, `backend` and `base_url`; see [Customizing a run](customizing-a-run.md#changing-one-agents-tools-nodes-in-configyaml) | each agent's own |
+| `llm_slurm` | serve the model on a SLURM GPU allocation; see [Customizing a run](customizing-a-run.md#a-local-model-on-a-slurm-gpu-node-vllm) | off |
+| `mem_cap` | hard memory cap per delegation, in bytes. Absent: the SLURM job's memory allocation, else a built-in default | see description |
+| `review_statement` | review `PROBLEM_STATEMENT.md` before the run; advisory only. `false` skips it | `true` |
 | `runtime` | run knobs — debug capture, timeouts, retry, limits; see below | all defaulted |
+| `study` | settings for your own scripts. adda never reads inside it | none |
+
+adda reads exactly the keys above. Any other top-level key stops the run at
+start with an error that suggests the closest known key, so a typo cannot pass
+silently. Put your own settings under `study:`.
 
 See [Customizing a run](customizing-a-run.md#reference-the-available-backends) for the
 `backend`/`model` details, including setting them per agent instead of for
@@ -123,7 +134,7 @@ normal run worse by construction. They are the arms of an ablation — the
 question "does this machinery earn its cost" — so an experiment sweeps them
 and a study author leaves them alone.
 
-To run an arm without editing the committed study, pass it on the command line: `python -m adda studies/example_study --set hypothesis_ledger=false --set verdict_validator=false` (repeatable; `python -m adda.watchdog` takes the same flag and forwards it). A `--set` outranks the environment and `config.yaml`, an unknown knob is an error, and the value lands in `run_config.json` like any explicit knob. For a replicate sweep, launch each replicate from a clean copy of the study (no `runs/`, no `workspace/`, no archived `pipeline_*.ipynb`), because the literature notes under `runs/lit_reviewer_notes` and the archives are study-scoped and would otherwise carry one arm's work into the next.
+To run an arm without editing the committed study, pass it on the command line: `python -m adda studies/example_study --set hypothesis_ledger=false --set verdict_validator=false` (repeatable; `python -m adda.watchdog` takes the same flag and forwards it). A `--set` outranks `config.yaml` (the environment sets no knob), an unknown knob is an error, and the value lands in `run_config.json` like any explicit knob. For a replicate sweep, launch each replicate from a clean copy of the study (no `runs/`, no `workspace/`, no archived `pipeline_*.ipynb`), because the literature notes under `runs/lit_reviewer_notes` and the archives are study-scoped and would otherwise carry one arm's work into the next.
 
 Each one withholds everything it owns at once: its runtime object, the tools
 that exist only because of it, and the prompt section that tells the agent to
@@ -136,7 +147,7 @@ choice: a study with no notebook deliverable legitimately turns it off.)
 
 | key | meaning | default |
 |---|---|---|
-| `hypothesis_ledger` | the run's falsifiable-hypothesis record. Off withholds its five tools and its prompt section too, so the agent is never told to use a tool that is gone. PARTIAL: the Popperian workflow is argued throughout the strategizer's method, which stays | `true` |
+| `hypothesis_ledger` | the run's falsifiable-hypothesis record. Off withholds its three tools and its prompt section too, so the agent is never told to use a tool that is gone. PARTIAL: the Popperian workflow is argued throughout the strategizer's method, which stays | `true` |
 | `milestones_enabled` | run the process-milestone gate | `true` |
 | `science_monitor` | the runtime drift monitor that flags unledgered evals and unstamped rows, and escalates repeats to the critic | `true` |
 | `f3dasm_api` | let the implementer and datagenerator look up the INSTALLED f3dasm's API (`ConsultF3dasm`): signatures, docstrings and source, read off the package the run actually executes against, so it cannot go stale. Off withholds the tool and the one prompt section that instructs its use; the CI-verified `<f3dasm_api>` excerpt stays, so the arm is "excerpt only" — the state before the tool existed | `true` |

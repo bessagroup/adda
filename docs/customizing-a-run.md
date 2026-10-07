@@ -45,15 +45,31 @@ the built-in graph now runs on Ollama, because none of the shipped agents
 `backend`, so each one falls back to the run's default:
 `agent.backend or self._backend` (in `agent_runtime.py`'s `_make_adapter`).
 
-## A different backend for one agent: this needs Python, not YAML
+## A different backend or model for one agent: `nodes:` in `config.yaml`
 
-`config.yaml`'s `backend`/`model` are run-wide; there's no YAML key for
-"just the implementer." Getting that means setting `backend`/`model` on one
-node, which means that node is your own `Agent` subclass, which means
-building the graph yourself: swapping a hand-rolled agent into the shipped
-graph while keeping the rest isn't a pattern this project tests. So a custom
-graph, a custom prompt, and a different backend for one node usually arrive
-together, in one `Graph`:
+`backend` and `model` in `config.yaml` apply to the whole run. To set them for
+one agent, name the agent in a `nodes:` block:
+
+```yaml
+backend: claude
+nodes:
+  implementer:
+    backend: ollama
+    model: qwen2.5:7b
+    base_url: http://localhost:11434/v1
+```
+
+The strategizer and every other agent keep the run's backend. The other keys
+of a `nodes:` entry, and the rules they follow, are in
+[Changing one agent's tools](#changing-one-agents-tools-nodes-in-configyaml).
+
+## Your own agents: a custom graph in Python
+
+If you need your own `Agent` subclass, for a custom prompt or a different set
+of agents, build the graph yourself. Swapping a hand-written agent into the
+shipped graph while keeping the rest is not a pattern this project tests, so a
+custom graph and a custom prompt usually arrive together, in one `Graph`. In
+that case you can also set `backend` and `model` on the node directly:
 
 ```python
 from adda import Agent, Edge, Graph, AgenticRun
@@ -88,18 +104,17 @@ AgenticRun(study_dir=study_dir, graph=graph).execute()
 
 Run this with no `config.yaml` (or one that just says `backend: claude`) and
 the strategizer runs on Claude, the run's default, while the implementer
-alone runs on Ollama with `qwen2.5:7b`. Nothing here reads `config.yaml` for
-the implementer's backend at all; `Implementer(model=...)` and
-`backend = "ollama"` are the only source of truth for that one node.
+alone runs on Ollama with `qwen2.5:7b`. If the study's `config.yaml` also has
+a `nodes:` entry for that agent, the config entry wins over the class.
 
 A bare `Agent` subclass starts from zero tools (`Agent.tools` defaults to
 `frozenset()`) and zero epistemic machinery. The shipped agents wire up the
 hypothesis ledger, the reproduction gate, and each other's delegation tools
 already; a hand-rolled one, like `Strategist`/`Implementer` above, does not.
-This is also why no shipped agent sets a per-agent `backend`, and no test in
-this project exercises a graph that mixes backends: it's a real, working
-lever (as shown above), but running most of a graph on Claude and one node
-on a local model is a combination you'd be the first to try.
+No shipped agent sets its own `backend`. Tests check that each node resolves
+its own backend, model and endpoint, but none runs a whole graph that mixes
+backends. Running most of a graph on Claude and one node on a local model
+works by design, but you may be the first to try it.
 
 ## Changing one agent's tools: `nodes:` in `config.yaml`
 
@@ -205,11 +220,11 @@ mean removed.
 ### The problem it solves
 
 A capability is never just one object. The hypothesis ledger is a JSON file
-*and* five tools the agent can call *and* a block of the strategizer's system
+*and* three tools the agent can call *and* a block of the strategizer's system
 prompt telling it that `hypotheses.json` is its canonical scientific record.
 Wire those three independently and a flag that switches off the object leaves
 the other two running: the agent is still commanded to use the ledger, still
-sees all five tools published as AUTHORITATIVE, calls one, and gets back
+sees all three tools published as AUTHORITATIVE, calls one, and gets back
 
 ```
 ERROR: hypothesis ledger not available in this run.
@@ -236,7 +251,7 @@ Feature(
 )
 ```
 
-Four fields carry everything a feature can own:
+These fields carry what a feature owns:
 
 | field | what it owns |
 |---|---|
@@ -244,6 +259,8 @@ Four fields carry everything a feature can own:
 | `tools` | tool names that exist only because this feature does |
 | `sections` | prompt sections `<tag>…</tag>` this feature owns outright |
 | `behaviours` | runtime capabilities with no tool and no prompt surface |
+| `pervasive` | the feature's idea runs through prompt text it does not own, so turning it off is a partial ablation; see below |
+| `requires` | other features this one needs; a run that turns one off and leaves this one on refuses to start |
 
 A richer one — the ledger owns tools *and* a prompt section, and carries a
 caveat explained below:
@@ -306,7 +323,7 @@ One registry file, and three places that read it: the tool catalog calls
 `disabled_tool_names()`, prompt assembly calls
 `strip_disabled_sections()`, and a feature with a runtime object or behaviour
 calls `features.enabled("key")` at the single point where that object is
-constructed. Adding a feature does not add a branch anywhere else, and a
+constructed. Features are declared in adda's own `runtime/features.py`; a study cannot declare one from its own files. Adding a feature does not add a branch anywhere else, and a
 reader who does not care about ablations never meets one — the declarations
 sit in `runtime/features.py` and the rest of the code reads as if the feature
 is simply present.
