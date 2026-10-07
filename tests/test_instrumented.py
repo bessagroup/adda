@@ -973,3 +973,125 @@ def test_dedup_skip_of_an_identical_retry_notifies_without_differs_flag(
 
     df_in, df_out = ExperimentData.from_file(project_dir=tmp_path).to_pandas()
     assert len(df_out) == 1
+
+
+# ---------------------------------------------------------------------------
+# Oracle revision: a changed oracle makes the same design a NEW evaluation
+# (run truss-iscso2015-open 20261007T002015: an agent edited the registered
+# oracle and re-evaluated its 150 designs seven times; dedup-on-write keyed on
+# the inputs alone and kept the first, broken oracle's rows).
+# ---------------------------------------------------------------------------
+
+def _rev_gen(tmp_path, val, rev, delegation="D001", scope="delegation"):
+    from adda._src.evaluation.instrumented import InstrumentedDataGenerator
+    return InstrumentedDataGenerator(
+        inner=_const_gen(val), store_dir=tmp_path, delegation_id=delegation,
+        flush_every=1, oracle_rev=rev, dedup_scope=scope)
+
+
+def test_a_changed_oracle_stores_the_same_design_again_and_marks_both(
+        tmp_path, capsys):
+    v1 = _rev_gen(tmp_path, 99.0, "rev1aaaaaaaa")
+    v1.execute(_make_sample(0.5))
+    v2 = _rev_gen(tmp_path, 1.0, "rev2bbbbbbbb")
+    v2.execute(_make_sample(0.5))
+
+    _, df_out = ExperimentData.from_file(project_dir=tmp_path).to_pandas()
+    assert sorted(float(v) for v in df_out["f"]) == [1.0, 99.0]
+    by_rev = dict(zip(df_out["_oracle_rev"], (float(v) for v in df_out["f"])))
+    assert by_rev == {"rev1aaaaaaaa": 99.0, "rev2bbbbbbbb": 1.0}
+    notice = capsys.readouterr().out
+    assert "ORACLE CHANGED" in notice and "rev1aaaaaaaa" in notice
+
+
+def test_the_same_oracle_revision_is_still_deduped_and_the_skip_names_it(
+        tmp_path, capsys):
+    gen = _rev_gen(tmp_path, 5.0, "rev1aaaaaaaa")
+    gen.execute(_make_sample(0.5))
+    gen.execute(_make_sample(0.5))
+    _, df_out = ExperimentData.from_file(project_dir=tmp_path).to_pandas()
+    assert len(df_out) == 1
+    assert "oracle revision rev1aaaaaaaa" in capsys.readouterr().out
+
+
+def test_rows_without_a_stored_revision_still_dedup(tmp_path):
+    from adda._src.evaluation.instrumented import InstrumentedDataGenerator
+    legacy = InstrumentedDataGenerator(
+        inner=_const_gen(5.0), store_dir=tmp_path, delegation_id="D001",
+        flush_every=1)
+    legacy.execute(_make_sample(0.5))
+    _rev_gen(tmp_path, 5.0, "rev1aaaaaaaa").execute(_make_sample(0.5))
+    _, df_out = ExperimentData.from_file(project_dir=tmp_path).to_pandas()
+    assert len(df_out) == 1
+
+
+def test_a_replay_adds_no_rows_even_when_the_oracle_changed(tmp_path):
+    _rev_gen(tmp_path, 5.0, "rev1aaaaaaaa").execute(_make_sample(0.5))
+    _rev_gen(tmp_path, 5.0, "rev2bbbbbbbb", delegation="D999",
+             scope="all").execute(_make_sample(0.5))
+    _, df_out = ExperimentData.from_file(project_dir=tmp_path).to_pandas()
+    assert len(df_out) == 1
+
+
+def test_a_design_under_two_revisions_is_not_a_duplicate_evaluation(tmp_path):
+    from adda._src.evaluation.ledger_summary import duplicate_eval_stats
+    _rev_gen(tmp_path, 9.0, "rev1aaaaaaaa").execute(_make_sample(0.5))
+    _rev_gen(tmp_path, 1.0, "rev2bbbbbbbb").execute(_make_sample(0.5))
+    stats = duplicate_eval_stats(tmp_path)
+    assert stats["D001"]["total_rows"] == 2
+    assert stats["D001"]["duplicate_rows"] == 0
+
+
+def test_oracle_revision_follows_the_oracle_source_not_the_run_dir(tmp_path):
+    from adda._src.evaluation.oracle_resolution import oracle_revision
+    study = tmp_path / "study"
+    (study / "workspace").mkdir(parents=True)
+    run_dir = study / "runs" / "r1"
+    (run_dir / "experiment_data").mkdir(parents=True)
+    gen = study / "workspace" / "gen.py"
+    gen.write_text("x = 1\n")
+    cfg = {"evaluator_entrypoint": "workspace/gen.py:G",
+           "store_dir": str(run_dir / "experiment_data")}
+    r1 = oracle_revision(cfg, study)
+    assert r1 and oracle_revision(cfg, study) == r1
+    (run_dir / "campaign.py").write_text("print('driver')\n")
+    assert oracle_revision(cfg, study) == r1
+    gen.write_text("x = 2\n")
+    assert oracle_revision(cfg, study) != r1
+    assert oracle_revision({}, study) == ""
+
+
+def test_editing_the_registered_oracle_file_is_stored_not_skipped(
+        tmp_path, monkeypatch):
+    """The exact failure through the real door: evaluate X, edit the registered
+    oracle's source, evaluate X again. v2's result is stored, v1's stays, and
+    the two rows carry different revisions."""
+    from adda._src.evaluation.oracle_resolution import get_evaluator
+
+    debug_dir = tmp_path / "runs" / "ts" / "debug"
+    delegation_dir = debug_dir / "delegations" / "D001"
+    delegation_dir.mkdir(parents=True)
+    store_dir = tmp_path / "runs" / "ts" / "experiment_data"
+    store_dir.mkdir()
+    study_dir = tmp_path / "study"
+    study_dir.mkdir()
+    oracle = study_dir / "oracle.py"
+    oracle.write_text("def f(**kw):\n    return 100.0\n")
+    (debug_dir / "run_config.json").write_text(json.dumps({
+        "store_dir": str(store_dir),
+        "lock_path": str(store_dir / "experiment_data" / ".lock"),
+        "source": "t", "study_dir": str(study_dir),
+        "evaluator_entrypoint": "oracle.py:f",
+        "evaluator_output_names": ["f"],
+    }))
+    monkeypatch.chdir(delegation_dir)
+    monkeypatch.delenv("F3DASM_DELEGATION_ID", raising=False)
+    monkeypatch.delenv("F3DASM_DEDUP_SCOPE", raising=False)
+
+    get_evaluator().execute(_make_sample(0.5))
+    oracle.write_text("def f(**kw):\n    return 1.0\n")
+    get_evaluator().execute(_make_sample(0.5))
+
+    _, df_out = ExperimentData.from_file(project_dir=store_dir).to_pandas()
+    assert sorted(float(v) for v in df_out["f"]) == [1.0, 100.0]
+    assert df_out["_oracle_rev"].nunique() == 2

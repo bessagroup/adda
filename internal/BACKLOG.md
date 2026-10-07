@@ -31,6 +31,8 @@ before. Until one is answered or closed, treat it as known, not news.
 - [ ] **#18** Critic should flag an infeasible-extremum headline on a constrained study — *open, §4 user-owned* — grounding moved to the critic (`6494489b`) but it only checks the value is real, not feasible
 - [ ] **#42** Same study, two Haiku runs, opposite gate outcomes (RunScratch vs. a token Delegate()-registered oracle) — *open, §4 user-owned* — see §42 below
 
+- [ ] **#50** Two delegations edit the registered oracle file concurrently — *open, §4 user-owned* — see §50 below
+
 ## Actionable
 
 - [ ] **#1** Reconcile cancelled-but-completed delegations — *open, highest priority* (recurring UNGATED root cause; partially mitigated 2026-06-15)
@@ -39,6 +41,8 @@ before. Until one is answered or closed, treat it as known, not news.
 - [ ] **#16** ABAQUS subprocess can't import workspace modules (PYTHONPATH) — *open, abaqus2py-owned* (recommendation only; not an f3dasm fix)
 - [ ] **#43** promptmap.html citations are file:line, so any unrelated src edit that shifts lines makes it stale — *open, design smell in a working safety net* — see §43 below
 - [ ] **#44** `pip install` inside an "activated" uv venv can silently target the wrong Python — *open, local-dev-only, not a fix, a documented gotcha* — see §44 below
+- [ ] **#51** Rows from a superseded oracle revision still count in `evals_used` and in best-row ranking — *open, separate step after real mixed-revision stores exist* — see §51 below
+- [ ] **#52** An in-band harness notice that guards data integrity travels inside a tool output that can be truncated — *open, investigate first, report before fixing* — see §52 below
 - [ ] **#47** Computed cost sits 0-8% below the SDK's `total_cost_usd` on validator/critic calls — *open, low (telemetry column, not correctness)* — see §47 below
 
 ## Parked — deferred on purpose
@@ -706,3 +710,26 @@ from the CLI's clear error in one call. Left disabled (judgment call, no prompt
 line: that would be a workaround, not a principle). Option (b), enabling it, is
 gated on a live test that Monitor's async event notifications reach a headless
 per-turn query.
+
+## 50. Two delegations edit the registered oracle file concurrently — §4
+
+Run `truss-iscso2015-open` / `20261007T002015`: the registered oracle is
+`workspace/data_generator.py`, a plain file. D002 (builder) and D001 (DoE
+runner) both rewrote it between 00:23 and 00:30 UTC. Oracle revisions now make
+the change visible in the store (`_oracle_rev`), but nothing says who may edit
+the file. Whether to forbid it, serialize it or leave it is the user's call.
+
+## 51. Superseded-revision rows still count
+
+`_oracle_rev` separates rows, but `evals_used`, the best-row table and the
+viewer's best-so-far still count every row. Risk: a stale row from a broken
+oracle with an attractive objective can win `n_best`. Decide after real
+mixed-revision stores exist.
+
+## 52. A harness notice rides inside a truncatable tool output
+
+D001 got "[EVAL NOT STORED ... NEW output differs from STORED]" eight times,
+inside a 185 KB tool output cut to a 2 KB preview, so the warning never arrived.
+Find where the preview cut happens and whether harness notices can travel in a
+channel that is never truncated (prepended, or injected like the science
+monitor's notices). Report before fixing.

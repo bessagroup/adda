@@ -173,6 +173,49 @@ def load_inner_evaluator(
 
 # ==========================================================================
 
+
+def oracle_revision(run_config: dict, study_dir: Path) -> str:
+    """A short fingerprint of the registered oracle's SOURCE.
+
+    Two evaluations carry the same revision only if the oracle was the same
+    code. It hashes the entrypoint file and every study-local module the
+    entrypoint imported (a solver package beside it, say). The run directory
+    is left out: a campaign script the agent edits is not the oracle.
+    Lookup oracles hash their config. Returns ``""`` when there is nothing to
+    hash.
+    """
+    import hashlib
+    import sys
+
+    h = hashlib.sha256()
+    study = Path(study_dir).resolve()
+    lookup = run_config.get("evaluator_lookup")
+    entry = run_config.get("evaluator_entrypoint")
+    if lookup:
+        h.update(json.dumps(lookup, sort_keys=True).encode())
+    elif entry:
+        file_part, _, attr = entry.rpartition(":")
+        files = {(study / file_part).resolve()}
+        run_dir = Path(run_config.get("store_dir", study)).resolve().parent
+        for mod in list(sys.modules.values()):
+            f = getattr(mod, "__file__", None)
+            if not f or not str(f).endswith(".py") or mod.__name__ == "__main__":
+                continue
+            p = Path(f).resolve()
+            if study in p.parents and run_dir not in p.parents:
+                files.add(p)
+        h.update(attr.encode())
+        for p in sorted(files):
+            try:
+                h.update(str(p.relative_to(study)).encode())
+                h.update(p.read_bytes())
+            except (OSError, ValueError):
+                continue
+    else:
+        return ""
+    return h.hexdigest()[:12]
+
+
 _GOVERNOR_PID_APPLIED = False
 
 
@@ -374,6 +417,7 @@ def get_evaluator(namespace: str | None = None) -> InstrumentedDataGenerator:
         extra_provenance=extra_provenance,
         eval_budget=cfg.get("eval_budget"),
         dedup_scope=dedup_scope,
+        oracle_rev=oracle_revision(cfg, Path(study_dir_str)) or None,
     )
 
 
@@ -444,4 +488,5 @@ def _load_run_config() -> dict:
 __all__ = [
     "get_evaluator",
     "load_inner_evaluator",
+    "oracle_revision",
 ]

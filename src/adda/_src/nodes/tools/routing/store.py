@@ -588,6 +588,9 @@ def _best_rows_table(
         show_cols.append("_delegation_id")
     if "_namespace" in best_rows.columns:
         show_cols.append("_namespace")
+    if "_oracle_rev" in best_rows.columns and best_rows[
+            "_oracle_rev"].dropna().nunique() > 1:
+        show_cols.append("_oracle_rev")
 
     if filtered_in is not None:
         best_in = filtered_in.loc[best_idx, [

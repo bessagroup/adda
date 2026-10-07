@@ -101,6 +101,18 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   inputs as submitted, before `execute()`, so evaluator-stamped kwargs can't
   defeat dedup or supersede. `dedup_scope="all"` (reproduction/deliverable
   replay) treats every store row as already seen.
+  **Oracle revisions.** The registered oracle is a file that can change mid-run,
+  so each row carries `_oracle_rev` (provenance column): a 12-hex hash of the
+  entrypoint file plus the study-local modules it imports
+  (`oracle_resolution.oracle_revision`, passed by `get_evaluator`). Delegation-
+  scope dedup matches a stored row only when its revision equals the current
+  one, so a design re-evaluated by an edited oracle is stored as a new row and
+  the old row stays, distinguishable. Rows without a revision match any
+  revision. The skip notice names the stored revision; a changed oracle prints
+  one `[ORACLE CHANGED]` line per flush. QueryStore lists `_oracle_rev`; its
+  best-rows table shows it only when revisions are mixed. Replay scope stays
+  revision-blind. Run 20261007T002015 stored 150 rows of a broken oracle and
+  skipped 1050 corrected re-evaluations before this existed.
 - **Where:** `science_monitor.py` (`_check_unledgered`, `_check_unstamped_rows`,
   `_check_duplicate_evaluations`); `ledger_summary.py` `unstamped_row_count`,
   `duplicate_eval_stats`; `nodes/tools/routing/delegation.py` `Wait()`

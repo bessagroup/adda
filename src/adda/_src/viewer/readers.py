@@ -716,7 +716,7 @@ def read_milestones(run_dir: Path | str) -> list[dict[str, Any]]:
 # and how long it took" answers a different question from "what did the
 # oracle return", and mixing them makes a result table unreadable.
 _PROVENANCE_COLS = {
-    "_delegation_id", "_source", "_ts", "_wall_ms",
+    "_delegation_id", "_source", "_ts", "_wall_ms", "_oracle_rev",
 }
 
 # The default store's own data directory. The name is reserved by

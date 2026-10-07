@@ -485,11 +485,17 @@ def duplicate_eval_stats(store_root: Path | str) -> dict[str, dict]:
             if c not in _PROVENANCE_COLS
         ]
         rounded = df_in[input_cols].round(10) if input_cols else None
+        revs = (df_out["_oracle_rev"].tolist()
+                if "_oracle_rev" in df_out.columns else [None] * len(df_out))
         for pos, did in enumerate(df_out["_delegation_id"]):
             if not did:
                 continue
             did = str(did)
             coords = tuple(rounded.iloc[pos]) if rounded is not None else ()
+            # The same design under another oracle revision is a new
+            # evaluation, not a repeat.
+            rev = revs[pos] if isinstance(revs[pos], str) else None
+            coords = (*coords, rev)
             bucket = per_deleg.setdefault(
                 did, {"counts": {}, "cols": input_cols})
             bucket["counts"][coords] = bucket["counts"].get(coords, 0) + 1
@@ -505,7 +511,7 @@ def duplicate_eval_stats(store_root: Path | str) -> dict[str, dict]:
                 counts.items(), key=lambda kv: kv[1])
             if worst_count > 1:
                 worst = (
-                    dict(zip(bucket["cols"], worst_coords, strict=True)),
+                    dict(zip(bucket["cols"], worst_coords[:-1], strict=True)),
                     worst_count,
                 )
         out[did] = {

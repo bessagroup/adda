@@ -45,7 +45,14 @@ __status__ = "Experimental"
 # Columns the wrapper stamps on every ledgered row. Everything else in an
 # output frame is a real output; everything else in an input frame is a
 # design coordinate.
-_PROVENANCE_COLS = frozenset({"_delegation_id", "_source", "_ts", "_wall_ms"})
+_PROVENANCE_COLS = frozenset({
+    "_delegation_id", "_source", "_ts", "_wall_ms", "_oracle_rev"})
+
+
+def _known_rev(v) -> str | None:
+    """A stored ``_oracle_rev`` as a string, or None when the row has none
+    (written before revisions were stamped, or by a seeding path)."""
+    return v if isinstance(v, str) and v else None
 
 
 def _round_coord(v):
@@ -120,6 +127,13 @@ class InstrumentedDataGenerator(DataGenerator):
         cell, which must add ZERO new rows to satisfy the "LAZY"
         reproduction invariant) rather than a live campaign delegation
         genuinely exploring in parallel.
+    oracle_rev : str or None, optional
+        Revision of the registered oracle's source (see
+        ``oracle_resolution.oracle_revision``), stamped on every row as
+        ``_oracle_rev``. Under ``dedup_scope="delegation"`` a stored row only
+        counts as already-seen when it came from the SAME revision: after the
+        oracle changes, the same design is a new evaluation, not a repeat.
+        Rows with no stored revision match any revision.
     """
 
     def __init__(
@@ -135,8 +149,10 @@ class InstrumentedDataGenerator(DataGenerator):
         extra_provenance: Optional[dict] = None,
         eval_budget: Optional[int] = None,
         dedup_scope: str = "delegation",
+        oracle_rev: Optional[str] = None,
     ) -> None:
         self.inner = inner
+        self.oracle_rev = oracle_rev
         self.store_dir = Path(store_dir)
         if dedup_scope not in ("delegation", "all"):
             raise ValueError(
@@ -159,6 +175,8 @@ class InstrumentedDataGenerator(DataGenerator):
         # (delegation.py's _reconcile_evals: "believe the store, not the
         # worker's self-report"), this only feeds the soft nudge.
         self._dedup_skipped_total = 0
+        self._dedup_skipped_revs: set[str] = set()
+        self._rev_changed: list[tuple] = []
         self.fidelity_column = fidelity_column  # unused Phase 1
         self.flush_every = flush_every
         # Extensible, oracle-stamped provenance: arbitrary {column: value}
@@ -259,6 +277,8 @@ class InstrumentedDataGenerator(DataGenerator):
         # (per-phase, per-fidelity) is df.groupby(col)["_wall_ms"] downstream —
         # no timing-specific code special-cases a dimension here.
         out._output_data["_wall_ms"] = round(_wall_ms, 3)
+        if self.oracle_rev:
+            out._output_data["_oracle_rev"] = self.oracle_rev
         # Extensible declared provenance (oracle-stamped, not agent-authored).
         for _col, _val in self.extra_provenance.items():
             out._output_data[_col] = _val
@@ -353,6 +373,7 @@ class InstrumentedDataGenerator(DataGenerator):
                 # Ensure provenance columns are declared on the canon domain
                 # (the fixed four + any extensible declared columns).
                 for col in ("_delegation_id", "_source", "_ts", "_wall_ms",
+                            *(("_oracle_rev",) if self.oracle_rev else ()),
                             *self.extra_provenance):
                     canon._domain.add_output(col, exist_ok=True)
 
@@ -381,6 +402,8 @@ class InstrumentedDataGenerator(DataGenerator):
             self._maybe_nudge_budget(_n_total + self._dedup_skipped_total)
         if n_skipped:
             self._record_dedup(n_skipped)
+        if self._rev_changed:
+            self._notify_rev_changed()
 
         self._buffer.clear()
         self._buffer_keys.clear()
@@ -429,6 +452,9 @@ class InstrumentedDataGenerator(DataGenerator):
         try:
             canon_rows: list[dict] = []
             canon_outputs: list[dict] = []
+            canon_revs: list[str | None] = []
+            self._dedup_skipped_revs = set()
+            self._rev_changed = []
             if canon is not None:
                 df_in, df_out = canon.to_pandas()
                 if df_in is not None and not df_in.empty:
@@ -450,6 +476,10 @@ class InstrumentedDataGenerator(DataGenerator):
                                 == str(self.delegation_id)).to_numpy()
                         df_in = df_in[mine]
                         df_out = df_out[mine]
+                    canon_revs = (
+                        [_known_rev(v) for v in df_out["_oracle_rev"]]
+                        if "_oracle_rev" in df_out.columns
+                        else [None] * len(df_out))
                     cols = [c for c in df_in.columns
                             if c not in _PROVENANCE_COLS]
                     canon_rows = df_in[cols].to_dict("records")
@@ -460,17 +490,35 @@ class InstrumentedDataGenerator(DataGenerator):
             survivor_keys: list[tuple] = []
             seen_in_batch: set = set()
             seen_in_batch_outputs: dict[tuple, dict] = {}
+            # A stored row from a DIFFERENT oracle revision is not the same
+            # evaluation: it does not shadow this one (it stays in the store,
+            # distinguishable by its _oracle_rev). Only a delegation-scoped
+            # campaign is revision-aware; a replay (scope "all") adds no rows.
+            revision_aware = (
+                self.dedup_scope == "delegation" and bool(self.oracle_rev))
             for s, k in zip(self._buffer, self._buffer_keys, strict=True):
                 stored_outputs = seen_in_batch_outputs.get(k)
+                stored_rev = self.oracle_rev if stored_outputs is not None else None
+                superseded_rev = None
                 if stored_outputs is None:
-                    for row, out_row in zip(
-                            canon_rows, canon_outputs, strict=True):
-                        if _row_matches_submitted_key(k, row):
-                            stored_outputs = out_row
-                            break
+                    for row, out_row, rev in zip(
+                            canon_rows, canon_outputs, canon_revs, strict=True):
+                        if not _row_matches_submitted_key(k, row):
+                            continue
+                        if (revision_aware and rev is not None
+                                and rev != self.oracle_rev):
+                            superseded_rev = rev
+                            continue
+                        stored_outputs, stored_rev = out_row, rev
+                        break
                 if k in seen_in_batch or stored_outputs is not None:
-                    self._notify_dedup_skip(k, s._output_data, stored_outputs)
+                    self._notify_dedup_skip(
+                        k, s._output_data, stored_outputs, stored_rev)
+                    if stored_rev:
+                        self._dedup_skipped_revs.add(stored_rev)
                     continue
+                if superseded_rev is not None:
+                    self._rev_changed.append((k, superseded_rev))
                 seen_in_batch.add(k)
                 seen_in_batch_outputs[k] = {
                     c: v for c, v in s._output_data.items()
@@ -486,7 +534,8 @@ class InstrumentedDataGenerator(DataGenerator):
 
     def _notify_dedup_skip(
             self, key: tuple, new_outputs: dict,
-            stored_outputs: dict | None) -> None:
+            stored_outputs: dict | None,
+            stored_rev: str | None = None) -> None:
         """Never let a computed-but-discarded evaluation pass silently: tell
         the calling agent's own script, via the same stdout channel
         ``_maybe_nudge_budget`` uses (Channel 1 — the campaign's OWN stdout,
@@ -508,6 +557,17 @@ class InstrumentedDataGenerator(DataGenerator):
                 "If this was a deliberate correction, call supersede(...) "
                 "instead of execute() to REPLACE the stored row."
             )
+            if stored_rev:
+                msg += (
+                    f" The stored row was written by oracle revision "
+                    f"{stored_rev}"
+                    + (" (the revision that just ran)"
+                       if stored_rev == self.oracle_rev else "")
+                    + ". Editing the oracle's source is not a correction "
+                    "in this sense: a changed revision is stored as a new "
+                    "row beside the old one, so this skip means the oracle "
+                    "source did not change between the two evaluations."
+                )
             if stored_outputs is not None:
                 differs = any(
                     _round_coord(new_clean.get(c)) != _round_coord(v)
@@ -519,6 +579,25 @@ class InstrumentedDataGenerator(DataGenerator):
                         f"new={new_clean!r}, stored={stored_outputs!r}."
                     )
             print(msg, flush=True)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _notify_rev_changed(self) -> None:
+        """One line per flush: designs stored again because the oracle's
+        source changed since their stored row. Best-effort, like every notice."""
+        try:
+            n = len(self._rev_changed)
+            key, old = self._rev_changed[0]
+            design = ", ".join(f"{c}={v}" for c, v in key)
+            old_revs = sorted({r for _, r in self._rev_changed})
+            print(
+                f"[ORACLE CHANGED — {self.delegation_id}] {n} design(s) "
+                f"already have a row from oracle revision "
+                f"{', '.join(old_revs)}; this evaluation ran revision "
+                f"{self.oracle_rev}, so it was stored as a new row. The older "
+                "row stays in the store, marked by its _oracle_rev column, "
+                f"and came from a superseded oracle. First: ({design}).",
+                flush=True)
         except Exception:  # noqa: BLE001
             pass
 
@@ -536,7 +615,10 @@ class InstrumentedDataGenerator(DataGenerator):
                     "error_type": "DEDUP_SKIPPED",
                     "message": (
                         f"{n_skipped} buffered eval(s) skipped: design already "
-                        "in the store (dedup-on-write)"),
+                        "in the store (dedup-on-write)"
+                        + (f"; stored by oracle revision "
+                           f"{', '.join(sorted(self._dedup_skipped_revs))}"
+                           if self._dedup_skipped_revs else "")),
                 }
                 with diag.open("a", encoding="utf-8") as f:
                     f.write(_json.dumps(rec) + "\n")
