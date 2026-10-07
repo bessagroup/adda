@@ -1153,3 +1153,25 @@ def test_wrapper_names_the_keyword_contract_when_the_parameter_is_misnamed(
             in str(ei.value))
     assert isinstance(ei.value.__cause__, TypeError)
     assert "'sample'" in str(ei.value.__cause__)
+
+
+def test_a_misnamed_execute_parameter_fails_alike_on_both_paths(tmp_path):
+    """One contract: a generator whose execute() does not take
+    experiment_sample= by keyword fails through .call() and through the
+    metered wrapper, rather than passing on one path only."""
+    from adda._src.evaluation.instrumented import InstrumentedDataGenerator
+
+    class _Writes(DataGenerator):
+        def execute(self, sample, **kwargs):
+            sample._output_data["f"] = 1.0
+            sample.job_status = JobStatus.FINISHED
+            return sample
+
+    plain = _Writes().call(_make_call_data(0.1, 0.2), mode="sequential")
+    metered = InstrumentedDataGenerator(
+        inner=_Writes(), store_dir=tmp_path, delegation_id="D001",
+    ).call(_make_call_data(0.1, 0.2), mode="sequential")
+
+    for result in (plain, metered):
+        _, df_out = result.to_pandas()
+        assert "f" not in df_out.columns or df_out["f"].isna().all()
