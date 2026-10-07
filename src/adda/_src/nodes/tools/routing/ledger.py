@@ -226,18 +226,40 @@ class LedgerTools:
             return self._check_d000_pool_exists(hypothesis_id)
         if d_cited is None or node._delegation_log is None:
             return None
-        completed_ids = {
-            r["id"] for r in node._delegation_log.query_all()
-            if r.get("status") == "DONE"
+        status_by_id = {
+            r["id"]: r.get("status")
+            for r in node._delegation_log.query_all()
         }
-        if d_cited not in completed_ids:
+        if status_by_id.get(d_cited) != "DONE":
             return (
                 f"ERROR: {hypothesis_id} cites evidence from {d_cited!r}, "
-                "which is not a completed delegation. Only cite completed "
-                "delegations (status DONE) — if the delegation hasn't "
-                "finished, wait for it."
+                + self._cited_state_clause(d_cited, status_by_id.get(d_cited))
             )
         return None
+
+    @staticmethod
+    def _cited_state_clause(d_cited: str, status: str | None) -> str:
+        """Name the cited delegation's state and the step that resolves it."""
+        if status == "OPEN_FOR_REVIEW":
+            return (
+                f"which is OPEN FOR REVIEW: its report is delivered, but you "
+                f"have not approved it. Call SendMessage({d_cited!r}, ..., "
+                "approve=True) to finalize it (status DONE), or send feedback "
+                "first. Then cite it."
+            )
+        if status == "RUNNING":
+            return (
+                "which is still running. Wait for it to finish, then cite it."
+            )
+        if status is None:
+            return (
+                "which is not a delegation of this run. Cite the id of a "
+                "delegation that finished (status DONE)."
+            )
+        return (
+            f"which ended with status {status}, not DONE. Cite a delegation "
+            "that finished (status DONE)."
+        )
 
     def _check_d000_pool_exists(self, hypothesis_id: str) -> str | None:
         """'D000' is only a valid citation when this study actually ingested a

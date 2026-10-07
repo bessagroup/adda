@@ -242,3 +242,35 @@ def test_d000_is_valid_evidence_anchor(tmp_path):
     # D000 itself doesn't need to be in the delegation log
     assert not result.startswith("ERROR:") or "falsification" in result.lower(), (
         f"D000 evidence blocked unexpectedly by delegation-exists check: {result!r}")
+
+
+def _cite(n, h, did):
+    return n.adapter.closure_tools["HypothesisUpdate"](
+        h, "REFUTED", "x", 0.1,
+        evidence={"delegation": did, "numbers": {"best_f": 1.47}})
+
+
+def test_cited_delegation_open_for_review_names_the_state_and_the_action(tmp_path):
+    n = _node(tmp_path)
+    h = _propose(n)
+    n._delegation_log.record(
+        id="D001", from_node="strategizer", to_node="implementer", task="t",
+        deliverable="r", hypothesis_ids=[h],
+        started_at="2026-01-01T00:00:00+00:00",
+        completed_at="2026-01-01T01:00:00+00:00", status="OPEN_FOR_REVIEW")
+    msg = _cite(n, h, "D001")
+    assert msg.startswith("ERROR:")
+    assert "OPEN FOR REVIEW" in msg and "approve=True" in msg
+    assert "not a completed delegation" not in msg
+
+
+def test_cited_delegation_that_is_running_or_unknown_says_which(tmp_path):
+    n = _node(tmp_path)
+    h = _propose(n)
+    n._delegation_log.record(
+        id="D001", from_node="strategizer", to_node="implementer", task="t",
+        deliverable="", hypothesis_ids=[h],
+        started_at="2026-01-01T00:00:00+00:00", completed_at="",
+        status="RUNNING")
+    assert "still running" in _cite(n, h, "D001")
+    assert "not a delegation of this run" in _cite(n, h, "D009")
