@@ -222,9 +222,9 @@ def _track_message_usage(
 
 
 def _usage_fields(event: Any) -> dict:
-    """Usage worth persisting on a transcript ``stream_evt`` row, so a run's
-    spend can be recomputed from the transcript alone (see
-    ``adda._src.infra.usage_recompute``)."""
+    """Usage worth persisting on a transcript ``stream_evt`` row. Nothing in
+    adda sums these; ``debug/telemetry`` is the total. One API call can appear
+    as two rows with one ``message_id``, so dedupe by it before summing."""
     if not isinstance(event, dict):
         return {}
     et = event.get("type")
