@@ -94,6 +94,24 @@ def get_run_config_path() -> str | None:
     return getattr(_transcript_tls, "run_config_path", None)
 
 
+def append_diagnostic(debug_dir: Path, node: str, event_type: str,
+                      message: str, **extra: Any) -> None:
+    """Append one fault row to ``debug_dir/diagnostics.jsonl`` (may raise)."""
+    import json as _json
+    from datetime import datetime, timezone
+    record: dict = {
+        "ts": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
+        "node": node,
+        "tool": event_type,
+        "error_type": event_type,
+        "fault": "system",
+        "message": message,
+    }
+    record.update(extra)
+    with (Path(debug_dir) / "diagnostics.jsonl").open("a", encoding="utf-8") as f:
+        f.write(_json.dumps(record) + "\n")
+
+
 def record_stream_diagnostic(event_type: str, message: str, **extra: Any) -> None:
     """Best-effort append to this delegation's ``debug/diagnostics.jsonl``.
 
@@ -116,20 +134,9 @@ def record_stream_diagnostic(event_type: str, message: str, **extra: Any) -> Non
         rc = get_run_config_path()
         if not rc:
             return
-        import json as _json
-        from datetime import datetime, timezone
-        debug_dir = Path(rc).parent
-        record: dict = {
-            "ts": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
-            "node": get_delegation_id() or get_diagnostic_label() or "",
-            "tool": event_type,
-            "error_type": event_type,
-            "fault": "system",
-            "message": message,
-        }
-        record.update(extra)
-        with (debug_dir / "diagnostics.jsonl").open("a", encoding="utf-8") as f:
-            f.write(_json.dumps(record) + "\n")
+        append_diagnostic(
+            Path(rc).parent, get_delegation_id() or get_diagnostic_label() or "",
+            event_type, message, **extra)
     except Exception:  # noqa: BLE001
         pass
 

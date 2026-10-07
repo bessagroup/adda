@@ -2045,3 +2045,13 @@ race between concurrent runs in one process. `runtime/study_config.py` lists the
 top-level keys; an unknown one is a startup error (and a viewer error) with a
 "did you mean" hint. `study:` is reserved for the study's own scripts; adda never
 reads inside it. **Status:** core.
+
+### Native tool errors are results (openai-compatible backends)
+
+A native tool (`Read`, `Write`, `Edit`, `Glob`, `Grep`, `Bash`, `BashOutput`,
+`KillShell`, and the literature tools) that raises returns `ERROR: <ExceptionType>:
+<message>` to the model. `_guard_native` in `backends/openai_compatible.py` does
+this for every one of them. Before, the exception ended the whole delegation (for
+example `Read` on a directory). Each error result, raised or returned, also
+writes an `ERROR_RETURN` row to `diagnostics.jsonl` with the tool name and its
+arguments, so the KPI counts it. **Status:** core.

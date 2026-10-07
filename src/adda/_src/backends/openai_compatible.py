@@ -466,11 +466,47 @@ def _make_write_tool(cwd: Path | None, nudge: Any = None) -> Any:
     return StructuredTool.from_function(write_file, name="Write")
 
 
-def _native_tool_map(cwd: Path | None, nudge: Any = None) -> dict[str, Any]:
+def _guard_native(tool: Any, on_error: Any = None) -> Any:
+    """Make a tool's failure a result the model reads, never a crash.
+
+    An exception that leaves a tool propagates through LangGraph and ends the
+    whole delegation, so one bad path (a directory handed to Read) cost the
+    entire delegation. The wrapper returns ``ERROR: <Type>: <message>`` instead
+    and reports it to *on_error* (``tool_name, message, args``), so it counts
+    as ERROR_RETURN as the closure tools do. A result that already starts with
+    "ERROR:" is reported too. LangChain's ``handle_tool_error`` covers only
+    ``ToolException``, not these errors. The sink is a callable and not the
+    thread-local run context, because LangGraph runs tools on its own threads.
+    """
+    import functools
+
+    inner = tool.func
+
+    @functools.wraps(inner)
+    def guarded(*args, **kwargs):
+        try:
+            result = inner(*args, **kwargs)
+        except Exception as exc:  # noqa: BLE001
+            result = f"ERROR: {type(exc).__name__}: {exc}"
+        if (on_error is not None and isinstance(result, str)
+                and result.lstrip().startswith("ERROR:")):
+            try:
+                on_error(tool.name, result[:2000],
+                         {k: str(v)[:2000] for k, v in kwargs.items()})
+            except Exception:  # noqa: BLE001
+                pass
+        return result
+
+    tool.func = guarded
+    return tool
+
+
+def _native_tool_map(cwd: Path | None, nudge: Any = None,
+                     on_error: Any = None) -> dict[str, Any]:
     # One BashSession shared by Bash/BashOutput/KillShell so background shells
     # launched by Bash are visible to the companion tools.
     session = _BashSession(cwd)
-    return {
+    tools = {
         "Bash":  _make_bash_tool(cwd, nudge, session=session),
         "BashOutput": _make_bashoutput_tool(session),
         "KillShell":  _make_killshell_tool(session),
@@ -480,6 +516,7 @@ def _native_tool_map(cwd: Path | None, nudge: Any = None) -> dict[str, Any]:
         "Glob":  _make_glob_tool(cwd),
         "Grep":  _make_grep_tool(),
     }
+    return {name: _guard_native(t, on_error) for name, t in tools.items()}
 
 
 def _build_arxiv_closures() -> dict:
@@ -839,13 +876,24 @@ class OpenAICompatibleAdapter:
         return post_tool_context(
             self._oracle_nudge, tool_name, tool_input, debug_dir, did)
 
+    def _record_native_error(self, tool_name: str, message: str,
+                             args: dict) -> None:
+        """Write a native tool's error result as an ERROR_RETURN row."""
+        from .base import append_diagnostic
+        debug_dir, did = self._notice_ctx
+        if debug_dir is None:
+            return
+        append_diagnostic(debug_dir, did or "", "ERROR_RETURN", message,
+                          tool=tool_name, args=args, fault="agent")
+
     def _build_tools(self) -> list[Any]:
         import functools
 
         from langchain_core.tools import StructuredTool
 
         from ..prompts.tool_catalog import tool_summary
-        native_map = _native_tool_map(self.study_dir, self._post_tool_context)
+        native_map = _native_tool_map(
+            self.study_dir, self._post_tool_context, self._record_native_error)
         tools: list[Any] = [
             native_map[name]
             for name in self.native_tools
@@ -877,7 +925,8 @@ class OpenAICompatibleAdapter:
         if self.extra_allowed_tools:
             lit_tools = _make_literature_tools()
             allowed = set(self.extra_allowed_tools)
-            tools += [t for t in lit_tools if t.name in allowed]
+            tools += [_guard_native(t, self._record_native_error) for t in lit_tools
+                      if t.name in allowed]
         return tools
 
     def _build_agent(self) -> Any:
