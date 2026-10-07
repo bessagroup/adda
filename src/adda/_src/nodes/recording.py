@@ -96,8 +96,12 @@ class RecordingMixin:
         error_type: str,
         message: str,
         tb: str | None = None,
+        args: dict | None = None,
     ) -> None:
-        """Increment error counter and append to diagnostics.jsonl (thread-safe)."""
+        """Increment error counter and append to diagnostics.jsonl (thread-safe).
+
+        ``args`` are the call's arguments; each value is capped at 2,000 chars.
+        """
         import json as _json
 
         # Classify fault: system (transient API/network) vs agent (bad usage).
@@ -120,6 +124,8 @@ class RecordingMixin:
         }
         if tb:
             record["traceback"] = tb
+        if args:
+            record["args"] = {k: str(v)[:2000] for k, v in args.items()}
         try:
             with (debug_dir / "diagnostics.jsonl").open("a", encoding="utf-8") as f:
                 f.write(_json.dumps(record) + "\n")

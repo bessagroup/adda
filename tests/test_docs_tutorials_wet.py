@@ -145,7 +145,8 @@ def test_quickstart_branin_runs_without_crashing(tmp_path):
         "Minimise the 2D Branin function over its standard domain.\n"
         "Report the best design found and the objective value there.\n"
     )
-    (study_dir / "config.yaml").write_text("backend: openrouter\n")
+    (study_dir / "config.yaml").write_text(
+        "backend: openrouter\nruntime:\n  debug: true\n")
     _run_and_check(study_dir)
 
 
@@ -167,6 +168,8 @@ def test_authoring_a_study_worked_example_runs_without_crashing(tmp_path):
     # OpenRouter instead. eval_budget/evaluator are unmodified.
     (study_dir / "config.yaml").write_text(
         "backend: openrouter\n"
+        "runtime:\n"
+        "  debug: true\n"
         "eval_budget: 200\n"
         "evaluator:\n"
         '  entrypoint: "workspace/evaluator.py:evaluate"\n'

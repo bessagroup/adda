@@ -682,6 +682,7 @@ class OrchestrationMixin:
         def _wrapped(*args, **kwargs):
             node._raise_if_abandoned()
             # Coerce string args before calling the real function.
+            call_args = dict(kwargs)
             try:
                 bound = _inspect.signature(fn).bind_partial(
                     *args, **kwargs
@@ -691,6 +692,7 @@ class OrchestrationMixin:
                         pname, bound.arguments[pname]
                     )
                 args, kwargs = bound.args, bound.kwargs
+                call_args = dict(bound.arguments)
             except TypeError:
                 pass  # signature mismatch: let fn raise its own error
 
@@ -704,7 +706,8 @@ class OrchestrationMixin:
                         node_name,
                         tool_name,
                         "ERROR_RETURN",
-                        result[:300],
+                        result[:2000],
+                        args=call_args,
                     )
                 # A tool can carry a diagnostic source (e.g. ConsultLiterature
                 # tags itself with its LiteratureCorpus) for facts that are
@@ -753,8 +756,9 @@ class OrchestrationMixin:
                     node_name,
                     tool_name,
                     type(exc).__name__,
-                    str(exc)[:300],
+                    str(exc)[:2000],
                     tb=traceback.format_exc(),
+                    args=call_args,
                 )
                 raise
 

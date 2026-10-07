@@ -274,3 +274,28 @@ def test_cited_delegation_that_is_running_or_unknown_says_which(tmp_path):
         status="RUNNING")
     assert "still running" in _cite(n, h, "D001")
     assert "not a delegation of this run" in _cite(n, h, "D009")
+
+
+def test_error_return_row_carries_the_call_arguments_and_the_whole_message(tmp_path):
+    import json
+    n = _node(tmp_path)
+    h = _propose(n)
+    msg = _cite(n, h, "D009")
+    rows = [json.loads(x) for x in
+            (tmp_path / "debug" / "diagnostics.jsonl").read_text().splitlines()]
+    (row,) = [r for r in rows if r["error_type"] == "ERROR_RETURN"]
+    assert row["tool"] == "HypothesisUpdate"
+    assert row["args"]["hypothesis_id"] == h
+    assert row["args"]["evidence"] == str({"delegation": "D009",
+                                           "numbers": {"best_f": 1.47}})
+    assert row["message"] == msg
+
+
+def test_error_row_caps_each_field(tmp_path):
+    import json
+    n = _node(tmp_path)
+    n._record_tool_error("strategizer", "T", "ERROR_RETURN", "m",
+                         args={"content": "x" * 5000})
+    row = json.loads(
+        (tmp_path / "debug" / "diagnostics.jsonl").read_text().splitlines()[-1])
+    assert len(row["args"]["content"]) == 2000
