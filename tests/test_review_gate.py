@@ -39,7 +39,8 @@ class _FakeWorker:
                  raises=False, resume_raises=False, revised_text=None):
         self.closure_tools: dict = {}
         self._text = text
-        self._revised_text = revised_text or ("A revised report.\n\n" * 5)
+        self._revised_text = revised_text or (
+            "## Report\n\n" + "A revised report.\n\n" * 5)
         self._raises = raises
         self._resume_raises = resume_raises
         self.last_usage: dict = {}
@@ -808,16 +809,16 @@ def test_feedback_or_approval_on_an_unread_report_is_refused():
 
 
 def test_retrospective_is_read_from_the_newest_version_that_has_one(tmp_path):
-    """Regression (run 20261007T154633, D003): a follow-up reply replaces the
-    deliverable, and a plain answer holds no retrospective. The exit interview
-    was written with the full report, so it is read from that version."""
+    """A revision may lack the retrospective the first report carried. The
+    exit interview was written with the full report, so it is read from
+    the newest version that has one."""
     import json as _json
     from adda._src.infra.delegation_log import DelegationLog
 
     (tmp_path / "debug").mkdir(parents=True)
     report = ("A full report.\n\n### Retrospective\n- CONSISTENCY: ok\n"
               "- DECISION: seed 0\n- FRICTION: none\n- BLOCKED: none\n")
-    worker = _FakeWorker(text=report, revised_text="Short chat answer.")
+    worker = _FakeWorker(text=report, revised_text="## Report\nRevised, no retrospective.")
     log = DelegationLog(tmp_path / "debug" / "delegation_log.jsonl")
     node = _make_node(worker=worker, delegation_log=log)
     node._current_notes_dir = tmp_path / "debug" / "strategizer_notes"
@@ -838,3 +839,60 @@ def test_retrospective_is_read_from_the_newest_version_that_has_one(tmp_path):
     assert rec["parse_failed"] is False
     assert "DECISION: seed 0" in rec["text"]
     assert isinstance(rec["deliverable_version"], int)
+
+
+def test_a_reply_to_a_question_does_not_replace_the_report(tmp_path):
+    """Regression (run 20261007T154633, D003): a plain answer to a review
+    question used to become the delegation's deliverable, hiding the 4385-char
+    report behind a 1815-char chat reply. Only a text with the report
+    headings is a revision; anything else is a reply kept beside the report."""
+    import json as _json
+    from adda._src.infra.delegation_log import DelegationLog
+
+    (tmp_path / "debug").mkdir(parents=True)
+    report = "## Report\n\nThe full report.\n"
+    worker = _FakeWorker(text=report, revised_text="Short chat answer.")
+    log = DelegationLog(tmp_path / "debug" / "delegation_log.jsonl")
+    node = _make_node(worker=worker, delegation_log=log)
+    dt = DelegationTools(node)
+    set_delegation_id(None)
+
+    dt.Delegate("implementer", "do the thing", "a report", wait=True)
+    did = next(iter(node._registry))
+    dt.SendMessage(did, "what does this bound mean?")
+    _join_resume_thread(node, did)
+
+    entry = node._registry[did]
+    assert entry["status"] == "OpenForReview"
+    assert "The full report." in entry["result"]
+    assert entry["reply"].startswith("Short chat answer.")
+
+    out = dt.Wait()
+    assert "REPLY to your message" in out and "Short chat answer." in out
+    assert "unchanged" in out
+
+    last = _json.loads(
+        (tmp_path / "debug" / "delegation_log.jsonl").read_text()
+        .splitlines()[-1])
+    assert last["status"] == "OPEN_FOR_REVIEW"
+    assert "The full report." in last["deliverable"]
+    assert last["reply"].startswith("Short chat answer.")
+
+    dt.SendMessage(did, "thanks", approve=True)
+    assert "The full report." in node._registry[did]["result"]
+
+
+def test_a_revised_report_replaces_the_report_and_clears_the_reply():
+    worker = _FakeWorker(revised_text="## Report\n\nA second report.\n")
+    node = _make_node(worker=worker)
+    dt = DelegationTools(node)
+    set_delegation_id(None)
+
+    dt.Delegate("implementer", "do the thing", "a report", wait=True)
+    did = next(iter(node._registry))
+    dt.SendMessage(did, "please fix the bound")
+    _join_resume_thread(node, did)
+
+    entry = node._registry[did]
+    assert "A second report." in entry["result"]
+    assert entry["reply"] is None

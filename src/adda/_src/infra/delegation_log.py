@@ -96,8 +96,12 @@ class DelegationLog:
         constraints: dict | None = None,
         workspace_sha: str | None = None,
         critic_review: str | None = None,
+        reply: str | None = None,
     ) -> None:
         """Append one delegation record.
+
+        ``reply`` is a worker's answer to a review question. It is kept
+        beside the deliverable, never in place of it.
 
         ``critic_review`` is the ``debug/critic_reviews/`` file a critic
         delegation (GATE or FEEDBACK) produced, e.g. ``call_003.md``; None
@@ -139,6 +143,8 @@ class DelegationLog:
             "workspace_sha": workspace_sha,
             "critic_review": critic_review,
         }
+        if reply is not None:
+            record["reply"] = reply
         with self._lock:
             with self._path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(record) + "\n")

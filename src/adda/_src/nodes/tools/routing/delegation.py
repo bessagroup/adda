@@ -37,6 +37,7 @@ from ..._constants import (
 from ...notices import wrap_notice
 from ...parsing import (
     _classify_response,
+    _has_section,
     _reconcile_delegation_evals,
     _stamped_eval_count,
 )
@@ -76,10 +77,20 @@ _MCP_ERROR_PATTERNS = (
 # (not node name) keeps it forward-compatible across node renames.
 
 
-def open_for_review_message(delegation_id: str, result: str) -> str:
+def open_for_review_message(
+    delegation_id: str, result: str, reply: str | None = None,
+) -> str:
     """The one message every path gives for a report that is ready but not
     yet approved (Delegate(wait=True), a status poll, a bare or named
-    Wait)."""
+    Wait). With a ``reply``, the worker answered a question: the report is
+    unchanged and the reply is what is new."""
+    if reply:
+        return (
+            f"[{delegation_id}] REPLY to your message -- {reply}"
+            "\n\nThe report is unchanged and still OPEN FOR REVIEW. "
+            f"SendMessage({delegation_id!r}, ..., approve=True) to finalize "
+            "it, or ask another question."
+        )
     return (
         f"[{delegation_id}] report ready but OPEN FOR REVIEW -- {result}"
         f"\n\nSendMessage({delegation_id!r}, ..., approve=True) to "
@@ -782,6 +793,7 @@ class WorkerSession:
         usage: dict,
         off_ledger: bool,
         stamped: int,
+        reply: str | None = None,
     ) -> None:
         """Hold this delegation open instead of finalizing it (spec 12
         item 3, ratified trigger: every non-error report, automatically,
@@ -790,6 +802,10 @@ class WorkerSession:
         ``SendMessage(to=<id>, message=..., approve=True)`` calls
         :meth:`finalize_after_review` below; anything else RESUMES the
         worker's session (:meth:`resume_and_revise`) with that message.
+
+        With ``reply`` set, ``text`` is the worker's answer to a question,
+        not a report: the recorded report stays the deliverable and the
+        reply is kept beside it (see ``_resume_and_revise``).
 
         Called on the FIRST report and on every REVISED one alike (the
         same path, not a special case): ``"waited"`` resets to False
@@ -831,9 +847,12 @@ class WorkerSession:
         )
         with node._registry_lock:
             entry = node._registry[delegation_id]
+            if reply is not None:
+                text = entry.get("result", "")
             entry.update({
                 "status": "OpenForReview",
                 "result": text,
+                "reply": reply,
                 "evals": evals,
                 "usage": usage,
                 "_review_off_ledger": off_ledger,
@@ -878,14 +897,17 @@ class WorkerSession:
                 # commit to AFTER approval; _finish_ok's own
                 # _commit_workspace call (unchanged) provides it then.
                 workspace_sha=None,
+                reply=reply,
             )
         parent_cond = node._get_delegator_cond(entry.get("parent", "entry"))
         with parent_cond:
             parent_cond.notify_all()
         with node._notifications_lock:
             node._notifications.append(
-                f"[Delegation {delegation_id} report ready for review -- "
-                "SendMessage(id, ..., approve=True) to finalize it, or "
+                f"[Delegation {delegation_id} "
+                + ("replied to your message; its report is unchanged -- "
+                   if reply is not None else "report ready for review -- ")
+                + "SendMessage(id, ..., approve=True) to finalize it, or "
                 "ask a question first]"
             )
             if unread_pending:
@@ -964,7 +986,11 @@ class WorkerSession:
             self._flag_mcp_errors(text)
             evals, off_ledger, stamped = self._reconcile_evals()
             text = self._append_budget_report(text)
-            self._open_for_review(text, evals, usage, off_ledger, stamped)
+            # A revision carries the report headings; a plain answer to the
+            # question does not. Only a revision replaces the report.
+            self._open_for_review(
+                text, evals, usage, off_ledger, stamped,
+                reply=None if _has_section(text, "Report") else text)
         except Exception:  # noqa: BLE001
             self._finish_error(traceback.format_exc())
 
@@ -1772,7 +1798,8 @@ class DelegationTools:
                     if _live is not None:
                         _live["waited"] = True
                 return open_for_review_message(
-                    delegation_id, entry.get("result", ""))
+                    delegation_id, entry.get("result", ""),
+                    entry.get("reply"))
             return f"Errored:\n{entry.get('result', '(no details)')}"
 
         if queue_reason:
@@ -2195,7 +2222,7 @@ class DelegationTools:
             # item 3's open question 3) -- mark it.
             entry["waited"] = True
             return open_for_review_message(
-                delegation_id, entry["result"]) + _tail
+                delegation_id, entry["result"], entry.get("reply")) + _tail
         if status == "Revising":
             return (
                 f"[{delegation_id}] resuming its session to revise its "
@@ -2613,7 +2640,8 @@ class DelegationTools:
                     cp = entry.get("checkpoint", "")
                     if entry["status"] == "OpenForReview":
                         body = open_for_review_message(
-                            did, entry.get("result", ""))
+                            did, entry.get("result", ""),
+                            entry.get("reply"))
                     else:
                         body = (f"[{did}] {entry['status']}\n\n"
                                 f"{entry.get('result', '')}")
@@ -2759,7 +2787,7 @@ class DelegationTools:
         cp = entry.get("checkpoint", "")
         if entry.get("status") == "OpenForReview":
             body = open_for_review_message(
-                delegation_id, entry.get("result", ""))
+                delegation_id, entry.get("result", ""), entry.get("reply"))
         else:
             body = (f"{entry.get('status', 'Unknown')}\n\n"
                     f"{entry.get('result', '')}")

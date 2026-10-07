@@ -530,9 +530,17 @@ commit(s) that build this:
   `ClaudeAgentOptions(resume=...)`/SDK equivalent) with the question as
   its next user turn, framed with the `<adda-note>`; asserts the resume
   parameter used, not a fresh unrelated session.
-- `test_worker_revises_report_after_a_review_question` — the resumed
-  session's new final text replaces the delegation's recorded report, and
-  it is validated by `_classify_response` again exactly as the first was.
+- `test_worker_revises_report_after_a_review_question` — a resumed session
+  that answers with a text carrying the report headings (`## Report`) has
+  REVISED its report: that text replaces the delegation's recorded report,
+  and it is validated by `_classify_response` again exactly as the first
+  was.
+- `test_a_reply_to_a_question_does_not_replace_the_report` — any other
+  answer is a REPLY. The recorded report stays the deliverable; the reply
+  is kept beside it (`reply` on the registry entry and on the
+  OPEN_FOR_REVIEW log row), delivered once through `Wait` as "REPLY to
+  your message", and the review stays open. Run 20261007T154633 (D003): a
+  1815-char chat reply had replaced a 4385-char report.
 - `test_resume_failure_falls_back_and_is_recorded_as_a_diagnostic` — a
   mocked resume failure (SDK error / expired session) falls back to
   reconstructing from recorded history AND fires a diagnostic event
