@@ -670,7 +670,12 @@ class ClaudeAdapter:
         try:
             from claude_agent_sdk import HookMatcher
 
-            from .base import OracleNudgeBudget, oracle_registered
+            from .base import (
+                OracleNudgeBudget,
+                get_delegation_id,
+                get_run_config_path,
+                oracle_registered,
+            )
             # Silent until an oracle is registered: pre-registration work (the
             # datagenerator wrapping/validating its raw source) has no
             # get_evaluator() to use, so nudging it is a false positive.
@@ -679,10 +684,19 @@ class ClaudeAdapter:
             # firings as direct evidence (see _record_intervention).
             self._oracle_nudge = _nudge
 
+            # The hook may run on another thread, so bind the delegation and
+            # the run's debug dir now, while this thread still holds them.
+            from ..infra import pending_notices as _pn
+            _rc = get_run_config_path()
+            _pn_dir = Path(_rc).parent if _rc else None
+            _pn_did = get_delegation_id()
+
             async def _oracle_hook(input_data, tool_use_id, context):
-                msg = _nudge.check(
+                msg = _pn.post_tool_context(
+                    _nudge,
                     input_data.get("tool_name", ""),
                     input_data.get("tool_input") or {},
+                    _pn_dir, _pn_did,
                 )
                 if not msg:
                     return {}

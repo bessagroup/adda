@@ -101,7 +101,18 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   design: a per-design line once made a 150-design campaign print 185 KB, which
   the CLI cut to a 2 KB preview that never held the warning. The first examples
   and the counts are also in the `DEDUP_SKIPPED` diagnostic (`detail`). A skip is
-  also printed in-band to the campaign and counts toward the soft
+  **Pending-notice bridge** (`infra/pending_notices.py`): the wrapper also
+  queues each aggregate `[EVAL NOT STORED]` / `[ORACLE CHANGED]` notice in
+  `<run>/debug/pending_notices/<delegation>.jsonl`. The backend's post-tool hook
+  (Claude: the PostToolUse hook that carries the raw-oracle nudge; OpenAI-
+  compatible: the Bash/Write tool's nudge slot, one shared
+  `post_tool_context`) drains the file for its own delegation and returns the
+  text, wrapped in `<adda-note>`, as extra context outside the tool result. The
+  CLI keeps only the first 2 KB of a large result, so stdout alone can hide the
+  line behind a long campaign log. stdout keeps its copy. Status: delivered as
+  `additionalContext`; that the model receives it is NOT yet verified against a
+  real transcript record.
+  A skip is also printed in-band to the campaign and counts toward the soft
   eval-budget nudge (not the canonical store tally). The key is computed from the
   inputs as submitted, before `execute()`, so evaluator-stamped kwargs can't
   defeat dedup or supersede. `dedup_scope="all"` (reproduction/deliverable

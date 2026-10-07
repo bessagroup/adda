@@ -605,9 +605,17 @@ class InstrumentedDataGenerator(DataGenerator):
                 msg += f" new={ex['new']!r}, stored={ex['stored']!r}"
             if len(msg) > 1500:
                 msg = msg[:1500] + " …"
-            print(msg, flush=True)
+            self._announce(msg)
         except Exception:  # noqa: BLE001
             pass
+
+    def _announce(self, msg: str) -> None:
+        """stdout (the tool result) plus the pending-notice file the backend's
+        post-tool hook drains, so a long result cannot hide the notice."""
+        print(msg, flush=True)
+        from ..infra import pending_notices
+        pending_notices.post(
+            self.store_dir.parent / "debug", self.delegation_id, msg)
 
     def _notify_rev_changed(self) -> None:
         """One line per flush: designs stored again because the oracle's
@@ -617,14 +625,13 @@ class InstrumentedDataGenerator(DataGenerator):
             key, old = self._rev_changed[0]
             design = ", ".join(f"{c}={v}" for c, v in key)
             old_revs = sorted({r for _, r in self._rev_changed})
-            print(
+            self._announce(
                 f"[ORACLE CHANGED — {self.delegation_id}] {n} design(s) "
                 f"already have a row from oracle revision "
                 f"{', '.join(old_revs)}; this evaluation ran revision "
                 f"{self.oracle_rev}, so it was stored as a new row. The older "
                 "row stays in the store, marked by its _oracle_rev column, "
-                f"and came from a superseded oracle. First: ({design}).",
-                flush=True)
+                f"and came from a superseded oracle. First: ({design}).")
         except Exception:  # noqa: BLE001
             pass
 

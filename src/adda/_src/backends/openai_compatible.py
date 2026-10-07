@@ -798,6 +798,7 @@ class OpenAICompatibleAdapter:
         # Non-blocking raw-oracle nudge, capped per delegation (= per invoke).
         from .base import OracleNudgeBudget
         self._oracle_nudge = OracleNudgeBudget()
+        self._notice_ctx: tuple = (None, None)
         # Populated after each invoke() with token counts for run-level accounting.
         self.last_usage: dict = {}
         # Parity with ClaudeAdapter's session-resumption capture (spec 12
@@ -823,9 +824,19 @@ class OpenAICompatibleAdapter:
         twin._summary_cache = {}
         twin._agent = None
         twin._oracle_nudge = OracleNudgeBudget()
+        twin._notice_ctx = (None, None)
         twin.last_usage = {}
         twin.last_session_id = None
         return twin
+
+    def _post_tool_context(self, tool_name: str, tool_input: dict) -> str | None:
+        """Raw-oracle nudge plus queued campaign notices, same text the Claude
+        backend's post-tool hook returns. Tool closures run on other threads,
+        so the delegation context is the one bound at invoke time."""
+        from ..infra.pending_notices import post_tool_context
+        debug_dir, did = self._notice_ctx
+        return post_tool_context(
+            self._oracle_nudge, tool_name, tool_input, debug_dir, did)
 
     def _build_tools(self) -> list[Any]:
         import functools
@@ -833,7 +844,7 @@ class OpenAICompatibleAdapter:
         from langchain_core.tools import StructuredTool
 
         from ..prompts.tool_catalog import tool_summary
-        native_map = _native_tool_map(self.study_dir, self._oracle_nudge.check)
+        native_map = _native_tool_map(self.study_dir, self._post_tool_context)
         tools: list[Any] = [
             native_map[name]
             for name in self.native_tools
@@ -1141,6 +1152,10 @@ class OpenAICompatibleAdapter:
         # One invoke == one delegation's worker run; reset the per-delegation
         # nudge cap. The cached agent's tool closures read this live.
         self._oracle_nudge.reset()
+        from .base import get_delegation_id, get_run_config_path
+        _rc = get_run_config_path()
+        self._notice_ctx = (Path(_rc).parent if _rc else None,
+                            get_delegation_id())
         if self._agent is None:
             self._agent = self._build_agent()
 
