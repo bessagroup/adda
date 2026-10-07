@@ -20,6 +20,7 @@ from __future__ import annotations
 
 #                                                                      Modules
 # ==========================================================================
+import inspect
 import time
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -263,7 +264,15 @@ class InstrumentedDataGenerator(DataGenerator):
         # (see _coord_key's own docstring; real bug, run 20260927T012131).
         _submitted_key = self._coord_key(experiment_sample._input_data)
         _t0 = time.perf_counter()
-        out = self.inner.execute(experiment_sample, **kwargs)
+        try:
+            inspect.signature(self.inner.execute).bind(
+                experiment_sample=experiment_sample, **kwargs)
+        except TypeError as exc:
+            raise TypeError(
+                "execute() must accept experiment_sample= by keyword "
+                "(f3dasm's driver passes it so)") from exc
+        out = self.inner.execute(experiment_sample=experiment_sample,
+                                 **kwargs)
         _wall_ms = (time.perf_counter() - _t0) * 1000.0
 
         # Stamp provenance into the output dict.

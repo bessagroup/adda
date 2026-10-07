@@ -1133,3 +1133,23 @@ def test_a_150_design_skip_prints_one_bounded_line_and_records_detail(
     detail = [r for r in recs if r["error_type"] == "DEDUP_SKIPPED"][-1]["detail"]
     assert detail["n_skipped"] == 150 and detail["n_differs"] == 150
     assert 1 <= len(detail["examples"]) <= 3
+
+
+class _WrongParamName(DataGenerator):
+    def execute(self, sample, **kwargs):
+        return sample
+
+
+def test_wrapper_names_the_keyword_contract_when_the_parameter_is_misnamed(
+        tmp_path):
+    from adda._src.evaluation.instrumented import InstrumentedDataGenerator
+
+    gen = InstrumentedDataGenerator(
+        inner=_WrongParamName(), store_dir=tmp_path, delegation_id="D001",
+        source="t", flush_every=1)
+    with pytest.raises(TypeError) as ei:
+        gen.execute(_make_sample())
+    assert ("execute() must accept experiment_sample= by keyword"
+            in str(ei.value))
+    assert isinstance(ei.value.__cause__, TypeError)
+    assert "'sample'" in str(ei.value.__cause__)

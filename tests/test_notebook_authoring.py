@@ -184,7 +184,8 @@ def test_authored_notebook_passes_the_gate(tmp_path):
     store_dir.mkdir()
 
     class _Sum(DataGenerator):
-        def execute(self, s, **k):
+        def execute(self, experiment_sample, **k):
+            s = experiment_sample
             s._output_data["f"] = sum(s._input_data.values())
             s.job_status = JobStatus.FINISHED
             return s
@@ -229,7 +230,8 @@ def test_check_deliverable_sees_evals_in_a_design_namespace_only(tmp_path):
     ns_store_dir.mkdir(parents=True)
 
     class _Sum(DataGenerator):
-        def execute(self, s, **k):
+        def execute(self, experiment_sample, **k):
+            s = experiment_sample
             s._output_data["f"] = sum(s._input_data.values())
             s.job_status = JobStatus.FINISHED
             return s

@@ -88,7 +88,8 @@ def test_no_provenance_block_means_no_extra_columns(tmp_path):
     from f3dasm._src.core import DataGenerator
 
     class _Const(DataGenerator):
-        def execute(self, s, **k):
+        def execute(self, experiment_sample, **k):
+            s = experiment_sample
             s._output_data["y"] = 1.0
             return s
 

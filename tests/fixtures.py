@@ -181,7 +181,8 @@ class ScriptedStrategistAdapter:
                 from f3dasm._src.core import DataGenerator
                 from f3dasm._src.experimentsample import ExperimentSample, JobStatus
                 class _Stub(DataGenerator):
-                    def execute(self, s, **k):
+                    def execute(self, experiment_sample, **k):
+                        s = experiment_sample
                         s._output_data["f"] = 0.0
                         s.job_status = JobStatus.FINISHED
                         return s

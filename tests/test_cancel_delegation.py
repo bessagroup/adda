@@ -119,7 +119,8 @@ def _seed_store(store_dir, delegation_id):
     from f3dasm._src.experimentsample import ExperimentSample, JobStatus
 
     class _Sum(DataGenerator):
-        def execute(self, s, **k):
+        def execute(self, experiment_sample, **k):
+            s = experiment_sample
             s._output_data["f"] = sum(s._input_data.values())
             s.job_status = JobStatus.FINISHED
             return s

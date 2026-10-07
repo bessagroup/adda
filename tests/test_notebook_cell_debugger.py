@@ -100,7 +100,8 @@ def test_runpipelinecell_upto_name_accepts_a_custom_phase_cell(tmp_path):
             return "ok"
 
     class _Sum(DataGenerator):
-        def execute(self, s, **k):
+        def execute(self, experiment_sample, **k):
+            s = experiment_sample
             s._output_data["f"] = sum(s._input_data.values())
             s.job_status = JobStatus.FINISHED
             return s

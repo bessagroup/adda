@@ -30,7 +30,8 @@ class _StubAdapter:
 
 
 class _Sum(DataGenerator):
-    def execute(self, s, **k):
+    def execute(self, experiment_sample, **k):
+        s = experiment_sample
         s._output_data["f"] = sum(s._input_data.values())
         s.job_status = JobStatus.FINISHED
         return s
@@ -98,7 +99,8 @@ def test_gate_fails_when_pipeline_adds_evals(tmp_path):
         "from f3dasm._src.core import DataGenerator\n"
         "from f3dasm._src.experimentsample import ExperimentSample, JobStatus\n"
         "class G(DataGenerator):\n"
-        "    def execute(self, s, **k):\n"
+        "    def execute(self, experiment_sample, **k):\n"
+        "        s = experiment_sample\n"
         "        s._output_data['f'] = 1.0\n"
         "        s.job_status = JobStatus.FINISHED\n"
         "        return s\n"
@@ -126,7 +128,8 @@ def test_gate_fails_when_pipeline_adds_evals_to_a_namespace_store(tmp_path):
         "from f3dasm._src.core import DataGenerator\n"
         "from f3dasm._src.experimentsample import ExperimentSample, JobStatus\n"
         "class G(DataGenerator):\n"
-        "    def execute(self, s, **k):\n"
+        "    def execute(self, experiment_sample, **k):\n"
+        "        s = experiment_sample\n"
         "        s._output_data['f'] = 1.0\n"
         "        s.job_status = JobStatus.FINISHED\n"
         "        return s\n"
@@ -156,7 +159,9 @@ class _WithOptionalColumn(DataGenerator):
     def __init__(self, with_family: bool) -> None:
         self._with_family = with_family
 
-    def execute(self, s, **k):
+    def execute(self, experiment_sample, **k):
+
+        s = experiment_sample
         s._output_data["f"] = 1.0
         if self._with_family:
             s._output_data["family"] = "rectangle"
@@ -306,7 +311,8 @@ def test_gate_runs_in_sandbox_never_pollutes_real_ledger(tmp_path):
         "from f3dasm._src.core import DataGenerator\n"
         "from f3dasm._src.experimentsample import ExperimentSample, JobStatus\n"
         "class G(DataGenerator):\n"
-        "    def execute(self, s, **k):\n"
+        "    def execute(self, experiment_sample, **k):\n"
+        "        s = experiment_sample\n"
         "        s._output_data['f'] = 1.0\n"
         "        s.job_status = JobStatus.FINISHED\n"
         "        return s\n"
@@ -369,7 +375,8 @@ _LOAD_OR_CREATE_PIPELINE = (
     "    from f3dasm._src.core import DataGenerator\n"
     "    from f3dasm._src.experimentsample import ExperimentSample, JobStatus\n"
     "    class _Sum(DataGenerator):\n"
-    "        def execute(self, s, **k):\n"
+    "        def execute(self, experiment_sample, **k):\n"
+    "            s = experiment_sample\n"
     "            s._output_data['f'] = sum(s._input_data.values())\n"
     "            s.job_status = JobStatus.FINISHED\n"
     "            return s\n"
@@ -577,7 +584,8 @@ def test_repro_gate_fails_when_notebook_adds_evals(tmp_path):
         "from f3dasm._src.core import DataGenerator\n"
         "from f3dasm._src.experimentsample import ExperimentSample, JobStatus\n"
         "class G(DataGenerator):\n"
-        "    def execute(self, s, **k):\n"
+        "    def execute(self, experiment_sample, **k):\n"
+        "        s = experiment_sample\n"
         "        s._output_data['f'] = 1.0; s.job_status = JobStatus.FINISHED; return s\n"
         "g = InstrumentedDataGenerator(inner=G(), store_dir=os.environ['F3DASM_CANONICAL_STORE'],\n"
         "                              delegation_id='D777', flush_every=1)\n"
