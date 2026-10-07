@@ -36,3 +36,20 @@ instead of for the whole run, see
 [Use a different model or backend](use-a-different-model-or-backend.md#the-available-backends).
 
 The `runtime:` block has its own page: the [Runtime reference](runtime-reference.md).
+
+## Required deliverables
+
+`pipeline.ipynb` is always required. List any other file the study must hand
+back under `required_deliverables`, by bare filename:
+
+```yaml
+required_deliverables:
+  - design.json
+```
+
+adda refuses `Done()` until each listed file exists in the study directory. The
+agent writes it with `WriteDeliverable`, which takes a bare filename and writes
+into the study directory. A path with a directory, such as `temp/submission.json`,
+cannot be declared. If a study's `PROBLEM_STATEMENT.md` asks for a file by name,
+list that file here. A file that you do not list is not checked, and the run can
+finish without it.
