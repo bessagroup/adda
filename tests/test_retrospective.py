@@ -367,6 +367,27 @@ class TestRetrospectiveParseFailureIsHonest:
         assert raw in rec["text"]
         assert "contained no ### Retrospective section" in rec["text"]
 
+    def test_bold_label_lines_with_prose_paragraphs_are_one_retrospective(
+            self, tmp_path):
+        """Regression (run 20261007T154633): a bold-only label line such as
+        "**CONSISTENCY: flagged**" used to end the section at once, so a real
+        retrospective was recorded as a parse failure."""
+        node = self._node(tmp_path)
+        raw = (
+            "Done.\n\n### Retrospective on the System\n\n"
+            "**CONSISTENCY: flagged**\n\nThe gate contract says two things.\n\n"
+            "**DECISION: Hedging the scope claim**\n\nI hedged.\n\n"
+            "**FRICTION: Two critical usability issues**\n\nto_pandas.\n\n"
+            "**BLOCKED: None — all required capabilities were available**\n"
+        )
+        node._record_retrospective("strategizer", "DONE", raw)
+        (rec,) = self._entries(tmp_path)
+        assert rec["parse_failed"] is False
+        assert rec["flagged"] is True
+        for label in ("CONSISTENCY", "DECISION", "FRICTION", "BLOCKED"):
+            assert label in rec["text"]
+        assert "I hedged." in rec["text"]
+
     def test_genuinely_empty_summary_records_nothing(self, tmp_path):
         node = self._node(tmp_path)
         node._record_retrospective("strategizer", "DONE", "")

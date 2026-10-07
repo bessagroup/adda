@@ -248,7 +248,9 @@ def _has_section(text: str, name: str) -> bool:
     return any(opener.match(line) for line in text.splitlines())
 
 
-def _extract_report_section(text: str, name: str) -> str:
+def _extract_report_section(
+    text: str, name: str, items: tuple[str, ...] = ()
+) -> str:
     """Return the body of the section called ``name``, or '' if absent.
 
     The one section extractor for every heading-based parse (retrospectives,
@@ -260,11 +262,16 @@ def _extract_report_section(text: str, name: str) -> str:
     to the next heading, bold-only heading line, horizontal rule or end of
     text. A bold or ``X:`` opener that carries text on its own line ("Verdict:
     REVISE. I found ...") is a paragraph: it runs to the first blank line.
+    ``items`` names the labels the section is made of ("CONSISTENCY", ...): a
+    bold line that starts with one is part of the body, not a new heading.
     """
     import re as _re
     opener = _section_opener(name)
     stop = _re.compile(
         r"^\s*(?:\#{1,6}\s|---\s*$|(?:\*\*|__)[^*_\n]+(?:\*\*|__)\s*:?\s*$)")
+    item = (_re.compile(
+        r"^\s*(?:\*\*|__)\s*(?:" + "|".join(map(_re.escape, items)) + r")\b",
+        _re.IGNORECASE) if items else None)
     lines = text.splitlines()
     for i, line in enumerate(lines):
         m = opener.match(line)
@@ -275,7 +282,8 @@ def _extract_report_section(text: str, name: str) -> str:
         inline = bool(rest)
         body = [rest] if inline else []
         for nxt in lines[i + 1:]:
-            if stop.match(nxt) or (inline and not nxt.strip()):
+            if (stop.match(nxt) and not (item and item.match(nxt))) or (
+                    inline and not nxt.strip()):
                 break
             body.append(nxt)
         return "\n".join(body).strip()
