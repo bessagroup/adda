@@ -73,3 +73,5 @@ studies/*/surrogates/
 studies/*/pipeline*.ipynb
 studies/*/*.log
 studies/*/test_summary.json
+.vale/styles/*
+!.vale/styles/config

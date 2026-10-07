@@ -37,6 +37,15 @@ jobs:
           python -m pip install '.[docs,all]'
       - name: Build docs
         run: mkdocs build --strict
+      # Style check, Google developer documentation style. Reports only until
+      # the pages are clean; the last step of the docs overhaul makes it fail.
+      - name: Install Vale
+        run: |
+          curl -sSfL https://github.com/errata-ai/vale/releases/download/v3.24.0/vale_3.24.0_Linux_64-bit.tar.gz | sudo tar -xz -C /usr/local/bin vale
+          vale sync
+      - name: Style check docs
+        continue-on-error: true
+        run: vale docs
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
