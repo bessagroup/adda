@@ -56,3 +56,14 @@ def test_no_retrospectives_file_is_empty_not_an_error(tmp_path):
     assert c.get(f"/api/runs/{RUN}/retrospectives").json() == {
         "retrospectives": [], "missing": []}
     assert c.get("/api/runs/nope/retrospectives").status_code == 404
+
+
+def test_bold_label_lines_split_without_stray_markers():
+    pre, sec = _split_retrospective(
+        "**CONSISTENCY: flagged**\n\nThe gate says two things.\n\n"
+        "**DECISION: Hedging the scope claim**\n\nI hedged.\n\n"
+        "**BLOCKED: None — all required capabilities were available**\n"
+    )
+    assert sec["DECISION"].startswith("Hedging the scope claim")
+    assert "**" not in sec["DECISION"] and "**" not in sec["BLOCKED"]
+    assert "I hedged." in sec["DECISION"]

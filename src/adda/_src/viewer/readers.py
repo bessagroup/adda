@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from ..infra.delegation_log import DelegationLog
+from ..nodes.parsing import RETRO_LABELS
 
 __all__ = [
     "notebook_path",
@@ -1744,9 +1745,8 @@ def read_monitor_injections(run_dir: Path | str) -> list[dict[str, Any]]:
     return out
 
 
-_RETRO_SECTIONS = ("CONSISTENCY", "DECISION", "FRICTION", "BLOCKED", "TIME")
 _RETRO_HEAD = re.compile(
-    r"^[ \t]*(?:#+[ \t]+|[-*][ \t]+)?\**(" + "|".join(_RETRO_SECTIONS)
+    r"^[ \t]*(?:#+[ \t]+|[-*][ \t]+)?\**(" + "|".join(RETRO_LABELS)
     + r")\**[ \t]*[:\uff1a]?\**[ \t]*", re.MULTILINE)
 
 
@@ -1762,6 +1762,8 @@ def _split_retrospective(text: str) -> tuple[str, dict[str, str]]:
     sections: dict[str, str] = {}
     for m, nxt in zip(heads, [*heads[1:], None], strict=True):
         body = text[m.end(): nxt.start() if nxt else len(text)].strip()
+        if body.split("\n", 1)[0].count("**") % 2:
+            body = body.replace("**", "", 1).strip()
         key = m.group(1)
         sections[key] = f"{sections[key]}\n\n{body}" if key in sections else body
     return text[: heads[0].start()].strip(), sections
