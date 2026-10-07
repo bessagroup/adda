@@ -178,6 +178,8 @@ KNOB = [
      [S + "runtime/features.py", S + "prompts/agent_prompts.py"]),
     ("k16", "how do I stop it pushing the agent to try again when it ends without finishing",
      [S + "runtime/features.py", S + "nodes/orchestration.py"]),
+    ("k17", "how do I stop the data generator checking its model against known answers",
+     [S + "runtime/features.py", S + "agents/datagenerator.py"]),
 ]
 
 #: Which query is the way to ASK FOR each declared feature knob.
@@ -201,6 +203,7 @@ KNOB_COVERAGE = {
     "budget_notes": "k14",
     "delegation_contract": "k15",
     "reprompt_unfinished": "k16",
+    "model_verification": "k17",
 }
 
 TIERS = {"name": NAME, "concept": CONCEPT, "error": ERROR,

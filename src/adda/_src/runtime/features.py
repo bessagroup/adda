@@ -243,6 +243,17 @@ FEATURES: tuple[Feature, ...] = (
         behaviours=("delegation_contract",),
     ),
     Feature(
+        key="model_verification",
+        default=True,
+        # No tools and no tagged section. Its prompt contribution is the
+        # CORRECTNESS CHECK paragraph of the data generator's principle 2 and
+        # its report lines, resolved by inline gates; its handbook chapter
+        # (verify-before-you-trust) carries ``feature: model_verification``
+        # and is hidden while the knob is off. Off is the arm that checks the
+        # interface (one sample through .call()) and nothing more.
+        behaviours=("model_verification",),
+    ),
+    Feature(
         key="reprompt_unfinished",
         default=True,
         # The bounded re-prompt after a turn ends without an accepted Done(),

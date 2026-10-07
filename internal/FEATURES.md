@@ -1982,6 +1982,27 @@ runs).
   worker task message; `prompts/agent_prompts.py` inline gate.
   **Status:** done.
 
+### Data generator correctness check: `model_verification`
+- **What:** the data generator's principle 2 splits into an INTERFACE CHECK
+  (one sample through `.call()`, unchanged) and a CORRECTNESS CHECK: before
+  delivery the agent tests its model against expectations that come from
+  outside its code (it chooses them; the prompt names kinds, never study
+  cases) and records each in `validate_{name}.json` (expected value, source of
+  the expectation, obtained value, tolerance, pass or fail). A failed check is
+  reported, not hidden. The checks call the model directly, so they are not
+  metered and do not count against the evaluation budget. The `### Numbers`
+  block gains `correctness_checks`. The handbook chapter
+  `verify-before-you-trust` (audience: datagenerator, implementer) states the
+  principle once; the prompt points to it by id. Knob `model_verification`,
+  default on. Off, the data generator prompt is byte-identical to the one
+  before this feature, and the chapter is hidden (its `feature:` frontmatter).
+  No diagnostic and no critic change: nothing enforces the check yet.
+- **Where:** `agents/datagenerator.py` (inline `[[if model_verification]]`
+  gates); `knowledge/entries/0013-verify-before-you-trust.md`;
+  `runtime/features.py` (registry, so it shows in `arms` and the `arm_*`
+  ledger columns); `tests/test_model_verification.py`.
+  **Status:** done.
+
 ### Epistemic ownership follows the tools a node holds
 - **What:** a node with outgoing edges owns the hypothesis ledger only if it
   holds a hypothesis tool, the milestone ledger only if it holds a milestone

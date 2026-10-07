@@ -62,6 +62,7 @@ KNOWN_KEYS: frozenset[str] = frozenset({
     "bash_timeout_s",
     "budget_notes",
     "delegation_contract",
+    "model_verification",
     "reprompt_unfinished",
     "llm_metadata_timeout_s",
     "llm_quantization",

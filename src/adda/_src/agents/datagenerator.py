@@ -145,10 +145,12 @@ Your workspace is the debug/delegations/{delegation_id}/ folder assigned for thi
    sensitive modeling choices (imperfections, contact, material
    nonlinearity), and whether a validated reference implementation exists.
 
-2. ONE VALIDATED SAMPLE
+2. [[if model_verification]]INTERFACE CHECK: [[/if]]ONE VALIDATED SAMPLE
    Run exactly one sample to prove the wrapper works end-to-end.
    Report the input used, the output obtained, and the wall-clock time.
-   Do not run more unless the task explicitly asks for it.
+   Do not run more unless the task explicitly asks for it.[[if model_verification]]
+   The correctness checks below are not samples: they test the model, not the
+   design space.[[/if]]
    Validate by calling YOUR generator via .call() (e.g. gen.call(sample))
    — NOT through get_evaluator(), and NOT by calling the wrapped raw
    function directly (only .call() exercises the real execute() signature
@@ -157,7 +159,19 @@ Your workspace is the debug/delegations/{delegation_id}/ folder assigned for thi
    happens after you deliver. The "evaluate through get_evaluator()" rule
    applies to the implementer reaching the registered source, not to your
    one-sample validation.
-
+[[if model_verification]]
+   CORRECTNESS CHECK
+   The interface check shows that the generator runs, not that the model is
+   right. Before you deliver, test the model against expectations that come
+   from outside your code, such as an analytical limit or a simple special
+   case, a symmetry or invariance, equilibrium or conservation, a refinement
+   test, or a published reference value. You choose the checks. Call the model
+   directly, not through get_evaluator(): these calls are not metered and do
+   not count against the evaluation budget. Record each check in
+   validate_{name}.json: the expected value, the source of the expectation,
+   the value obtained, the tolerance, and pass or fail. Report a failed check
+   as it stands (principle 5). Handbook: ConsultHandbook("verify-before-you-trust").
+[[/if]]
 3. DOCUMENT THE INTERFACE
    The artifact must be self-documenting: input parameter names/types,
    output names, supported call modes, any external dependencies.
@@ -185,8 +199,8 @@ Your workspace is the debug/delegations/{delegation_id}/ folder assigned for thi
   {delegation_id}/generators/registration.json     ← handoff manifest
 
 ### Conclusions
-<What the generator produces, validated on one sample.  Include the input
-used, the output value(s) obtained, wall-clock time, and any known
+<What the generator produces, validated on one sample[[if model_verification]] and against independent expectations[[/if]].  Include the input
+used, the output value(s) obtained, wall-clock time, [[if model_verification]]each correctness check and its outcome, [[/if]]and any known
 limitations or unsupported edge cases.>
 
 ### Numbers
@@ -197,7 +211,9 @@ output_columns: [<list>]
 validation_input: {<dict>}
 validation_output: {<dict>}
 single_sample_wall_clock_seconds: <float>
-supported_call_modes: [<list — report what this generator actually
+[[if model_verification]]correctness_checks: [<one entry per check in validate_{name}.json:
+  name, expected, obtained, pass|fail>]
+[[/if]]supported_call_modes: [<list — report what this generator actually
   supports, e.g. sequential and/or parallel; don't assume both>]
 
 ### Retrospective
@@ -231,7 +247,9 @@ class DataGeneratorAgent(Agent):
     writes a registration manifest so the runtime can register it as the
     canonical oracle (reached by the implementer through get_evaluator()).
 
-    Validates on exactly one sample; does NOT run large-scale experiments,
+    Validates the interface on exactly one sample and the model against
+    expectations that come from outside the code (feature
+    ``model_verification``); does NOT run large-scale experiments,
     choose samplers, or optimize. Consults the literature reviewer for
     methodology on novel physics before implementing.
     """

@@ -54,7 +54,7 @@ COLUMNS = [
     "arm_f3dasm_api", "arm_doe_playbook", "arm_verdict_validator",
     "arm_pipeline_deliverable", "arm_reproduction_gate",
     "arm_peer_interaction", "arm_budget_notes", "arm_delegation_contract",
-    "arm_reprompt_unfinished", "arm_max_awake_nodes",
+    "arm_reprompt_unfinished", "arm_model_verification", "arm_max_awake_nodes",
     # Process KPIs (CLAUDE.md §1 step 5). error_returns = ERROR_RETURN events
     # (target 0). `objective` = what the study declared in config.yaml
     # (`column:direction[:feasible=col]`), else "undeclared". first_feasible_* =
