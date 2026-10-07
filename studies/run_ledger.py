@@ -32,6 +32,15 @@ COLUMNS = [
     "critic_consults", "delegations",
     "ledger_rows", "mean_wall_ms", "input_tokens", "output_tokens",
     "cache_read_tokens", "cache_creation_tokens",
+    # The backend-independent token schema (infra/telemetry.py): disjoint, so
+    # tokens_total is their sum and a number means the same on every backend.
+    # `tokens_schema` is "normalized" when every call carried it and "legacy"
+    # when some call did not. BLANK = a row written before these columns
+    # existed, which is legacy too: its input_tokens is cache-inclusive on
+    # openai-compatible backends and cache-exclusive on Claude, so do not
+    # compare it across backends. Old rows are never rewritten.
+    "tokens_fresh_input", "tokens_cache_read", "tokens_cache_write",
+    "tokens_output", "tokens_total", "tokens_schema",
     "cost_usd", "time_used", "wall_s",
     "milestones_done", "milestones_skipped",
     "milestones_pending", "diagnostics",
@@ -277,6 +286,16 @@ def extract(run_dir: Path) -> dict:
             row["cache_read_tokens"] = _tot.get("cache_read_input_tokens", "")
             row["cache_creation_tokens"] = _tot.get(
                 "cache_creation_input_tokens", "")
+            if _tot.get("normalized_calls") and not _tot.get("legacy_calls"):
+                row.update(
+                    tokens_fresh_input=_tot.get("fresh_input", ""),
+                    tokens_cache_read=_tot.get("cache_read", ""),
+                    tokens_cache_write=_tot.get("cache_write", ""),
+                    tokens_output=_tot.get("output", ""),
+                    tokens_total=_tot.get("tokens_total", ""),
+                    tokens_schema="normalized")
+            else:
+                row["tokens_schema"] = "legacy"
             # None (no backend reported a price) stays BLANK, not 0 — an
             # unpriced run is unmeasured, not free.
             _cost = _tot.get("total_cost_usd")

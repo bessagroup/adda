@@ -134,3 +134,49 @@ def test_ledger_header_migrates_when_a_column_is_added(tmp_path, monkeypatch):
     rows = list(_csv.DictReader(led.open()))
     assert list(rows[0]) == run_ledger.COLUMNS
     assert rows[0]["cost_usd_computed"] == "" and rows[0]["study"] == "x"
+
+
+_SCHEMA_TOTALS = dict(
+    _TOTALS, normalized_calls=4, legacy_calls=0, fresh_input=1200,
+    cache_read=90_000, cache_write=5_000, output=340, tokens_total=96_540)
+
+
+def test_normalized_token_columns_come_from_the_schema(tmp_path):
+    row = run_ledger.extract(_run(tmp_path, totals=_SCHEMA_TOTALS))
+
+    assert row["tokens_schema"] == "normalized"
+    assert (row["tokens_fresh_input"], row["tokens_cache_read"],
+            row["tokens_cache_write"], row["tokens_output"],
+            row["tokens_total"]) == (1200, 90_000, 5_000, 340, 96_540)
+
+
+def test_a_mixed_run_is_marked_legacy_with_blank_schema_columns(tmp_path):
+    """One call without the schema makes the run's total incomparable: the
+    columns stay blank rather than hold a partial sum."""
+    row = run_ledger.extract(
+        _run(tmp_path, totals=dict(_SCHEMA_TOTALS, legacy_calls=1)))
+
+    assert row["tokens_schema"] == "legacy"
+    assert row["tokens_total"] == ""
+
+
+def test_telemetry_without_the_schema_is_legacy(tmp_path):
+    row = run_ledger.extract(_run(tmp_path, totals=_TOTALS))
+
+    assert row["tokens_schema"] == "legacy"
+    assert row["tokens_total"] == ""
+    assert row["input_tokens"] == 1200   # the old column is untouched
+
+
+def test_old_ledger_rows_keep_their_values_and_get_blank_schema(tmp_path, monkeypatch):
+    """Adding the columns migrates the header; no old value changes. Blank
+    `tokens_schema` reads as legacy (see COLUMNS)."""
+    ledger = tmp_path / "run_ledger.csv"
+    ledger.write_text("commit,study,run_id,input_tokens\nabc,s,r1,777\n")
+    monkeypatch.setattr(run_ledger, "LEDGER", ledger)
+    run_ledger._migrate_header()
+    import csv
+    rows = list(csv.DictReader(ledger.open()))
+    assert rows[0]["input_tokens"] == "777"
+    assert rows[0]["tokens_schema"] == ""
+    assert "tokens_total" in rows[0]
