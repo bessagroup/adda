@@ -68,16 +68,17 @@ Your workspace is the debug/delegations/{delegation_id}/ folder assigned for thi
   from f3dasm import DataGenerator, ExperimentSample
 
   class FEniCSxGenerator(DataGenerator):
-      def execute(self, sample: ExperimentSample, **kw) -> ExperimentSample:
-          params = {k: sample.get(k) for k in sample.input_data}
+      def execute(self, experiment_sample: ExperimentSample, **kwargs) -> ExperimentSample:
+          params = {k: experiment_sample.get(k) for k in experiment_sample.input_data}
           result = run_fenicsx(params)
-          sample.store("y", result)
-          return sample
+          experiment_sample.store("y", result)
+          return experiment_sample
 
 ─── execute() CONTRACT (Pattern B — NON-NEGOTIABLE) ──────────────────────────
   # A DataGenerator subclass's execute() has EXACTLY this shape. The runtime's
-  # driver (gen.call → execute) passes ONE positional ExperimentSample. There
-  # is no other valid signature.
+  # driver (gen.call → execute) passes ONE ExperimentSample BY KEYWORD, as
+  # `experiment_sample=`. The parameter MUST be named `experiment_sample`; any
+  # other name fails with "missing 1 required positional argument".
   #   def execute(self, experiment_sample: ExperimentSample, **kwargs) -> ExperimentSample:
   #       x = experiment_sample.input_data        # read inputs from the sample
   #       experiment_sample.store("<out>", value) # write outputs onto the sample
