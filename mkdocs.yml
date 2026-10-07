@@ -94,6 +94,7 @@ nav:
         - "Read a run's output": 'read-a-runs-output.md'
         - 'Use a different model or backend': 'use-a-different-model-or-backend.md'
         - 'Customize agents and tools': 'customize-agents-and-tools.md'
+        - 'Run an ablation': 'run-an-ablation.md'
         - 'Troubleshoot': 'troubleshoot.md'
     - Concepts:
         - 'The permission graph': 'permission-graph.md'
