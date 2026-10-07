@@ -771,3 +771,13 @@ matters: build the floor from the built-ins the first init record lists (the
 fixed name list, with a test that a renamed built-in is still disallowed. No
 work until a CLI rename is seen. Evidence note: the init records were read by a
 probe that Elvis had not approved (see the 2026-10-07 exchange with the PM).
+
+## 56. A datagenerator read adda's evaluator source to learn how to register
+
+On the 2026-10-06 wet docs test (`openrouter/free`), D001 spent about 280 s
+reading the source of `get_evaluator` to learn how to register its evaluator,
+although it had already read the registration handbook entry. Read as friction:
+either the entry did not answer the question D001 had, or the model did not
+trust it. The model was an unpinned router, so the run cannot say which. Only a
+note. Revisit if runs on the pinned wet-test model show it again; then read the
+transcript to see which question the entry failed to answer.
