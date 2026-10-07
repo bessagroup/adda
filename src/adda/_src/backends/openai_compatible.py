@@ -22,6 +22,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from ..infra.telemetry import normalized_usage
 from . import context_budget, context_compaction
 from .base import DEFAULT_TOOLS
 
@@ -1284,6 +1285,7 @@ class OpenAICompatibleAdapter:
         """
         new_msgs = ((result or {}).get("messages") or [])[len(lc_msgs):]
         total_in = total_out = total_cache_read = total_cache_creation = 0
+        total_fresh = 0
         for _m in new_msgs:
             meta = getattr(_m, "usage_metadata", None)
             if not meta:
@@ -1293,7 +1295,17 @@ class OpenAICompatibleAdapter:
             details = meta.get("input_token_details") or {}
             total_cache_read += details.get("cache_read", 0) or 0
             total_cache_creation += details.get("cache_creation", 0) or 0
+            # prompt_tokens is the WHOLE prompt, cached part included; the
+            # schema's fresh_input is the rest. Per call, so one call's cache
+            # figure can never offset another's.
+            total_fresh += max(
+                (meta.get("input_tokens", 0) or 0)
+                - (details.get("cache_read", 0) or 0)
+                - (details.get("cache_creation", 0) or 0), 0)
         self.last_usage = {
+            **normalized_usage(
+                fresh_input=total_fresh, cache_read=total_cache_read,
+                cache_write=total_cache_creation, output=total_out),
             "input_tokens": total_in,
             "output_tokens": total_out,
             "cache_read_input_tokens": total_cache_read,

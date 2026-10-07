@@ -1507,13 +1507,19 @@ no claim. A run with no ledger reads "no hypothesis ledger". Tests: `tests/test_
 ### LLM-call telemetry (`debug/telemetry/`)
 - **What:** one JSON row per LLM call (role, model, phase, delegation_id, ts,
   token fields, the SDK `total_cost_usd` [None under ollama, never faked],
-  `cost_usd_computed`) written to `calls.<pid>.jsonl`. At close,
+  `cost_usd_computed`) written to `calls.<pid>.jsonl`. Every backend also maps
+  its usage into ONE schema, `fresh_input` / `cache_read` / `cache_write` /
+  `output` (disjoint, so total = their sum); `input_tokens` is not comparable
+  across backends (Claude excludes cache, openai-compatible includes it). A row
+  without the four fields is legacy; `summary.json` counts `normalized_calls`
+  and `legacy_calls` and gives `tokens_total` over the normalized ones. At close,
   `Telemetry.merge` unions them into `summary.json`: totals + by_role / by_phase
   / by_model (tokens, wall_time_s, cost, computed cost / computed_cost_calls).
 - **Why:** additive and off the decision path, for post-hoc ablation ("where did
   the budget go"); a telemetry write never breaks a run (module docstring).
 - **Where:** `infra/telemetry.py` (`Telemetry.record_call/merge`,
-  `compute_cost_usd`); an instance per orchestrating node
+  `compute_cost_usd`, `normalized_usage`); mapped in `backends/claude.py::_settle_usage`
+  and `backends/openai_compatible.py::_capture_usage`; an instance per orchestrating node
   (`nodes/orchestration.py`); merged in `AgenticRun._finalize_run`; read by
   `studies/run_ledger.py`.
 - **Config:** none (always on); prices in `infra/model_prices.yaml`. **Status:** done.

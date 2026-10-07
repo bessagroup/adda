@@ -17,6 +17,24 @@ Layout (under ``<run>/debug/telemetry/``):
 A row carries the same token fields the run already accumulates
 (``adapter.last_usage``) plus ``role`` / ``model`` / ``phase`` /
 ``delegation_id`` / ``ts`` so each call is attributable.
+
+Token schema (the same for every backend)
+-----------------------------------------
+Each backend maps its own numbers into four disjoint counts, so a total is
+their plain sum and a number means the same thing whichever backend produced
+it:
+
+  - ``fresh_input`` -- prompt tokens the model read at full price (not served
+    from, and not written to, a cache);
+  - ``cache_read``  -- prompt tokens served from a cache;
+  - ``cache_write`` -- prompt tokens written to a cache;
+  - ``output``      -- generated tokens.
+
+The older ``input_tokens`` field is NOT comparable across backends: Claude
+reports it without cache tokens, an openai-compatible server (vllm, ollama,
+openrouter) reports the whole re-sent prompt with cache tokens included. It
+stays on the row for continuity. A row without the four fields above was
+written before the schema existed; read it as "legacy, not comparable".
 """
 from __future__ import annotations
 
@@ -59,7 +77,17 @@ def compute_cost_usd(model: Optional[str], usage: dict) -> Optional[float]:
                 "telemetry: no price for model %r in %s; cost_usd_computed "
                 "is None for its calls", model, _PRICES_PATH.name)
         return None
-    cc_total = usage.get("cache_creation_input_tokens") or 0
+    if has_normalized_usage(usage):
+        # input_tokens may include cache tokens (openai-compatible); the
+        # disjoint schema fields never do.
+        fresh, read, out = (
+            usage["fresh_input"], usage["cache_read"], usage["output"])
+        cc_total = usage["cache_write"]
+    else:
+        fresh = usage.get("input_tokens") or 0
+        read = usage.get("cache_read_input_tokens") or 0
+        out = usage.get("output_tokens") or 0
+        cc_total = usage.get("cache_creation_input_tokens") or 0
     cc_1h = usage.get("cache_creation_1h_tokens")
     cc_5m = usage.get("cache_creation_5m_tokens")
     if cc_1h is None and cc_5m is None:
@@ -68,12 +96,35 @@ def compute_cost_usd(model: Optional[str], usage: dict) -> Optional[float]:
         cc_1h, cc_5m = cc_1h or 0, cc_5m or 0
         cc_1h += max(cc_total - cc_1h - cc_5m, 0)
     return (
-        (usage.get("input_tokens") or 0) * entry["input"]
-        + (usage.get("output_tokens") or 0) * entry["output"]
-        + (usage.get("cache_read_input_tokens") or 0) * entry["cache_read"]
+        fresh * entry["input"]
+        + out * entry["output"]
+        + read * entry["cache_read"]
         + cc_1h * entry["cache_write_1h"]
         + cc_5m * entry["cache_write_5m"]
     ) / 1e6
+
+
+# The backend-independent token schema (see the module docstring).
+NORMALIZED_FIELDS = ("fresh_input", "cache_read", "cache_write", "output")
+
+
+def normalized_usage(
+    *, fresh_input: int, cache_read: int, cache_write: int, output: int,
+) -> dict:
+    """The four schema fields, as non-negative ints. Each backend calls this
+    with its own mapping; ``fresh_input + cache_read + cache_write + output``
+    is then the call's total."""
+    return {
+        "fresh_input": max(int(fresh_input or 0), 0),
+        "cache_read": max(int(cache_read or 0), 0),
+        "cache_write": max(int(cache_write or 0), 0),
+        "output": max(int(output or 0), 0),
+    }
+
+
+def has_normalized_usage(row: dict) -> bool:
+    """True for a row written under the schema; False for a legacy row."""
+    return all(isinstance(row.get(f), (int, float)) for f in NORMALIZED_FIELDS)
 
 
 # Token fields copied verbatim from adapter.last_usage.
@@ -124,6 +175,11 @@ class Telemetry:
             }
             for f in _TOKEN_FIELDS:
                 row[f] = usage.get(f, 0) or 0
+            # The schema fields are copied only when the backend reported
+            # them: inventing zeros would make a legacy row look measured.
+            if has_normalized_usage(usage):
+                for f in NORMALIZED_FIELDS:
+                    row[f] = int(usage[f])
             # cost is the one field that stays None under ollama (never faked)
             row["total_cost_usd"] = usage.get("total_cost_usd")
             # Computed from exact tokens x config price; separate from the
@@ -182,6 +238,14 @@ class Telemetry:
                 "cache_creation_input_tokens": 0,
                 "cache_creation_1h_tokens": 0,
                 "cache_creation_5m_tokens": 0,
+                # The backend-independent schema, summed over the calls that
+                # carry it; `legacy_calls` counts the rest (not comparable).
+                "normalized_calls": 0,
+                "legacy_calls": 0,
+                "fresh_input": 0,
+                "cache_read": 0,
+                "cache_write": 0,
+                "output": 0,
                 "total_cost_usd": 0.0,
                 "computed_cost_calls": 0,
                 "cost_usd_computed": 0.0,
@@ -191,6 +255,12 @@ class Telemetry:
             b["calls"] += 1
             for f in _TOKEN_FIELDS:
                 b[f] += int(r.get(f, 0) or 0)
+            if has_normalized_usage(r):
+                b["normalized_calls"] += 1
+                for f in NORMALIZED_FIELDS:
+                    b[f] += int(r[f])
+            else:
+                b["legacy_calls"] += 1
             cost = r.get("total_cost_usd")
             if cost is not None:
                 b["cost_calls"] += 1
@@ -230,9 +300,14 @@ class Telemetry:
             if isinstance(ts, (int, float)):
                 tss.append(ts)
 
+        # Legacy and NOT comparable across backends (see the module
+        # docstring); kept so older readers keep working.
         totals["total_tokens"] = (
             totals["input_tokens"] + totals["output_tokens"]
         )
+        # Comparable: fresh + cache_read + cache_write + output, over the
+        # normalized calls only (`legacy_calls` says how many were left out).
+        totals["tokens_total"] = sum(totals[f] for f in NORMALIZED_FIELDS)
         totals["wall_time_s"] = (max(tss) - min(tss)) if len(tss) >= 2 else 0.0
 
         summary = {

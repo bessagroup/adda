@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ..infra.telemetry import normalized_usage
 from .base import DEFAULT_TOOLS, record_stream_diagnostic
 
 __all__ = ["ClaudeAdapter"]
@@ -1087,6 +1088,15 @@ class ClaudeAdapter:
             }
         else:
             self.last_usage = {}
+
+        # Claude reports input_tokens WITHOUT cache tokens, so each count maps
+        # one to one onto the telemetry schema.
+        u = self.last_usage
+        self.last_usage = {**u, **normalized_usage(
+            fresh_input=u.get("input_tokens"),
+            cache_read=u.get("cache_read_input_tokens"),
+            cache_write=u.get("cache_creation_input_tokens"),
+            output=u.get("output_tokens"))}
 
         self.last_session_id = (
             getattr(last_result, "session_id", None)

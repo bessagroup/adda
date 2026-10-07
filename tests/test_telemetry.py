@@ -279,3 +279,79 @@ def test_a_partly_priced_run_reports_what_was_priced(tmp_path):
     assert summary["totals"]["cost_calls"] == 1
     assert abs(summary["totals"]["total_cost_usd"] - 0.02) < 1e-9
     assert summary["by_model"]["qwen-local"]["total_cost_usd"] is None
+
+
+# ---------------------------------------------------------------------------
+# One token schema for every backend: fresh_input / cache_read / cache_write /
+# output, disjoint, so a total is their sum. `input_tokens` is NOT comparable
+# across backends (Claude excludes cache, openai-compatible includes it).
+# ---------------------------------------------------------------------------
+
+def _norm_usage(fresh, read, write, out):
+    return {"input_tokens": fresh, "output_tokens": out,
+            "cache_read_input_tokens": read,
+            "cache_creation_input_tokens": write,
+            "fresh_input": fresh, "cache_read": read,
+            "cache_write": write, "output": out,
+            "total_cost_usd": None}
+
+
+def _rows(tmp_path):
+    f = next((tmp_path / "debug" / "telemetry").glob("calls.*.jsonl"))
+    return [json.loads(line) for line in f.read_text().splitlines()]
+
+
+def test_a_row_carries_the_schema_fields_when_the_backend_reports_them(tmp_path):
+    Telemetry(tmp_path / "debug").record_call(
+        role="r", model="m", phase="p", delegation_id=None,
+        usage=_norm_usage(10, 200, 30, 5))
+    r = _rows(tmp_path)[0]
+    assert (r["fresh_input"], r["cache_read"], r["cache_write"],
+            r["output"]) == (10, 200, 30, 5)
+
+
+def test_a_row_without_schema_fields_stays_legacy_not_zero_filled(tmp_path):
+    """Inventing zeros would make an unmeasured call look measured."""
+    Telemetry(tmp_path / "debug").record_call(
+        role="r", model="m", phase="p", delegation_id=None,
+        usage=_usage(100, 50))
+    r = _rows(tmp_path)[0]
+    for f in ("fresh_input", "cache_read", "cache_write", "output"):
+        assert f not in r
+
+
+def test_merge_sums_the_schema_and_counts_legacy_calls(tmp_path):
+    tel = Telemetry(tmp_path / "debug")
+    tel.record_call(role="a", model="m", phase="p", delegation_id=None,
+                    usage=_norm_usage(10, 200, 30, 5))
+    tel.record_call(role="a", model="m", phase="p", delegation_id=None,
+                    usage=_norm_usage(1, 2, 3, 4))
+    tel.record_call(role="b", model="m", phase="p", delegation_id=None,
+                    usage=_usage(1000, 500))  # legacy
+    s = Telemetry.merge(tmp_path / "debug")
+    t = s["totals"]
+    assert (t["fresh_input"], t["cache_read"], t["cache_write"],
+            t["output"]) == (11, 202, 33, 9)
+    assert t["tokens_total"] == 11 + 202 + 33 + 9
+    assert t["normalized_calls"] == 2 and t["legacy_calls"] == 1
+    assert s["by_role"]["b"]["normalized_calls"] == 0
+    assert s["by_role"]["b"]["legacy_calls"] == 1
+
+
+def test_cost_uses_the_disjoint_fields_not_a_cache_inclusive_input_tokens():
+    """An openai-compatible row's input_tokens includes cache; pricing it as
+    fresh input would charge the cached part at the full rate."""
+    from adda._src.infra.telemetry import compute_cost_usd
+    cache_inclusive = {"input_tokens": 1000, "output_tokens": 0,
+                       "cache_read_input_tokens": 900,
+                       "cache_creation_input_tokens": 0,
+                       "fresh_input": 100, "cache_read": 900,
+                       "cache_write": 0, "output": 0}
+    claude_style = {"input_tokens": 100, "output_tokens": 0,
+                    "cache_read_input_tokens": 900,
+                    "cache_creation_input_tokens": 0,
+                    "fresh_input": 100, "cache_read": 900,
+                    "cache_write": 0, "output": 0}
+    model = "claude-sonnet-5-5"
+    assert (compute_cost_usd(model, cache_inclusive)
+            == compute_cost_usd(model, claude_style))

@@ -190,8 +190,8 @@ def test_invoke_returns_last_message_content():
     fake_agent = _fake_agent()
     fake_agent.invoke.return_value = {
         "messages": [
-            MagicMock(content="intermediate"),
-            MagicMock(content="final answer"),
+            MagicMock(content="intermediate", usage_metadata=None),
+            MagicMock(content="final answer", usage_metadata=None),
         ]
     }
     adapter = _make_adapter()

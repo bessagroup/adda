@@ -786,3 +786,39 @@ def test_both_backends_share_one_bash_bound_default_and_knob():
         assert _build_session_env()["BASH_DEFAULT_TIMEOUT_MS"] == "45000"
     finally:
         settings.configure({})
+
+
+# ---------------------------------------------------------------------------
+# Telemetry schema: prompt_tokens is the WHOLE prompt with the cached part
+# included, so fresh_input is the remainder -- for every openai-compatible
+# backend, since they share one usage path.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("backend", ["vllm", "openrouter", "ollama"])
+def test_usage_maps_into_the_telemetry_schema(backend):
+    from langchain_core.messages import HumanMessage, ToolMessage
+
+    from adda._src.backends.ollama import OllamaAdapter
+    cls = {"vllm": VLLMAdapter, "openrouter": OpenRouterAdapter,
+           "ollama": OllamaAdapter}[backend]
+    fake_agent = _fake_agent()
+    fake_agent.invoke.return_value = {"messages": [
+        HumanMessage(content="go"),
+        _ai("tool", 1000, 5, cache_read=900),             # fresh 100
+        ToolMessage(content="r", tool_call_id="t1"),
+        _ai("final", 2000, 8, cache_read=1500, cache_creation=100),  # fresh 400
+    ]}
+    a = cls(model="m", system_prompt="s")
+    a._agent = fake_agent
+    a.invoke([{"role": "user", "content": "go"}])
+
+    u = a.last_usage
+    assert u["fresh_input"] == 100 + 400
+    assert u["cache_read"] == 900 + 1500
+    assert u["cache_write"] == 100
+    assert u["output"] == 5 + 8
+    # the schema is disjoint: its sum is every prompt token plus the output
+    assert (u["fresh_input"] + u["cache_read"] + u["cache_write"]
+            == 1000 + 2000)
+    # the legacy field keeps its old (cache-inclusive) meaning
+    assert u["input_tokens"] == 3000

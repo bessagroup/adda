@@ -1001,3 +1001,39 @@ def test_transcript_tool_call_carries_the_id_its_result_will_cite(tmp_path, monk
     call = next(r for r in recs if r["type"] == "assistant")["tools"][0]
     result = next(r for r in recs if r["type"] == "tool_result")["results"][0]
     assert call["tool_use_id"] == result["tool_use_id"] == "toolu_42"
+
+
+def test_claude_usage_maps_into_the_telemetry_schema():
+    """Claude reports input_tokens WITHOUT cache tokens: each count maps
+    straight onto the schema, with cache_creation as cache_write."""
+
+    class _Result:
+        usage = {"input_tokens": 8, "output_tokens": 20,
+                 "cache_read_input_tokens": 93821,
+                 "cache_creation_input_tokens": 1330}
+        total_cost_usd = 0.5
+
+    async def _gen(prompt, options):
+        yield _AssistantMessage([_TextBlock("x")])
+        yield _Result()
+
+    _install_fake_sdk(query=_gen, ResultMessage=_Result)
+    ClaudeAdapter = _get_adapter()
+    adapter = ClaudeAdapter("claude-3", "sys", None, [])
+    adapter.invoke([{"role": "user", "content": "hi"}])
+
+    u = adapter.last_usage
+    assert (u["fresh_input"], u["cache_read"], u["cache_write"],
+            u["output"]) == (8, 93821, 1330, 20)
+
+
+def test_claude_retry_attempts_sum_in_the_schema():
+    from adda._src.backends.claude import _combine_attempt_usage
+    from adda._src.infra.telemetry import normalized_usage
+    a = {**normalized_usage(fresh_input=1, cache_read=10, cache_write=2,
+                            output=3), "total_cost_usd": 0.1}
+    b = {**normalized_usage(fresh_input=4, cache_read=20, cache_write=0,
+                            output=5), "total_cost_usd": 0.2}
+    out = _combine_attempt_usage([a, b])
+    assert (out["fresh_input"], out["cache_read"], out["cache_write"],
+            out["output"]) == (5, 30, 2, 8)
