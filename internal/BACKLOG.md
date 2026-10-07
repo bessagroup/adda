@@ -781,3 +781,9 @@ either the entry did not answer the question D001 had, or the model did not
 trust it. The model was an unpinned router, so the run cannot say which. Only a
 note. Revisit if runs on the pinned wet-test model show it again; then read the
 transcript to see which question the entry failed to answer.
+
+## 57. A format check for required deliverables — dropped
+Run 20261007T154633: a required `design.json` was written as a status report,
+not a design. A declared schema per deliverable would catch it. Dropped: n=1,
+and a schema needs content specific to each problem. Revisit if a second run
+shows the same failure.
