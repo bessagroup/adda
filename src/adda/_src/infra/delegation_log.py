@@ -327,6 +327,27 @@ class DelegationLog:
                 f.write(json.dumps(patch_row) + "\n")
             return True
 
+    def deliverable_versions(self, delegation_id: str) -> list[tuple[int, str]]:
+        """Every deliverable written for ``delegation_id``, oldest first, as
+        (version, text). The version is the row's 1-based position among that
+        id's rows in the log, so it names the same row a reader sees there."""
+        out: list[tuple[int, str]] = []
+        with self._lock:
+            if not self._path.exists():
+                return out
+            n = 0
+            for line in self._path.read_text(encoding="utf-8").splitlines():
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if r.get("id") != delegation_id or "patch" in r:
+                    continue
+                n += 1
+                if r.get("deliverable"):
+                    out.append((n, r["deliverable"]))
+        return out
+
     def query_all(self) -> list[dict]:
         """Return every record, oldest-first."""
         with self._lock:

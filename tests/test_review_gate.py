@@ -805,3 +805,36 @@ def test_feedback_or_approval_on_an_unread_report_is_refused():
     out_ok = dt.SendMessage(did, "approved", approve=True)
     assert "Approved" in out_ok
     assert node._registry[did]["status"] == "Done"
+
+
+def test_retrospective_is_read_from_the_newest_version_that_has_one(tmp_path):
+    """Regression (run 20261007T154633, D003): a follow-up reply replaces the
+    deliverable, and a plain answer holds no retrospective. The exit interview
+    was written with the full report, so it is read from that version."""
+    import json as _json
+    from adda._src.infra.delegation_log import DelegationLog
+
+    (tmp_path / "debug").mkdir(parents=True)
+    report = ("A full report.\n\n### Retrospective\n- CONSISTENCY: ok\n"
+              "- DECISION: seed 0\n- FRICTION: none\n- BLOCKED: none\n")
+    worker = _FakeWorker(text=report, revised_text="Short chat answer.")
+    log = DelegationLog(tmp_path / "debug" / "delegation_log.jsonl")
+    node = _make_node(worker=worker, delegation_log=log)
+    node._current_notes_dir = tmp_path / "debug" / "strategizer_notes"
+    dt = DelegationTools(node)
+    set_delegation_id(None)
+
+    dt.Delegate("implementer", "do the thing", "a report", wait=True)
+    did = next(iter(node._registry))
+    dt.SendMessage(did, "what does this bound mean?")
+    _join_resume_thread(node, did)
+    dt.Wait()
+    dt.SendMessage(did, "thanks", approve=True)
+
+    rows = [_json.loads(ln) for ln in
+            (tmp_path / "debug" / "retrospectives.jsonl").read_text()
+            .splitlines() if ln]
+    (rec,) = [r for r in rows if r["source_id"] == did]
+    assert rec["parse_failed"] is False
+    assert "DECISION: seed 0" in rec["text"]
+    assert isinstance(rec["deliverable_version"], int)

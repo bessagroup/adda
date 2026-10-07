@@ -1135,9 +1135,29 @@ class WorkerSession:
 
         # Worker retrospective (every node has a 'job done'
         # moment — see _record_retrospective).
+        retro_text, version = self._retrospective_source(text)
         node._record_retrospective(
-            node._role_of(target), delegation_id, text
+            node._role_of(target), delegation_id, retro_text,
+            deliverable_version=version,
         )
+
+    def _retrospective_source(self, text: str) -> tuple[str, int | None]:
+        """The newest deliverable version that holds a retrospective.
+
+        A follow-up reply replaces the deliverable, and a short answer to a
+        question carries no retrospective. The exit interview was given once,
+        with the full report, so it is read from that version; the version
+        number is returned when it is not the final text.
+        """
+        from ...parsing import _extract_report_section
+        log = self.node._delegation_log
+        if log is None or _extract_report_section(text, "Retrospective"):
+            return text, None
+        for version, old in reversed(
+                log.deliverable_versions(self.delegation_id)):
+            if _extract_report_section(old, "Retrospective"):
+                return old, version
+        return text, None
 
     def _register_authored_evaluator(self) -> None:
         """Point the canonical entrypoint at an oracle this delegation authored.

@@ -170,7 +170,8 @@ class RecordingMixin:
             pass
 
     def _record_retrospective(
-        self, role: str, source_id: str, report_text: str
+        self, role: str, source_id: str, report_text: str,
+        deliverable_version: int | None = None,
     ) -> None:
         """Capture a node's end-of-life ### Retrospective.
 
@@ -224,6 +225,8 @@ class RecordingMixin:
                 "flagged": flagged, "text": body[:_RETRO_TEXT_CAP],
                 "parse_failed": parse_failed,
             }
+            if deliverable_version is not None:
+                rec["deliverable_version"] = deliverable_version
             with (debug_dir / "retrospectives.jsonl").open(
                     "a", encoding="utf-8") as f:
                 f.write(_json.dumps(rec) + "\n")
