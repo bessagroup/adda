@@ -23,7 +23,7 @@ from ..epistemics.hypothesis_ledger import HypothesisLedger
 from ..epistemics.science_monitor import ScienceMonitor
 from ..infra.delegation_log import DelegationLog
 from ._constants import budget_band_due, budget_wrapup_message
-from .notices import wrap_notice
+from .notices import insert_notice, wrap_notice
 from .parsing import _to_adapter_messages
 
 
@@ -708,7 +708,7 @@ class OrchestrationMixin:
                 if isinstance(result, str) and node_name == node._name:
                     notices = node._drain_notifications()
                     if notices.strip():
-                        result = result.rstrip("\n") + "\n\n" + notices.rstrip("\n")
+                        result = insert_notice(result, notices)
                     # Spec 12 design item 10(a): a pending-for-you notice
                     # on every tool result, scoped to THIS CALL's own
                     # delegator identity (never a sibling's or a nested
@@ -722,10 +722,8 @@ class OrchestrationMixin:
                         identity = get_delegation_id() or "entry"
                         pending = node._pending_for_you(identity)
                         if pending:
-                            result = (
-                                result.rstrip("\n") + "\n\n"
-                                + wrap_notice(pending)
-                            )
+                            result = insert_notice(
+                                result, wrap_notice(pending))
                 return result
             except Exception as exc:
                 node._record_tool_error(

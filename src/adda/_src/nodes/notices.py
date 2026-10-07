@@ -58,3 +58,38 @@ def split_notices(text: str) -> tuple[list[str], str]:
     """
     notices = [m.group(1).strip() for m in NOTICE_RE.finditer(text)]
     return notices, NOTICE_RE.sub("", text).strip()
+
+
+_LEADING_NOTICES_RE = re.compile(
+    r"\A\s*(?:" + re.escape(NOTICE_OPEN) + r".*?" + re.escape(NOTICE_CLOSE)
+    + r"\s*)*",
+    re.DOTALL,
+)
+
+#: A first line longer than this that opens like JSON is data, not a status line.
+LEAD_LINE_MAX = 200
+_JSON_OPEN_RE = re.compile(r'\s*(?:\{|\[\s*(?:[\[{"\-\d]|true|false|null))')
+
+
+def insert_notice(result: str, notice: str) -> str:
+    """Place *notice* right after the first line of *result*.
+
+    The first line carries the word a caller dispatches on ("Done",
+    "Working", "ERROR:", "[CONFIRM]", an id), so it stays first. The notice
+    sits next to it, inside the head of the result, which is the part that
+    survives when a host keeps only a preview of a large result. A long
+    first line that opens like JSON is data, not a status line, so the
+    notice goes in front of it. Notice blocks already at the start of
+    *result* are skipped, never split.
+    """
+    notice = notice.rstrip("\n")
+    if not notice.strip():
+        return result
+    lead_end = _LEADING_NOTICES_RE.match(result).end()
+    head, rest = result[:lead_end], result[lead_end:]
+    first, _, tail = rest.partition("\n")
+    if len(first) > LEAD_LINE_MAX and _JSON_OPEN_RE.match(first):
+        return head + notice + "\n\n" + rest
+    out = head + first + "\n\n" + notice
+    tail = tail.lstrip("\n")
+    return out + "\n\n" + tail if tail else out

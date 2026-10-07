@@ -101,6 +101,11 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   design: a per-design line once made a 150-design campaign print 185 KB, which
   the CLI cut to a 2 KB preview that never held the warning. The first examples
   and the counts are also in the `DEDUP_SKIPPED` diagnostic (`detail`). A skip is
+  **Notice placement** (`nodes/notices.py::insert_notice`): notices that adda
+  adds to its own tool results go right after the result's first line. The
+  leading word stays first, and the notice stays in the head of a large result
+  whatever the host keeps. A long first line that opens like JSON gets the
+  notice in front of it.
   **Pending-notice bridge** (`infra/pending_notices.py`): the wrapper also
   queues each aggregate `[EVAL NOT STORED]` / `[ORACLE CHANGED]` notice in
   `<run>/debug/pending_notices/<delegation>.jsonl`. The backend's post-tool hook

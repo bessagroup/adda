@@ -191,3 +191,54 @@ def test_drain_notifications_is_empty_when_nothing_pending(tmp_path):
     marker prepended to every tool result in the run."""
     node = _node(tmp_path / "runs" / "T3")
     assert node._drain_notifications() == ""
+
+
+class TestInsertNotice:
+    def test_short_status_line_keeps_lead_and_notice_in_head(self):
+        from adda._src.nodes.notices import insert_notice, wrap_notice
+        body = "Working\n" + "x" * 50_000
+        out = insert_notice(body, wrap_notice("hello", trailing=""))
+        assert out.startswith("Working\n")
+        assert "<adda-note>" in out[:2048]
+        assert out.endswith("x" * 100)
+
+    def test_one_line_json_gets_notice_prepended(self):
+        from adda._src.nodes.notices import insert_notice, wrap_notice
+        data = '{"k": "' + "v" * 400 + '"}'
+        out = insert_notice(data, wrap_notice("hello", trailing=""))
+        assert out.startswith("<adda-note>")
+        assert out.endswith(data)
+
+    def test_long_tagged_or_error_line_keeps_its_lead(self):
+        from adda._src.nodes.notices import insert_notice, wrap_notice
+        for lead in ("ERROR: ", "[CONFIRM] "):
+            out = insert_notice(lead + "e" * 400, wrap_notice("n", trailing=""))
+            assert out.startswith(lead)
+
+    def test_existing_leading_notice_is_not_split(self):
+        from adda._src.nodes.notices import (
+            insert_notice, split_notices, wrap_notice)
+        first = wrap_notice("one")
+        out = insert_notice(first + "Done\nbody", wrap_notice("two", trailing=""))
+        notes, text = split_notices(out)
+        assert notes == ["one", "two"]
+        assert text.split() == ["Done", "body"]
+
+    def test_single_line_result_and_empty_notice(self):
+        from adda._src.nodes.notices import insert_notice, wrap_notice
+        out = insert_notice("Done", wrap_notice("n", trailing=""))
+        assert out.startswith("Done\n\n<adda-note>")
+        assert insert_notice("Done", "  ") == "Done"
+
+
+def test_notice_on_a_large_tool_result_stays_in_its_head(tmp_path):
+    node = _node(tmp_path / "runs" / "T4")
+    with node._notifications_lock:
+        node._notifications.append("[Delegation D003 finished]")
+
+    def Probe() -> str:
+        return "Working\n" + "x" * 60_000
+
+    out = node._wrap_closure(Probe, node._name)()
+    assert out.startswith("Working\n")
+    assert "[Delegation D003 finished]" in out[:2048]
