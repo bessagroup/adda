@@ -1335,10 +1335,12 @@ class OpenAICompatibleAdapter:
         new_msgs = ((result or {}).get("messages") or [])[len(lc_msgs):]
         total_in = total_out = total_cache_read = total_cache_creation = 0
         total_fresh = 0
+        call_inputs: list[int] = []
         for _m in new_msgs:
             meta = getattr(_m, "usage_metadata", None)
             if not meta:
                 continue
+            call_inputs.append(meta.get("input_tokens", 0) or 0)
             total_in += meta.get("input_tokens", 0) or 0
             total_out += meta.get("output_tokens", 0) or 0
             details = meta.get("input_token_details") or {}
@@ -1360,4 +1362,9 @@ class OpenAICompatibleAdapter:
             "cache_read_input_tokens": total_cache_read,
             "cache_creation_input_tokens": total_cache_creation,
             "total_cost_usd": None,  # not available from open-weight/self-hosted
+            # input_tokens above is a sum over the turn's model calls; these
+            # show what one call read: how many calls, the first, the largest.
+            "n_calls": len(call_inputs),
+            "first_call_input": call_inputs[0] if call_inputs else 0,
+            "max_call_input": max(call_inputs, default=0),
         }

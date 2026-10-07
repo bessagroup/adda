@@ -355,3 +355,39 @@ def test_cost_uses_the_disjoint_fields_not_a_cache_inclusive_input_tokens():
     model = "claude-sonnet-5-5"
     assert (compute_cost_usd(model, cache_inclusive)
             == compute_cost_usd(model, claude_style))
+
+
+def test_openai_compatible_turn_reports_its_call_shape(tmp_path):
+    from types import SimpleNamespace
+
+    from adda._src.backends.ollama import OllamaAdapter
+
+    def ai(n_in):
+        return SimpleNamespace(usage_metadata={
+            "input_tokens": n_in, "output_tokens": 5,
+            "input_token_details": {}})
+
+    adapter = OllamaAdapter(model="m", system_prompt="s")
+    seed = [SimpleNamespace(usage_metadata=None)]
+    adapter._capture_usage(
+        seed, {"messages": seed + [ai(100), ai(400), ai(250)]})
+    u = adapter.last_usage
+    assert (u["n_calls"], u["first_call_input"], u["max_call_input"]) == (
+        3, 100, 400)
+    assert u["input_tokens"] == 750
+
+    tel = Telemetry(tmp_path / "debug")
+    tel.record_call(role="r", model="m", phase="p", delegation_id=None,
+                    usage=u)
+    f = next((tmp_path / "debug" / "telemetry").glob("calls.*.jsonl"))
+    row = json.loads(f.read_text().splitlines()[0])
+    assert (row["n_calls"], row["first_call_input"],
+            row["max_call_input"]) == (3, 100, 400)
+
+
+def test_a_backend_without_call_shape_writes_no_such_fields(tmp_path):
+    tel = Telemetry(tmp_path / "debug")
+    tel.record_call(role="r", model="m", phase="p", delegation_id=None,
+                    usage=_usage(10, 5))
+    f = next((tmp_path / "debug" / "telemetry").glob("calls.*.jsonl"))
+    assert "n_calls" not in json.loads(f.read_text().splitlines()[0])

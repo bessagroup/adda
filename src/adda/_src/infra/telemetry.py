@@ -138,6 +138,9 @@ _TOKEN_FIELDS = (
     "cache_creation_5m_tokens",
 )
 
+# How one turn's model calls were shaped; not every backend reports them.
+_CALL_SHAPE_FIELDS = ("n_calls", "first_call_input", "max_call_input")
+
 
 class Telemetry:
     """Per-run telemetry writer.  One instance per orchestrating node."""
@@ -180,6 +183,11 @@ class Telemetry:
             if has_normalized_usage(usage):
                 for f in NORMALIZED_FIELDS:
                     row[f] = int(usage[f])
+            # Per-call shape of a turn, only where the backend reports it
+            # (openai-compatible): input_tokens is a sum over the turn's calls.
+            for f in _CALL_SHAPE_FIELDS:
+                if f in usage:
+                    row[f] = int(usage[f] or 0)
             # cost is the one field that stays None under ollama (never faked)
             row["total_cost_usd"] = usage.get("total_cost_usd")
             # Computed from exact tokens x config price; separate from the

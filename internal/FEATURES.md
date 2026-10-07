@@ -1526,7 +1526,10 @@ no claim. A run with no ledger reads "no hypothesis ledger". Tests: `tests/test_
 ### LLM-call telemetry (`debug/telemetry/`)
 - **What:** one JSON row per LLM call (role, model, phase, delegation_id, ts,
   token fields, the SDK `total_cost_usd` [None under ollama, never faked],
-  `cost_usd_computed`) written to `calls.<pid>.jsonl`. Every backend also maps
+  `cost_usd_computed`) written to `calls.<pid>.jsonl`. A row from an
+  openai-compatible backend also has `n_calls`, `first_call_input` and
+  `max_call_input`: one row is a whole turn, and `input_tokens` sums the prompt
+  over every model call of that turn, so these show what one call read. Every backend also maps
   its usage into ONE schema, `fresh_input` / `cache_read` / `cache_write` /
   `output` (disjoint, so total = their sum); `input_tokens` is not comparable
   across backends (Claude excludes cache, openai-compatible includes it). A row
