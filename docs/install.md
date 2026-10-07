@@ -16,8 +16,8 @@ pip install "adda @ git+https://github.com/bessagroup/adda.git"
 
 ## 2. A model to drive the agents
 
-By default adda talks to models through the **Claude CLI**, a separate
-tool, not part of the `pip install` above.
+By default adda talks to models through the **Claude command-line tool**, a separate
+program, not part of the `pip install` in the preceding step.
 
 ```bash
 npm install -g @anthropic-ai/claude-code

@@ -30,7 +30,7 @@ the result against it, so write it precisely: a vague brief produces a vague,
 unverifiable answer. Cover:
 
 - **Objective and success criteria**: the headline number or claim the run must
-  deliver (e.g. "maximise the normalised buckling load; report the design and its
+  deliver (for example, "maximise the normalised buckling load; report the design and its
   value").
 - **Design space**: every input variable, with its bounds, type (continuous,
   integer, or categorical), and **units**.
@@ -105,7 +105,7 @@ objective:
 A design counts only if its `column` value is finite and, when `feasible` is
 given, that column is 1; a finite value on an infeasible design does not count.
 `column` and `feasible` must be outputs the evaluator declares (`output_names`
-or the lookup's `output_columns`); an unknown name refuses the run at start.
+or the `output_columns` of the lookup); an unknown name refuses the run at start.
 When the evaluator is written during the run, the start check is skipped; each
 oracle later registered without a declared column is reported to the delegating
 agent and recorded as an `OBJECTIVE_COLUMN_MISSING` diagnostics event.
@@ -141,7 +141,7 @@ also writes a timestamped folder under `runs/` with the evaluation record, logs,
 and a status file. See [Understanding a run's output](read-a-runs-output.md) for what's
 in there and how to read it.
 
-Everything above is `config.yaml` and `PROBLEM_STATEMENT.md`; the graph itself
+Everything on this page so far is `config.yaml` and `PROBLEM_STATEMENT.md`; the graph itself
 (which agents exist, how they delegate), each agent's system prompt, and each
 agent's backend/model are Python-level extension points instead. See
 [Customize agents and tools](customize-agents-and-tools.md) if the built-in strategizer and
@@ -201,9 +201,9 @@ AgenticRun(study_dir="studies/example_study").execute()
 
 ## Launching under a watchdog
 
-`budget` and `run_backstop_multiple` (above) are both checked from *inside*
-the run, so neither can help if the run genuinely wedges — a hung model call,
-a stuck simulation — and never reaches its own next check. For that, launch
+`budget` and `run_backstop_multiple` (described earlier) are both checked from *inside*
+the run, so neither can help if the run genuinely wedges—a hung model call,
+a stuck simulation—and never reaches its own next check. For that, launch
 the study as a child process under an external watchdog instead: it owns the
 wall-clock deadline from outside, and force-kills the whole run (every
 process it spawned, not just the top one) if the deadline passes.
@@ -213,8 +213,8 @@ python -m adda.watchdog studies/example_study --budget 00:45:00
 ```
 
 The deadline is twice whatever budget you give it (or `config.yaml`'s own
-`budget:` if you don't pass `--budget`) — plenty of headroom, since this is a
-last-resort kill switch for a hang, not a way to police a slow run. `python -m
+`budget:` if you don't pass `--budget`)—plenty of headroom, since this is a
+last-resort cutoff for a hang, not a way to police a slow run. `python -m
 adda <study-dir>` on its own still works exactly as before; this is an
 additional, safer way to launch the same run when you want a hard outer
 backstop.

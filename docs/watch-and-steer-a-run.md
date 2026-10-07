@@ -24,7 +24,7 @@ cookie) can write: answer a question, send a note, start or stop a run, commit
 a setup edit. Another web page cannot write on your behalf. Without the cookie
 the page is read-only and says so.
 
-The viewer binds the loopback interface only, because it can start and kill
+The viewer binds the loopback interface only, because it can start and stop
 runs. To serve it on a network, pass `--allow-network`. Do this only on a
 network you trust.
 
@@ -50,7 +50,7 @@ line has no in-memory graph, so it recovers one from the study's own
 ## The page
 
 The left rail lists the study's runs, newest first, each with its status:
-running, gated, stopped, halted, crashed or unapproved. A dot on a run marks a
+running, gated, stopped, halted, crashed, or unapproved. A dot on a run marks a
 question that waits for you.
 
 The header shows the vitals of the selected run:
@@ -60,7 +60,7 @@ The header shows the vitals of the selected run:
 - **Cost**, summed over metered calls. A call with no price is counted
   separately ("+3 calls without cost data"), because an unknown price is not a
   free call.
-- **Delegations**, done and running.
+- **Delegations**, done, and running.
 - **Best row**, the best counted row by the study's declared
   [objective](author-a-study.md#declaring-the-objective). It is not the
   run's headline claim. Click it to open the row. Without a declared
@@ -78,7 +78,7 @@ The timeline draws the run from top to bottom.
 - Each **card** is one delegation, on a column for its worker slot. The number
   of columns is the run's real peak concurrency. A card shows the role, the
   duration and, when it is tall enough, the task, a `falsify` chip for a
-  falsification attempt, the hypotheses it carries and its evaluation count.
+  falsification attempt, the hypotheses it carries, and its evaluation count.
 - A **hatched strip** beside a card is the time the delegation waited for a
   free slot.
 - A **gate mark** is an acceptance review of the deliverable, with its
@@ -125,7 +125,7 @@ The view shows the oracle's store: every real evaluation, as it is recorded.
   namespaces, buttons switch the store in focus.
 
 The inspector for a row shows its objective value, why it does or does not
-count, the delegation that produced it, and its inputs, outputs and notes.
+count, the delegation that produced it, and its inputs, outputs, and notes.
 
 ### Deliverable
 
@@ -165,7 +165,7 @@ The viewer refuses a commit when `config.yaml` has validation errors, when the
 message is empty, when the committed file changed since you opened the editor,
 or when other files in the study have uncommitted changes.
 
-## Start, stop and steer a run
+## Start, stop, and steer a run
 
 All of these need the `/session?token=…` cookie.
 
@@ -185,19 +185,21 @@ job id.
 
 ### Stop a run
 
+<!-- vale off -->
 **Stop** opens a popover. **Stop gracefully** asks the run to finish its
-current step, write its retrospectives and close. **Kill now** ends the run's
-processes at once, writes no retrospectives and leaves the run unclosed. Kill
-is offered only for a run this viewer started.
+current step, write its retrospectives, and close. **Kill now** ends the run's
+processes at once, writes no retrospectives, and leaves the run unclosed. The
+**Kill now** button is offered only for a run this viewer started.
+<!-- vale on -->
 
 ### Send a note
 
 **Note to run** queues a note: a correction, a constraint you forgot to write
-down, a "stop chasing that branch". By default it goes to the entry node. You
+down, a note such as "stop chasing that branch." By default it goes to the entry node. You
 can address it to one running delegation instead. The agent reads the note on
 its next tool call, marked as coming from the operator rather than from a
 tool. Notes are one way and asynchronous: you cannot know when the agent reads
-one, only that it will, and the note lands in the run record.
+one, only that it does read it, and the note lands in the run record.
 
 ### Answer a question
 
@@ -223,11 +225,11 @@ and no viewer, every `FollowUp` waits out its timeout. To turn the prompting off
 for an unattended run, set `interactive=False` on `AgenticRun`.
 
 The viewer also sends a heartbeat that says a human is looking, and the run uses
-it to tell "someone is about to answer" from "this is a stall".
+it to tell a pending answer from a stall.
 
 ## Other controls
 
-- **New study** creates a study next to this one, blank or copied from an
+- **New study** creates a study next to this one, blank, or copied from an
   existing study, and commits it with the message you give. It prints the
   command that opens the new study in a viewer.
 - **Docs** asks adda's documentation a question, the same lookup the
@@ -238,7 +240,7 @@ it to tell "someone is about to answer" from "this is a stall".
 
 ## Agents talking to each other
 
-You will see this in transcripts, so it helps to know. Agents also message each
+You see this in transcripts, so it helps to know. Agents also message each
 other mid-flight with `SendMessage`. The strategizer uses it to steer a
 delegation that is already running, instead of waiting for a wrong result and
 re-delegating. A running delegation gets the message prefixed onto its next

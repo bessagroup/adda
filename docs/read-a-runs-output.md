@@ -24,8 +24,8 @@ notebook's metadata):
 - **UNGATED** / **FAILED**: did not pass. Treat the result as unaudited.
 
 If you only check one thing, check this. For what the critic and the
-reproduction check are actually testing — and everything else a run has to
-clear before it can close — see
+reproduction check are actually testing—and everything else a run has to
+clear before it can close—see
 [How a run is kept honest](how-a-run-is-kept-honest.md).
 
 ## The run folder
@@ -55,10 +55,10 @@ walks through the common causes.)
   see why a run went the way it did.
 - **`critic_reviews/`**: the critic's write-ups and verdicts. If a run was
   UNGATED, this says what the critic objected to.
-- **`diagnostics.jsonl`**: automatic flags raised during the run (e.g. a claim
+- **`diagnostics.jsonl`**: automatic flags raised during the run (for example, a claim
   made without enough evidence).
 - **`delegations/`**: the full transcript of each task the hub handed to a
-  specialist. Open one only when the notes above point you at it.
+  specialist. Open one only when the notes in this list point you at it.
 
 ## Comparing runs over time
 

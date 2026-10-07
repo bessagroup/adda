@@ -6,8 +6,8 @@ list of typed steps, each either a real SymPy computation with a verdict
 assumption (`ASSERTED`).
 
 The split is the point. Anything SymPy can adjudicate is checked mechanically
-and carries its verdict; anything it cannot — an ansatz, a physical claim, an
-unverified relation — is recorded as an assumption rather than blurred into
+and carries its verdict; anything it cannot—an ansatz, a physical claim, an
+unverified relation—is recorded as an assumption rather than blurred into
 the derivation. A reader of the rendered result can always tell which is
 which.
 

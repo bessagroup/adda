@@ -37,6 +37,7 @@ your own, rather than treating it as a black box.
   .a3l .legend .trail-key i { border-color: var(--a3l-accent); }
   .a3l figcaption { font-size: 13px; color: var(--a3l-dim); margin-top: 10px; }
 </style>
+<!-- vale off -->
 <div class="a3l-scroll">
 <svg viewBox="0 0 1000 680" role="img"
   aria-label="The strategizer delegates to four specialists: literature reviewer, data generator, implementer, and critic, and loops on their reports. The implementer's evaluations and the strategizer's hypothesis verdicts feed two ledgers. Both ledgers are checked at a reproduction gate before the deliverable, pipeline.ipynb, is allowed out; failing the gate sends control back to the strategizer instead of ending the run.">
@@ -157,15 +158,15 @@ your own, rather than treating it as a black box.
   <span class="dim"><i></i>delegate, report, retry</span>
   <span class="trail-key"><i></i>the evidence trail</span>
 </div>
-<figcaption>Every specialist reports back to the strategizer the same way; only the evidence trail is checked before the notebook is allowed out. The diagram shows one gate where the run applies several in sequence — see <a href="../how-a-run-is-kept-honest/">How a run is kept honest</a> for the full ladder.</figcaption>
+<!-- vale on -->
+<figcaption>Every specialist reports back to the strategizer the same way; only the evidence trail is checked before the notebook is allowed out. The diagram shows one gate where the run applies several in sequence—see <a href="../how-a-run-is-kept-honest/">How a run is kept honest</a> for the full ladder.</figcaption>
 </figure>
 
 ## The graph and the open loop
 
 The agents are nodes in a graph. One node, the **strategizer**, is the hub: it
 reads the problem, decides what to do next, and hands work to the specialists. It
-runs an **open loop**, meaning it is not a fixed pipeline of "step 1, step 2, step
-3". After every piece of work comes back, the strategizer looks at the current
+runs an **open loop**, meaning it is not a fixed pipeline of numbered steps. After every piece of work comes back, the strategizer looks at the current
 state and chooses the next move. The loop ends when the strategizer declares the
 work done and that decision survives review.
 
@@ -202,8 +203,8 @@ system cannot quietly talk itself into a conclusion the evidence does not carry.
 
 Every real oracle evaluation is written once, under a lock, to a shared
 **canonical ledger** (an `ExperimentData` store), and stamped with the delegation
-that produced it. This store is the single source of truth for "what was actually
-measured". It is protected: a stray write that would shrink it, or reset a
+that produced it. This store is the single source of truth for what was actually
+measured. It is protected: a stray write that would shrink it, or reset a
 completed evaluation, is refused. The headline number in the final deliverable
 must trace back to rows in this ledger, or the deliverable cannot reproduce it.
 
@@ -219,15 +220,15 @@ is checked against the number the run claims. A run that cannot reproduce its ow
 headline does not pass. This is why the notebook you get back runs as-is.
 
 The reproduction gate is one of several checks between a decision and its
-counting — some of which refuse outright, and some of which only speak up.
+counting—some of which refuse outright, and some of which only speak up.
 [How a run is kept honest](how-a-run-is-kept-honest.md) is the full inventory,
 including which ones you can switch off.
 
-## Backends
+## Model backends
 
 The agents are driven by a language model through a **backend**. adda ships
-several: the Claude CLI (default), any OpenAI-compatible endpoint, Ollama,
-OpenRouter, and vLLM (including a mode that serves a model on a SLURM GPU node the
+several: the Claude command-line tool (default), any OpenAI-compatible endpoint, Ollama,
+OpenRouter, and vLLM (including a mode that serves a model on a Slurm GPU node the
 framework owns for the run). The backend is a configuration choice; the graph and
 the science do not change with it.
 
@@ -240,8 +241,8 @@ Long autonomous runs need guardrails. adda separates two kinds:
   never hard-stop the science.
 - **Hard caps** stop the run outright: per-delegation memory (host safety,
   enforced by a watchdog that also reaps runaway processes and force-exits a
-  stalled run), and an optional `budget_usd` cost ceiling (resumable — raise
-  it and resume; inactive on a backend with no per-call cost data, e.g.
+  stalled run), and an optional `budget_usd` cost ceiling (resumable—raise
+  it and resume; inactive on a backend with no per-call cost data, for example
   Ollama).
 
 ## What you provide, what you get

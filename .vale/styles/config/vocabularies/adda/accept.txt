@@ -24,3 +24,8 @@ docstrings
 implementer
 delegator
 substring
+Esc
+(?i)deliverables?
+unjudged
+unledgered
+rederive
