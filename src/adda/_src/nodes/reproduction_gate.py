@@ -111,10 +111,10 @@ class ReproductionGateMixin:
              ``get_evaluator()``, which skips every already-FINISHED row.
           3. It must NOT modify or delete any existing ledger row — no faking
              a zero-delta by delete-then-re-add or by rewriting a value.
-          4. If it prints both a freshly-computed ``REPRODUCED: <value>`` and
-             a stated ``CLAIMED_HEADLINE: <value>``, the two must agree — an
-             internally self-contradicting write-up fails even when every
-             other check passes.
+          4. The notebook prints a freshly-computed ``REPRODUCED: <value>``
+             and the ``CLAIMED_HEADLINE: <value>`` its write-up states. The
+             gate fails the notebook when the two differ. It does not fail
+             a notebook for a missing print.
 
         Passing (0)-(4) means the deliverable is a faithful, lightweight,
         lazy reproduction of a real, already-evaluated campaign — not a
