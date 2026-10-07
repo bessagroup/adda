@@ -35,12 +35,16 @@ Open `debug/run_config.json` in each run. Two entries matter.
 Read `arms`, not `runtime`, to label a run. An empty `runtime` can mean either
 an unlabelled baseline or a run that nobody configured.
 
-`debug/node_tools.json` does not change for this arm. That file records a
-`nodes:` override of an agent's tools. A switch that withholds a tool, such as
-`hypothesis_ledger: false`, removes the tool at run time, and `node_tools.json`
-does not show it. `science_monitor` owns no tools, so the monitor's absence
-shows only in `arms` and in a missing `diagnostics.jsonl` stream of monitor
-events, such as `UNSTAMPED_ROWS`.
+`debug/node_tools.json` does not change for this arm, because
+`science_monitor` owns no tools. The monitor's absence shows in `arms` and in
+a missing stream of monitor events in `diagnostics.jsonl`, such as
+`UNSTAMPED_ROWS`.
+
+A switch that owns tools does change `node_tools.json`. With
+`hypothesis_ledger=false`, each node's record gains `feature_withheld`, which
+maps every withheld tool to its switch, such as `"HypothesisList":
+"hypothesis_ledger"`. The `effective` list is the set the node really has:
+`resolved` minus those tools.
 
 ## Compare two runs
 

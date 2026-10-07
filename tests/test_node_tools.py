@@ -254,3 +254,38 @@ def test_the_notice_names_the_withheld_closures(tmp_path):
     assert "ConsultHandbook" in rec[0]["withheld"]
     assert "ReportEvals" in nt.DIFF_NOTICE.format(
         node="a", added=[], removed=[], withheld=rec[0]["withheld"])
+
+
+def test_record_shows_tools_a_disabled_feature_withholds(tmp_path):
+    from adda._src.runtime import settings
+
+    class _L(Agent):
+        description = "l"
+        tools = frozenset({"Read", "HypothesisList", "HypothesisUpdate"})
+
+    g = Graph(nodes={"l": _L()}, edges=(), entry="l")
+    try:
+        settings.configure({"hypothesis_ledger": False,
+                            "verdict_validator": False,
+                            "peer_interaction": False})
+        recs = nt.apply_node_config(g, {})
+        nt.record_resolution(tmp_path, recs, logging.getLogger("t"))
+    finally:
+        settings.configure(None)
+    rec = json.loads((tmp_path / "node_tools.json").read_text())["l"]
+    assert rec["resolved"] == ["HypothesisList", "HypothesisUpdate", "Read"]
+    assert rec["feature_withheld"] == {
+        "HypothesisList": "hypothesis_ledger",
+        "HypothesisUpdate": "hypothesis_ledger",
+        "SendMessage": "peer_interaction"}
+    assert rec["effective"] == ["Read"]
+
+
+def test_record_withholds_nothing_in_the_baseline(tmp_path):
+    from adda._src.runtime import settings
+
+    settings.configure(None)
+    recs = nt.apply_node_config(_graph(), {})
+    nt.record_resolution(tmp_path, recs, logging.getLogger("t"))
+    rec = json.loads((tmp_path / "node_tools.json").read_text())["a"]
+    assert rec["feature_withheld"] == {} and rec["effective"] == rec["resolved"]

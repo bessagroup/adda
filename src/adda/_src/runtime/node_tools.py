@@ -150,8 +150,34 @@ def _append(debug_dir: Path, record: dict) -> None:
         pass
 
 
+#: Tools the runtime grants every node from the topology, not from its
+#: declared set. A disabled feature withholds them all the same.
+_TOPOLOGY_GRANTED = frozenset({"SendMessage"})
+
+
+def feature_withheld(resolved: Any) -> dict[str, str]:
+    """``{tool: feature key}`` for tools a disabled ablation feature takes away.
+
+    Only tools the node would otherwise hold: its resolved set plus the tools
+    the topology grants to every node.
+    """
+    from . import features
+    held = frozenset(resolved) | _TOPOLOGY_GRANTED
+    return {t: f.key for f in features.FEATURES if not features.enabled(f.key)
+            for t in sorted(f.tools & held)}
+
+
 def record_resolution(debug_dir: Path, records: list[dict], log: logging.Logger) -> None:
-    """Write ``node_tools.json`` and the run-start notices (console + diagnostics)."""
+    """Write ``node_tools.json`` and the run-start notices (console + diagnostics).
+
+    ``effective`` is what the node really has: ``resolved`` minus the tools a
+    disabled feature withholds (``feature_withheld``, each with its feature
+    key). ``withheld`` is the separate ``nodes:`` list effect on always-on
+    closures.
+    """
+    for r in records:
+        r["feature_withheld"] = feature_withheld(r["resolved"])
+        r["effective"] = sorted(set(r["resolved"]) - set(r["feature_withheld"]))
     try:
         (Path(debug_dir) / "node_tools.json").write_text(
             json.dumps({r["node"]: r for r in records}, indent=2), encoding="utf-8")

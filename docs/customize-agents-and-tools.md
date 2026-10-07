@@ -149,7 +149,9 @@ names the tools `Default` turned into there.
 
 The run folder keeps the result: `debug/node_tools.json` has, for every node,
 where its tools came from (class or `config.yaml`), the class set, the final
-set and the difference.
+set and the difference. It also lists the tools that a switched-off ablation
+switch withholds, each with its switch, and the `effective` set that the node
+really has. See [Run an ablation](run-an-ablation.md).
 
 ## Seeing what you built
 

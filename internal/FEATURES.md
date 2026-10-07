@@ -1040,7 +1040,8 @@ native one). On other backends it is that adapter's native set
 Grep). `Default` is never inherited or injected; the critic keeps its explicit set.
 
 Records, all informational and never blocking: `debug/node_tools.json` (source
-class|config, class set, resolved set, diff); diagnostics rows (fault `nudge`)
+class|config, class set, resolved set, diff, `feature_withheld` = tool -> the
+disabled ablation feature that took it, `effective` = resolved minus those); diagnostics rows (fault `nudge`)
 `TOOLS_CONFIG_DIFFERS` (config differs from the class), `DEFAULT_TOOLS_BYPASS`
 (once per Default node: it can bypass Delegate, the literature rate limiter and
 cache, the reproduction gate via NotebookEdit, FollowUp via AskUserQuestion),
