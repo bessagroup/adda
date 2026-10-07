@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ..infra.telemetry import NORMALIZED_FIELDS, has_normalized_usage
 from .parsing import _extract_report_section
 
 # Max chars persisted per retrospective. The strategizer's end-of-run exit
@@ -76,6 +77,13 @@ class RecordingMixin:
             self._token_totals["output_tokens"] += usage.get("output_tokens", 0) or 0
             self._token_totals["cache_read_input_tokens"] += usage.get("cache_read_input_tokens", 0) or 0
             self._token_totals["cache_creation_input_tokens"] += usage.get("cache_creation_input_tokens", 0) or 0
+            t = self._token_totals
+            if has_normalized_usage(usage):
+                t["normalized_calls"] = t.get("normalized_calls", 0) + 1
+                for f in NORMALIZED_FIELDS:
+                    t[f] = t.get(f, 0) + int(usage[f])
+            else:
+                t["legacy_calls"] = t.get("legacy_calls", 0) + 1
             cost = usage.get("total_cost_usd")
             if cost is not None:
                 self._token_totals["total_cost_usd"] += cost

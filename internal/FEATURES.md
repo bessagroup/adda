@@ -1512,7 +1512,10 @@ no claim. A run with no ledger reads "no hypothesis ledger". Tests: `tests/test_
   `output` (disjoint, so total = their sum); `input_tokens` is not comparable
   across backends (Claude excludes cache, openai-compatible includes it). A row
   without the four fields is legacy; `summary.json` counts `normalized_calls`
-  and `legacy_calls` and gives `tokens_total` over the normalized ones. At close,
+  and `legacy_calls` and gives `tokens_total` over the normalized ones. The run's
+  in-memory token totals, the run report's token line and notebook token table,
+  and the `run_ledger.csv` `tokens_*` columns (`tokens_schema` blank/`legacy` =
+  not comparable) use the same schema. At close,
   `Telemetry.merge` unions them into `summary.json`: totals + by_role / by_phase
   / by_model (tokens, wall_time_s, cost, computed cost / computed_cost_calls).
 - **Why:** additive and off the decision path, for post-hoc ablation ("where did

@@ -19,6 +19,7 @@ from ..backends.base import Agent, Graph
 from ..infra.container_runner import ContainerRunner
 from ..infra.delegation_log import DelegationLog
 from ..infra.stop_request import write_stop_request
+from ..infra.telemetry import NORMALIZED_FIELDS
 from ..infra.workspace_vcs import init_workspace_repo
 from ..nodes._constants import (
     backstop_enabled,
@@ -113,6 +114,36 @@ def resolve_node_identity(
     never disagree with the thing it describes.
     """
     return (agent.model or default_model, agent.backend or default_backend)
+
+
+def _comparable_tokens(tokens: dict) -> dict | None:
+    """The run's four schema counts, or None when any call lacked them (a
+    mixed total would not be comparable across backends)."""
+    if not tokens.get("normalized_calls") or tokens.get("legacy_calls"):
+        return None
+    return {f: int(tokens.get(f, 0) or 0) for f in NORMALIZED_FIELDS}
+
+
+def _token_line(tokens: dict) -> str:
+    n = _comparable_tokens(tokens)
+    if n is None:
+        return "legacy (not comparable across backends)"
+    return (f"fresh {n['fresh_input']:,} / cache read {n['cache_read']:,} / "
+            f"cache write {n['cache_write']:,} / output {n['output']:,}")
+
+
+def _normalized_token_rows(tokens: dict, legacy_total: int) -> str:
+    """Token-table rows after the four legacy ones. `input_tokens` above is
+    cache-inclusive on openai-compatible backends and cache-exclusive on
+    Claude, so `total_tokens` is the schema's sum when the run has it."""
+    n = _comparable_tokens(tokens)
+    if n is None:
+        return (f"| total_tokens | {legacy_total:,} |\n"
+                "| token_schema | legacy, not comparable |\n")
+    return (f"| fresh_input_tokens | {n['fresh_input']:,} |\n"
+            f"| cache_write_tokens | {n['cache_write']:,} |\n"
+            f"| total_tokens | {sum(n.values()):,} |\n"
+            "| token_schema | fresh + cache read + cache write + output |\n")
 
 
 @dataclass
@@ -1125,8 +1156,7 @@ class AgenticRun:
 
         log.info(
             f"Run complete. Evals: {evals}. "
-            f"Tokens in/out: {tokens.get('input_tokens', 0) or 0}/"
-            f"{tokens.get('output_tokens', 0) or 0}. "
+            f"Tokens: {_token_line(tokens)}. "
             f"Cost: {cost_str}. "
             + ("pipeline.ipynb stamped." if nb_path.exists()
                else "pipeline.ipynb was NEVER WRITTEN — the agent never "
@@ -1368,8 +1398,8 @@ class AgenticRun:
             f"| output_tokens | {tokens_out:,} |\n"
             f"| cache_read_tokens | {cache_read:,} |\n"
             f"| cache_creation_tokens | {cache_create:,} |\n"
-            f"| total_tokens | {tokens_in + tokens_out:,} |\n"
-            f"| estimated_cost | {cost_str} |\n"
+            + _normalized_token_rows(tokens, tokens_in + tokens_out)
+            + f"| estimated_cost | {cost_str} |\n"
             + (
                 "\n## Tool-call errors per node\n\n"
                 + "| node | error_count |\n"

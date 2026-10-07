@@ -164,6 +164,14 @@ class Node(
             "output_tokens": 0,
             "cache_read_input_tokens": 0,
             "cache_creation_input_tokens": 0,
+            # The backend-independent schema (infra/telemetry.py): `legacy_calls`
+            # counts calls whose backend reported none of it.
+            "fresh_input": 0,
+            "cache_read": 0,
+            "cache_write": 0,
+            "output": 0,
+            "normalized_calls": 0,
+            "legacy_calls": 0,
             "total_cost_usd": 0.0,
         }
         self._cost_observed: bool = False
