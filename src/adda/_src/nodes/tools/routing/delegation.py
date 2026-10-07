@@ -1397,9 +1397,12 @@ class DelegationTools:
             " oracle + ledger. Leave it UNSET (the default) for the baseline study —"
             " that is most problems. Set namespace='some_name' only when the"
             " scientific question is a fundamentally different design REPRESENTATION"
-            " (new variables / new geometry — e.g. 'elliptical_rings'): delegate a"
-            " datagenerator with that namespace to build + register its oracle, then"
-            " delegate implementers with the SAME namespace to evaluate in it. Each"
+            " (new variables / new geometry — e.g. 'elliptical_rings')"
+            "[[if node:datagenerator]]: delegate a datagenerator with that namespace to"
+            " build + register its oracle[[if node:implementer]], then delegate"
+            " implementers with the SAME namespace to evaluate in it[[/if]]"
+            "[[else]][[if node:implementer]]: delegate implementers with the SAME"
+            " namespace to evaluate in it[[/if]][[/if]]. Each"
             " namespace keeps its own isolated ledger and the baseline is untouched;"
             " results compare across namespaces only insofar as they share the"
             " objective evaluator. A tool for creativity, not a requirement — open as"
@@ -1559,15 +1562,15 @@ class DelegationTools:
     # ── Delegate, and the dispatch steps it runs in order ────────────────────
 
     @tool_examples(
-        "Delegate('implementer', 'Run a 50-pt Latin sweep of t/L in "
+        "[[if node:implementer]]Delegate('implementer', 'Run a 50-pt Latin sweep of t/L in "
         "[0.02,0.20]; evaluate via get_evaluator(); report top-5 by "
         "buckling_load_norm + the results CSV path + feasible count.', "
         "'top-5 t/L, their values, CSV path, n feasible', "
-        "hypothesis_ids=['H1','H2'])",
-        "Delegate('implementer', 'Falsification probe: dense grid n=20 of "
+        "hypothesis_ids=['H1','H2'])[[/if]]",
+        "[[if node:implementer]]Delegate('implementer', 'Falsification probe: dense grid n=20 of "
         "t/L in [0.10,0.14]; does any point beat buckling_load_norm 1.47?', "
         "'best value in range + pass/fail', hypothesis_ids=['H1'], "
-        "is_falsification_attempt=True, phase='optimization')",
+        "is_falsification_attempt=True, phase='optimization')[[/if]]",
     )
     def Delegate(
         self,

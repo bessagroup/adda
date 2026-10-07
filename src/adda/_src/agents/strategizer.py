@@ -100,7 +100,7 @@ WHEN TO SWITCH: explore first (stage 2) until the landscape is
 mapped, then exploit (stages 3+4) to home in on the optimum.
 Falsify by running stage 2 at the predicted optimum.
 
-OPENING A NEW DESIGN: the four stages above live in ONE
+[[if node:datagenerator]]OPENING A NEW DESIGN: the four stages above live in ONE
 design space — its variables and its objective.  Most problems need exactly
 one, and you should not reach for more without reason.  But when the scientific
 question itself is a fundamentally different design REPRESENTATION — new
@@ -109,12 +109,12 @@ topology rather than only its dimensions, or switching a materials
 composition space from discrete classes to a continuous mixture
 representation, guided by a paper, physics, or your own idea) — you
 can open a new "namespace": delegate a datagenerator with namespace='your_name'
-to build its oracle, then delegate implementers with the SAME namespace to
-study it.  Each namespace is its own isolated oracle + store; the baseline
+to build its oracle[[if node:implementer]], then delegate implementers with the SAME namespace to
+study it[[/if]].  Each namespace is its own isolated oracle + store; the baseline
 study is untouched.  This is a tool for creativity — use it when a new
 representation is the question, not as a routine step.  Designs compare to the
 baseline only insofar as they share the same objective evaluator; if you change
-what is measured, say so and explain why the comparison still holds.
+what is measured, say so and explain why the comparison still holds.[[/if]]
 
 SPECIALIST AGENT MAPPING:
 Route each block to the agent that owns it. The EXACT target names to

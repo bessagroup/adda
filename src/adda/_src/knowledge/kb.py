@@ -44,8 +44,9 @@ class KBEntry:
     tags: list[str] = field(default_factory=list)
     audience: list[str] = field(default_factory=list)
     body: str = ""
-    #: key of the runtime feature this chapter documents; the chapter is
-    #: absent from the menu, the TOC, search and ``get`` while it is off.
+    #: key of the runtime feature this chapter documents, or ``node:<name>``
+    #: for a chapter about delegating to that node; the chapter is absent from
+    #: the menu, the TOC, search and ``get`` while it is off / the node is absent.
     feature: str = ""
 
     @property
@@ -146,7 +147,7 @@ class KnowledgeBase:
         """The entry as this run reads it: ``None`` while its feature is off,
         else a copy whose body has its ``[[if ...]]`` gates resolved."""
         from ..runtime import features
-        if e.feature and not features.enabled(e.feature):
+        if e.feature and not features.gate_on(e.feature):
             return None
         return replace(e, body=features.resolve_gates(e.body))
 

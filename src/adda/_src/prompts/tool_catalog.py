@@ -69,7 +69,9 @@ def render_tool_catalog(closure_tools: dict[str, Callable]) -> str:
         fn = closure_tools[name]
         doc = inspect.cleandoc(getattr(fn, "__doc__", None) or "") or "(no description)"
         block = f"### {name}\n{doc}"
-        examples = getattr(fn, "_tool_examples", None)
+        from ..runtime.features import resolve_gates
+        examples = [e for e in (resolve_gates(x) for x in
+                                getattr(fn, "_tool_examples", None) or ()) if e.strip()]
         if examples:
             block += "\nExamples:\n" + "\n".join(f"  - {e}" for e in examples)
         blocks.append(block)

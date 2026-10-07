@@ -3,6 +3,7 @@ id: author-and-register-a-source
 title: When no source is shipped, author and register one via the datagenerator
 tags: [datagenerator, registration, canonical-source, get_evaluator, setup]
 audience: [strategizer, datagenerator]
+feature: node:datagenerator
 ---
 If the study ships no canonical ground-truth source (no evaluator entrypoint
 or lookup pool in `run_config`), one must be authored before evaluations can

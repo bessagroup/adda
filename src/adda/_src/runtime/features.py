@@ -63,6 +63,7 @@ __all__ = [
     "conflicts",
     "disabled_tool_names",
     "strip_disabled_sections",
+    "gate_on",
     "resolve_gates",
     "by_key",
 ]
@@ -337,7 +338,7 @@ def strip_disabled_sections(prompt: str) -> str:
 _GATE_TOKEN = re.compile(r"\[\[(?:if ([\w:]+)|(else)|(/if))\]\]")
 
 
-def _gate_on(key: str) -> bool:
+def gate_on(key: str) -> bool:
     """A gate key is a feature knob, or ``node:<name>`` for graph membership."""
     if key.startswith("node:"):
         nodes = settings.graph_nodes()
@@ -371,7 +372,7 @@ def resolve_gates(text: str) -> str:
         pos = m.end()
         key, is_else, is_end = m.groups()
         if key is not None:
-            on = _gate_on(key)
+            on = gate_on(key)
             stack.append([live, on, False])
             live = live and on
         elif is_else:

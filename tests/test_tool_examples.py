@@ -41,6 +41,12 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[1]
 
 
+def _shown(example: str) -> str:
+    """The example as the agent reads it, with topology gates resolved."""
+    from adda._src.runtime.features import resolve_gates
+    return resolve_gates(example)
+
+
 def _promptmap():
     spec = importlib.util.spec_from_file_location(
         "_promptmap_for_examples", _ROOT / "internal" / "tools" / "promptmap.py")
@@ -146,7 +152,7 @@ def test_every_example_is_a_call_the_tool_accepts(tool):
         params = [a.arg for a in fn.args.args if a.arg != "self"]
         kwonly = [a.arg for a in fn.args.kwonlyargs]
         for example in _examples(fn):
-            call = ast.parse(example, mode="eval").body
+            call = ast.parse(_shown(example), mode="eval").body
             assert isinstance(call, ast.Call), f"{tool}: {example!r} is not a call"
             called = getattr(call.func, "id", None)
             assert called == tool, (
@@ -161,7 +167,7 @@ def test_every_example_is_a_call_the_tool_accepts(tool):
 
 
 def _check_call(tool: str, example: str, params: list[str], kwonly: list[str]):
-    call = ast.parse(example, mode="eval").body
+    call = ast.parse(_shown(example), mode="eval").body
     assert isinstance(call, ast.Call), f"{tool}: {example!r} is not a call"
     assert getattr(call.func, "id", None) == tool, (
         f"{tool}'s example calls another tool: {example!r}")

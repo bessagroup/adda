@@ -185,14 +185,28 @@ def test_arm_does_not_construct_its_backing_object(tmp_path, key):
 
 # --- graph composition --------------------------------------------------------
 
-_VOCAB = ("default-graph vocabulary (KB menu, role text, Delegate docstring "
-          "examples, OracleStatus text) still names this node when it is removed")
-REMOVABLE = [
-    "literature_reviewer",
-    pytest.param("datagenerator", marks=pytest.mark.xfail(strict=True, reason=_VOCAB)),
-    pytest.param("implementer", marks=pytest.mark.xfail(strict=True, reason=_VOCAB)),
-    "critic",
-]
+REMOVABLE = ["literature_reviewer", "critic"]
+
+# Removing these two leaves DESCRIPTIVE mentions (the strategizer's roster text
+# is conditional "WHEN PRESENT", OracleStatus names the datagenerator's effect,
+# the datagenerator's own prompt names the implementer). What must go is text
+# that INSTRUCTS the agent to delegate to the absent node.
+INSTRUCTING = {
+    "datagenerator": ["delegate a datagenerator", "via the datagenerator"],
+    "implementer": ["Delegate('implementer'", "delegate implementers"],
+}
+
+
+@pytest.mark.parametrize("name", sorted(INSTRUCTING))
+def test_a_removed_node_is_not_instructed_by_any_remaining_prompt(tmp_path, name):
+    built = _build(tmp_path, _spec_without(name))
+    assert name not in built.nodes
+    from adda._src.knowledge.kb import KnowledgeBase
+    kb_titles = " ".join(e.title for e in KnowledgeBase.load().entries)
+    for phrase in INSTRUCTING[name]:
+        assert phrase not in kb_titles, phrase
+        for node, text in built.prompts.items():
+            assert phrase not in text, (node, phrase)
 
 
 @pytest.mark.parametrize("name", REMOVABLE)
