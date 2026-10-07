@@ -1,35 +1,40 @@
 # adda
 
-**You write one file. It runs the research.**
+adda runs a team of LLM agents on a data-driven engineering problem. You
+describe the problem in one file, and adda hands back a notebook that
+reproduces the result end to end.
 
-adda takes a plain-language description of an engineering design or
-data-driven problem (the objective, the design space, what counts as a
-valid answer) and runs a team of LLM agents that decide what to try, write
-the code to evaluate it, run real experiments, check their own conclusions
-before accepting them, and hand you back a notebook that reproduces the
-result end to end.
+## What do you want to do?
 
-That's the whole interface: one input file, one notebook back. Everything
-in between, what to try first, how to test it, when to believe it, is the
-system's job, not yours.
+**Get started**
 
-## Get started
+- [Install adda](install.md) and connect a model.
+- [Run the quickstart](notebooks/quickstart.ipynb): a real problem, a real
+  answer, a couple of minutes.
 
-1. [Installation](install.md): the package, plus a model to drive the
-   agents. Two commands.
-2. [Quickstart](notebooks/quickstart.ipynb): a real problem in, a real
-   answer out, a couple of minutes start to finish.
-3. [Core concepts](permission-graph.md): once you've seen it run once, what the
-   pieces are actually called and why.
-4. [Authoring a study](author-a-study.md): write your own problem.
+**Do a task**
 
-## Under the hood
+- [Write a study](author-a-study.md).
+- [Watch a run and steer it](watch-and-steer-a-run.md).
+- [Understand what a run produced](read-a-runs-output.md).
+- [Use a different model or backend](use-a-different-model-or-backend.md).
+- [Change an agent's tools or build your own agents](customize-agents-and-tools.md).
+- [Fix a run that failed or stalled](troubleshoot.md).
 
-adda is a graph of agents: a hub **strategizer** delegating to
-specialists (**literature reviewer**, **data generator**, **implementer**,
-**critic**) that keeps every claim honest with a Popperian **hypothesis
-ledger** and closes every run with a **reproducible notebook**, checked end
-to end before the run is allowed to close, rather than written up afterward.
+**Understand how it works**
 
-It builds on [f3dasm](https://github.com/bessagroup/f3dasm) for the
+- [The permission graph](permission-graph.md): who may delegate to whom.
+- [How a run is kept honest](how-a-run-is-kept-honest.md): the hypothesis
+  ledger, the critic, and the reproduction gate.
+- [Features](features.md): how a piece of the scaffolding is turned off for an
+  experiment.
+
+**Look something up**
+
+- [Configuration reference](config-reference.md) and
+  [Runtime reference](runtime-reference.md): every `config.yaml` key.
+- [Command-line reference](cli.md).
+- [Python API reference](api/index.md).
+
+adda builds on [f3dasm](https://github.com/bessagroup/f3dasm) for the
 data-driven primitives and adds the agentic orchestration on top.
