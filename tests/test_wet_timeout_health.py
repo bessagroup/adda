@@ -31,6 +31,13 @@ def test_a_live_run_passes_and_says_so(tmp_path, capsys):
     assert "timed out while healthy" in capsys.readouterr().out
 
 
+def test_a_study_level_folder_beside_the_run_is_not_the_run(tmp_path, capsys):
+    study = _study(tmp_path)
+    (study / "runs" / "lit_reviewer_notes").mkdir()
+    _assert_timed_out_while_healthy(study)
+    assert "timed out while healthy" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("kwargs", [
     {"reason": "RuntimeError: boom"},
     {"store": False},

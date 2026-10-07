@@ -63,8 +63,11 @@ def _assert_timed_out_while_healthy(study_dir: Path) -> None:
     finished, and nothing in the run's own log is a traceback."""
     import json
 
-    run_dirs = sorted((study_dir / "runs").iterdir())
-    assert run_dirs, "timed out and no runs/<timestamp>/ directory exists"
+    # runs/ also holds study-level folders such as lit_reviewer_notes; only a
+    # run directory has a run_status.json.
+    run_dirs = sorted(d for d in (study_dir / "runs").iterdir()
+                      if (d / "debug" / "run_status.json").is_file())
+    assert run_dirs, "timed out and no runs/<timestamp>/ run directory exists"
     run_dir = run_dirs[-1]
     debug = run_dir / "debug"
     status = json.loads((debug / "run_status.json").read_text())
