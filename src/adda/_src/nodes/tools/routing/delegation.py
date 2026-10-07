@@ -1149,13 +1149,13 @@ class WorkerSession:
         with the full report, so it is read from that version; the version
         number is returned when it is not the final text.
         """
-        from ...parsing import _extract_report_section
+        from ...parsing import _extract_retrospective
         log = self.node._delegation_log
-        if log is None or _extract_report_section(text, "Retrospective"):
+        if log is None or _extract_retrospective(text):
             return text, None
         for version, old in reversed(
                 log.deliverable_versions(self.delegation_id)):
-            if _extract_report_section(old, "Retrospective"):
+            if _extract_retrospective(old):
                 return old, version
         return text, None
 

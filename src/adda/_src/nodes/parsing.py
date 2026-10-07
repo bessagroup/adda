@@ -249,7 +249,7 @@ def _has_section(text: str, name: str) -> bool:
 
 
 def _extract_report_section(
-    text: str, name: str, items: tuple[str, ...] = ()
+    text: str, name: str, items: tuple[str, ...] = (), last: bool = False
 ) -> str:
     """Return the body of the section called ``name``, or '' if absent.
 
@@ -262,6 +262,9 @@ def _extract_report_section(
     to the next heading, bold-only heading line, horizontal rule or end of
     text. A bold or ``X:`` opener that carries text on its own line ("Verdict:
     REVISE. I found ...") is a paragraph: it runs to the first blank line.
+    By default the first opener wins. With ``last=True`` the LAST opener that
+    has a body wins instead: a closing section such as the retrospective comes
+    after any earlier mention of it ("Retrospective: see below.").
     ``items`` names the labels the section is made of ("CONSISTENCY", ...): a
     bold line that starts with one is part of the body, not a new heading.
     """
@@ -273,6 +276,7 @@ def _extract_report_section(
         r"^\s*(?:\*\*|__)\s*(?:" + "|".join(map(_re.escape, items)) + r")\b",
         _re.IGNORECASE) if items else None)
     lines = text.splitlines()
+    found = ""
     for i, line in enumerate(lines):
         m = opener.match(line)
         if not m:
@@ -286,8 +290,25 @@ def _extract_report_section(
                     inline and not nxt.strip()):
                 break
             body.append(nxt)
-        return "\n".join(body).strip()
-    return ""
+        body_text = "\n".join(body).strip()
+        if not last:
+            return body_text
+        if body_text:
+            found = body_text
+    return found
+
+
+RETRO_LABELS = ("CONSISTENCY", "DECISION", "FRICTION", "BLOCKED", "TIME")
+
+
+def _extract_retrospective(text: str) -> str:
+    """The retrospective body of a report: the one parse every reader shares.
+
+    The retrospective closes a report, so the last opener with a body wins,
+    and a bold line starting with one of its labels belongs to the body.
+    """
+    return _extract_report_section(
+        text, "Retrospective", RETRO_LABELS, last=True)
 
 
 @tool_examples(

@@ -7,13 +7,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..infra.telemetry import NORMALIZED_FIELDS, has_normalized_usage
-from .parsing import _extract_report_section
+from .parsing import _extract_retrospective
 
 # Max chars persisted per retrospective. The strategizer's end-of-run exit
 # interview (CONSISTENCY/DECISION/FRICTION/BLOCKED) is the highest-signal
 # first-person record there is; the old 2000-char cap truncated it mid-sentence
 # (run 20260624T021359). Uniform across roles — no node-specific special-casing.
-_RETRO_ITEMS = ("CONSISTENCY", "DECISION", "FRICTION", "BLOCKED")
 _RETRO_TEXT_CAP = 16000
 
 # Fault classification (system vs agent) for the diagnostics KPI. The exception
@@ -199,8 +198,7 @@ class RecordingMixin:
         """
         try:
             report_text = report_text or ""
-            retro = _extract_report_section(
-                report_text, "Retrospective", _RETRO_ITEMS)
+            retro = _extract_retrospective(report_text)
             parse_failed = bool(report_text.strip()) and not retro
             if not retro and not parse_failed:
                 return

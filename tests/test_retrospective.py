@@ -8,6 +8,7 @@ worker flags contradictory instructions — emits a diagnostic + notification.
 from __future__ import annotations
 
 from adda._src.nodes import _extract_report_section
+from adda._src.nodes.parsing import _extract_retrospective
 
 
 class TestSectionExtractor:
@@ -23,6 +24,24 @@ class TestSectionExtractor:
         assert "DECISION: used seed 0" in body
         # Must not bleed earlier sections in
         assert "best: 1.2" not in body
+
+    def test_an_early_pointer_does_not_hide_the_real_section(self):
+        text = (
+            "Retrospective: see below.\n\n## Report\nFound x.\n\n"
+            "### Retrospective\n- CONSISTENCY: ok\n- DECISION: seed 0\n"
+        )
+        body = _extract_retrospective(text)
+        assert "see below" not in body
+        assert "DECISION: seed 0" in body
+
+    def test_an_early_bold_mention_does_not_hide_the_real_section(self):
+        text = (
+            "**Retrospective** follows the numbers.\n\nNumbers: a=1\n\n"
+            "### Retrospective\n- CONSISTENCY: flagged\n- BLOCKED: none\n"
+        )
+        body = _extract_retrospective(text)
+        assert "follows the numbers" not in body
+        assert "CONSISTENCY: flagged" in body
 
     def test_absent_section_returns_empty(self):
         assert _extract_report_section("## Report\n### Numbers\na: 1", "Retrospective") == ""
