@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ..infra.run_abandon import raise_if_stopped
 from ..infra.telemetry import call_shape, normalized_usage
 from .base import DEFAULT_TOOLS, record_stream_diagnostic
 
@@ -783,6 +784,7 @@ class ClaudeAdapter:
         _deliberate_break = False
         _msg_usage: dict[str, dict] = {}
         _cur_msg_id: list[str | None] = [None]
+        raise_if_stopped("model call")
         gen = query(prompt=prompt_str, options=options)
         # Idle-stream timeout — turns a silent stream into a retryable
         # TimeoutError. Resets on EVERY stream message. Scoped to model
@@ -925,6 +927,7 @@ class ClaudeAdapter:
             # stream event (≈ prefill latency).
             _last_evt = [time.monotonic()]
             async for msg in _stream:
+                raise_if_stopped("model call")
                 if isinstance(msg, StreamEvent):
                     _track_message_usage(
                         getattr(msg, "event", None), _msg_usage, _cur_msg_id)

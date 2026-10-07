@@ -53,7 +53,7 @@ if TYPE_CHECKING:
     from ..runtime.graph_state import AgenticState
 
 from ..infra.delegation_log import DelegationLog
-from .abandon import RunAbandoned
+from ..infra.run_abandon import RunAbandoned, raise_if_stopped
 from .critic_gate import CriticGateMixin
 from .lifecycle import LifecycleMixin
 from .orchestration import OrchestrationMixin
@@ -148,6 +148,7 @@ class Node(
         """End the calling thread once the run has stopped waiting for it."""
         if self._abandon.is_set():
             raise RunAbandoned(self._name)
+        raise_if_stopped(self._name)
 
     def _init_recording(self) -> None:
         """Establish the state ``RecordingMixin`` writes to, on EVERY node.

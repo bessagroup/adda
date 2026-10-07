@@ -22,6 +22,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from ..infra.run_abandon import raise_if_stopped
 from ..infra.telemetry import call_shape, normalized_usage
 from . import context_budget, context_compaction
 from .base import DEFAULT_TOOLS
@@ -484,6 +485,7 @@ def _guard_native(tool: Any, on_error: Any = None) -> Any:
 
     @functools.wraps(inner)
     def guarded(*args, **kwargs):
+        raise_if_stopped(tool.name)
         try:
             result = inner(*args, **kwargs)
         except Exception as exc:  # noqa: BLE001
@@ -1284,12 +1286,14 @@ class OpenAICompatibleAdapter:
         # nothing in hand, and the tokens the server already generated for that
         # turn would be unrecoverable.
         try:
+            raise_if_stopped("model call")
             for state in self._agent.stream(
                 {"messages": lc_msgs}, config=cfg, stream_mode="values",
             ):
                 result = state
                 if _debug:
                     _flush(state)
+                raise_if_stopped("model call")
         except Exception:
             # A failed turn keeps everything captured up to the failure.
             if _debug and result is not None:

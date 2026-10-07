@@ -241,12 +241,18 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   delegations, controlling for delegation duration) against a measured mean
   concurrency of 1.21 on a median 15 delegations per run.
   **An interrupted run returns** (`AgenticRun._invoke_abandonable`,
-  `nodes/abandon.py`): `graph.invoke` runs on a worker thread, so Ctrl-C or a
-  timeout reaches the run at once. It sets every node's abandon flag and waits
-  a bounded 30 s. Each node thread then raises `RunAbandoned` at its next tool
-  call or `Wait` loop. A thread stuck in a model call ends when the call
-  returns. A `RUN_ABANDONED` diagnostics row records the graph thread state
-  and the delegations left Working.
+  `infra/run_abandon.py`): `graph.invoke` runs on a worker thread, so Ctrl-C or a
+  timeout reaches the run at once. It sets a run-level stop signal and every
+  node's abandon flag, then waits a bounded 30 s. With the signal set, no node
+  and no backend starts a new call: both backends check it before each model
+  call and each streamed step (`ClaudeAdapter.ainvoke`,
+  `OpenAICompatibleAdapter._invoke_once`), and before each native tool call
+  (`_guard_native`); a node raises `RunAbandoned` at its next tool call or
+  `Wait` loop. The turn ends with no new call. A call already in flight ends when
+  it returns. The `RUN_ABANDONED` diagnostics row records the graph thread
+  state, the delegations left Working, and `calls_blocked`: how many calls the
+  signal refused before the row was written. The signal clears at the start of
+  the next run.
 - **Status:** core.
 
 ## B. The deliverable (pipeline.ipynb)

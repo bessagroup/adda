@@ -106,7 +106,7 @@ def _node():
 def test_wait_ends_when_the_run_abandons_the_node(target, monkeypatch):
     monkeypatch.setattr(
         "adda._src.nodes.tools.routing.delegation._NOTICE_POLL_S", 0.3)
-    from adda._src.nodes.abandon import RunAbandoned
+    from adda._src.infra.run_abandon import RunAbandoned
 
     n = _node()
     hold = threading.Event()
@@ -135,7 +135,7 @@ def test_wait_ends_when_the_run_abandons_the_node(target, monkeypatch):
 
 
 def test_tool_call_after_abandon_raises():
-    from adda._src.nodes.abandon import RunAbandoned
+    from adda._src.infra.run_abandon import RunAbandoned
 
     n = _node()
     n._abandon.set()

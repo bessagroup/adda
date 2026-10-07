@@ -187,3 +187,12 @@ def pytest_sessionfinish(session, exitstatus):
             "of skipping), or it is genuinely environmental and belongs in "
             "_SKIP_ALLOWLIST in tests/conftest.py, with a comment saying why.")
     session.exitstatus = 1
+
+
+@pytest.fixture(autouse=True)
+def _clear_run_stop_signal():
+    """The run-level stop signal is process-wide; no test may leak it."""
+    from adda._src.infra import run_abandon
+    run_abandon.reset_stop()
+    yield
+    run_abandon.reset_stop()

@@ -17,6 +17,7 @@ from langchain_core.messages import HumanMessage
 
 from ..agents import ImplementerAgent, StrategizerAgent, _default_graph
 from ..backends.base import Agent, Graph
+from ..infra import run_abandon as abandon
 from ..infra.container_runner import ContainerRunner
 from ..infra.delegation_log import DelegationLog
 from ..infra.stop_request import write_stop_request
@@ -950,6 +951,7 @@ class AgenticRun:
         """
         box: dict[str, Any] = {}
         finished = threading.Event()
+        abandon.reset_stop()
 
         def _go() -> None:
             try:
@@ -979,6 +981,7 @@ class AgenticRun:
         call ends when that call returns.
         """
         nodes = getattr(self, "_live_nodes", None) or {}
+        abandon.request_stop()
         for node in nodes.values():
             node._abandon.set()
         finished.wait(timeout=_ABANDON_GRACE_S)
@@ -997,9 +1000,11 @@ class AgenticRun:
                 "the run stopped waiting for its nodes after "
                 f"{_ABANDON_GRACE_S:.0f}s; graph thread "
                 f"{'ended' if finished.is_set() else 'still running'}; "
-                f"delegations left Working: {left or 'none'}"),
+                f"delegations left Working: {left or 'none'}; "
+                f"calls blocked by the stop signal: {abandon.blocked_calls()}"),
             "detail": {"graph_thread_alive": not finished.is_set(),
-                       "delegations_left": left},
+                       "delegations_left": left,
+                       "calls_blocked": abandon.blocked_calls()},
         }
         try:
             with (ctx.debug_dir / "diagnostics.jsonl").open(
