@@ -42,6 +42,7 @@ before. Until one is answered or closed, treat it as known, not news.
 - [ ] **#44** `pip install` inside an "activated" uv venv can silently target the wrong Python — *open, local-dev-only, not a fix, a documented gotcha* — see §44 below
 - [ ] **#51** Rows from a superseded oracle revision still count in `evals_used` and in best-row ranking — *open, separate step after real mixed-revision stores exist* — see §51 below
 - [ ] **#52** An in-band harness notice that guards data integrity travels inside a tool output that can be truncated — *open, investigate first, report before fixing* — see §52 below
+- [ ] **#54** Per-call input-token size on small studies — *open, investigate first, no work yet* — see §54 below
 - [ ] **#47** Computed cost sits 0-8% below the SDK's `total_cost_usd` on validator/critic calls — *open, low (telemetry column, not correctness)* — see §47 below
 
 ## Parked — deferred on purpose
@@ -746,3 +747,13 @@ covers prompt sections (`<tag>` blocks, `[[if key]]` gates) and tool names
 only. It cannot carry behaviour: code that must change when the knob flips
 (object construction, a gate, a validator) still needs an `enabled(key)` check
 written in the package.
+
+## 54. Per-call input-token size on small studies
+
+One datagenerator delegation (D001) on the trivial `quickstart_branin` study
+recorded 1,242,472 input tokens and 10,430 output tokens in a single telemetry
+row (`debug/telemetry/calls.<pid>.jsonl`, from the 2026-10-06 wet docs test,
+`openrouter/free`, so no money was spent). On a paid backend this would be real
+cost for a toy study. Investigate: is the input figure cumulative context across
+the delegation's turns, or repeated tool output? Check whether the row sums
+turns or counts one call. No work until then.

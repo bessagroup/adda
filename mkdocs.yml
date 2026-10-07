@@ -97,6 +97,7 @@ nav:
         - 'How a run is kept honest': 'how-a-run-is-kept-honest.md'
     - Reference:
         - 'Configuration reference': 'config-reference.md'
+        - 'Runtime reference': 'runtime-reference.md'
         - 'api/run.md'
         - 'api/agents.md'
         - 'api/graph.md'
