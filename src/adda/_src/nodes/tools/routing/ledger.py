@@ -415,8 +415,8 @@ class LedgerTools:
         """Add a process milestone, or close one.
 
         ADD: no milestone_id, a `description` → returns its id (M1, M2, …).
-        While pending it joins the backlog that gates delegating to the
-        implementer, exactly like the default milestones — so use it to hold
+        While pending it joins the backlog reminder a node sees on its first
+        Delegate, exactly like the default milestones — so use it to hold
         yourself to a process step you don't want to skip.
 
         CLOSE: milestone_id + status DONE or SKIPPED + a `note`. The note is
