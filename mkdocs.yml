@@ -98,6 +98,7 @@ nav:
     - Reference:
         - 'Configuration reference': 'config-reference.md'
         - 'Runtime reference': 'runtime-reference.md'
+        - 'Command-line reference': 'cli.md'
         - 'api/run.md'
         - 'api/agents.md'
         - 'api/graph.md'
