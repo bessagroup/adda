@@ -21,7 +21,7 @@ from adda._src.runtime import settings
 
 _SRC = Path(__file__).resolve().parent.parent / "src" / "adda" / "_src"
 _DOC = (Path(__file__).resolve().parent.parent
-        / "docs" / "authoring-a-study.md")
+        / "docs" / "author-a-study.md")
 
 # get_bool("debug", False) / get_str("semantic_scholar_api_key", "") / ...
 # `_?` so aliased imports (`from ...settings import get_int as _get_int`)
@@ -94,7 +94,7 @@ def test_runtime_block_is_documented_for_study_authors(key):
     study-authoring docs, not only in the source that reads it."""
     text = _DOC.read_text(encoding="utf-8")
     assert "`runtime`" in text or "runtime:" in text, (
-        "docs/authoring-a-study.md does not document the runtime: block at all"
+        "docs/author-a-study.md does not document the runtime: block at all"
     )
     assert key in text, f"runtime knob {key!r} is undocumented for study authors"
 

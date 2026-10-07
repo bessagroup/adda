@@ -101,7 +101,7 @@ def test_quickstart_branin_runs_without_crashing(tmp_path):
 
 
 def test_authoring_a_study_worked_example_runs_without_crashing(tmp_path):
-    """Mirrors docs/authoring-a-study.md's worked example (studies/example_study),
+    """Mirrors docs/author-a-study.md's worked example (studies/example_study),
     routed through OpenRouter instead of its own config.yaml's Claude default —
     the study's own PROBLEM_STATEMENT.md/evaluator.py are used unmodified."""
     _require_openrouter_key()

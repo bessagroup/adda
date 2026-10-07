@@ -19,7 +19,7 @@
 >   authoring is via the structured tools (not raw JSON); the notebook is
 >   required for all agentic runs (not opt-in).
 >
-> For the live contract see [`../authoring-a-study.md`](../authoring-a-study.md),
+> For the live contract see [`../author-a-study.md`](../author-a-study.md),
 > `notebook_exec.py`, and `tests/test_study_contract.py`. The line
 > numbers and "current mechanics" below describe the pre-migration code and are
 > stale. The original write-up is kept for the record.

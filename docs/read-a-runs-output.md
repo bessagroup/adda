@@ -4,7 +4,7 @@ When a run finishes, look in the study folder. Two things tell you almost
 everything: the deliverable, and whether it passed review.
 
 (To watch a run *while* it works instead, see
-[Watching a run](watching-a-run.md).)
+[Watching a run](watch-and-steer-a-run.md).)
 
 ## The deliverable: `pipeline.ipynb`
 
@@ -47,7 +47,7 @@ evaluation budget is counted against.
 ## When a result looks off
 
 If a run came back UNGATED, or the answer surprises you, `runs/<timestamp>/debug/`
-holds the detail, in rough order of usefulness. ([Troubleshooting](troubleshooting.md)
+holds the detail, in rough order of usefulness. ([Troubleshooting](troubleshoot.md)
 walks through the common causes.)
 
 - **`retrospectives.jsonl`**: each agent's own end-of-run notes, the call it was

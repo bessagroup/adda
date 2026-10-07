@@ -3,7 +3,7 @@
 The install command drifted into THREE different, two of them broken
 (README.md and the quickstart notebook both pointed at a private ssh:// URL,
 the wrong GitHub org, and a git tag that doesn't exist) while
-docs/installation.md quietly had the correct one. These tests pin a single
+docs/install.md quietly had the correct one. These tests pin a single
 source of truth so that can't happen silently again.
 """
 from __future__ import annotations
@@ -21,21 +21,21 @@ def _pip_install_lines(text: str) -> list[str]:
 
 def test_readme_and_installation_doc_agree_on_the_install_command():
     readme = (_ROOT / "README.md").read_text()
-    install_doc = (_ROOT / "docs" / "installation.md").read_text()
+    install_doc = (_ROOT / "docs" / "install.md").read_text()
 
     readme_lines = _pip_install_lines(readme)
     install_lines = _pip_install_lines(install_doc)
 
     assert readme_lines, "README.md has no pip install line"
-    assert install_lines, "docs/installation.md has no pip install line"
+    assert install_lines, "docs/install.md has no pip install line"
     assert readme_lines[0] in install_lines, (
         f"README's install command {readme_lines[0]!r} does not appear in "
-        "docs/installation.md — the two have drifted apart again"
+        "docs/install.md — the two have drifted apart again"
     )
 
 
 def test_install_command_is_not_a_broken_ssh_or_pinned_tag_url():
-    for path in (_ROOT / "README.md", _ROOT / "docs" / "installation.md"):
+    for path in (_ROOT / "README.md", _ROOT / "docs" / "install.md"):
         text = path.read_text()
         for line in _pip_install_lines(text):
             assert "git+ssh://" not in line, (
@@ -60,8 +60,8 @@ def test_quickstart_notebook_is_valid_and_does_not_duplicate_install_command():
     # re-diverging from) its own copy of the install command.
     assert "pip install" not in src, (
         "quickstart notebook repeats the install command inline instead of "
-        "linking to installation.md — this is exactly how it drifted before"
+        "linking to install.md — this is exactly how it drifted before"
     )
-    assert "installation.md" in src or "Installation" in src, (
+    assert "install.md" in src or "Installation" in src, (
         "quickstart notebook should point readers at the Installation page"
     )

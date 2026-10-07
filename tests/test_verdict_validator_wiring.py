@@ -289,5 +289,5 @@ def test_the_knob_is_declared_and_documented():
 
     assert "verdict_validator" in KNOWN_KEYS
     docs = (Path(__file__).resolve().parent.parent
-            / "docs" / "authoring-a-study.md").read_text(encoding="utf-8")
+            / "docs" / "author-a-study.md").read_text(encoding="utf-8")
     assert "`verdict_validator`" in docs

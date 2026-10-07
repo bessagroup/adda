@@ -19,7 +19,7 @@ If it doesn't, either log in once interactively or set an API key:
 export ANTHROPIC_API_KEY=sk-...
 ```
 
-See [Installation](installation.md). For a non-Claude backend, see
+See [Installation](install.md). For a non-Claude backend, see
 [Customizing a run](customizing-a-run.md#reference-the-available-backends).
 
 **The evaluator entrypoint doesn't resolve.** `evaluator.entrypoint` is
@@ -53,12 +53,12 @@ first. Note the nesting: run knobs go **inside** `runtime:`, while `model`,
    blocks for `runtime: followup_wait_s` (default 600s) before proceeding on
    its own. If the run has no TTY and nobody is watching in the viewer, it
    will simply wait out the timeout. See
-   [Watching a run](watching-a-run.md#answer-a-question), or
+   [Watching a run](watch-and-steer-a-run.md#answer-a-question), or
    pass `interactive=False` for a fully unattended run.
 2. Is a model call stalled? `runtime: llm_stream_idle_timeout` (default
    600s) abandons a call after that much stream silence.
 3. Is it just working? Long delegations are normal. Open the
-   [viewer](watching-a-run.md#start-the-viewer) and look, rather than
+   [viewer](watch-and-steer-a-run.md#start-the-viewer) and look, rather than
    guessing — that is what it is for.
 
 **The run halted on cost.** `budget_usd` is a hard ceiling and it is
@@ -95,7 +95,7 @@ run can still close. The hard backstop is `runtime: run_backstop_multiple`
 — no help if the run has genuinely wedged (a hung model call, a stuck
 simulation) and never gets there. For that, launch under the external
 watchdog instead — see
-[Launching under a watchdog](authoring-a-study.md#launching-under-a-watchdog).
+[Launching under a watchdog](author-a-study.md#launching-under-a-watchdog).
 
 ## When the result isn't what you wanted
 
@@ -120,7 +120,7 @@ record present and readable.
 **The answer is vague, or answers a different question.** This is almost
 always the brief. The agents work from `PROBLEM_STATEMENT.md` and the critic
 judges against it, so an unstated success criterion is an unjudged one. Go
-back to [Authoring a study](authoring-a-study.md#problem_statementmd-required)
+back to [Authoring a study](author-a-study.md#problem_statementmd-required)
 and state the objective, the design space with bounds/types/units, and what
 counts as valid — explicitly. The pre-run review exists to catch this; read
 its report rather than skipping past it.
@@ -129,7 +129,7 @@ its report rather than skipping past it.
 describe one in the brief, the run falls back to the honor system and the
 agents self-report. That's fine for exploring and worthless for a result you
 want to defend. Declare an evaluator — see
-[How designs get evaluated](authoring-a-study.md#how-designs-get-evaluated-the-evaluator).
+[How designs get evaluated](author-a-study.md#how-designs-get-evaluated-the-evaluator).
 
 **The same design was evaluated twice.** Reported as a diagnostic, not
 blocked. It costs budget and can inflate an apparent effect; check
@@ -141,4 +141,4 @@ Everything above lives under `runs/<timestamp>/`, and almost all of it
 requires `runtime: debug: true`. If you plan to debug a run at all, set it
 before you start — it cannot be recovered afterwards.
 
-See [Understanding a run's output](reading-a-run.md) for the full layout.
+See [Understanding a run's output](read-a-runs-output.md) for the full layout.

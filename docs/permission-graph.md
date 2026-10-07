@@ -249,7 +249,7 @@ Long autonomous runs need guardrails. adda separates two kinds:
 You provide one file: `PROBLEM_STATEMENT.md` in a study directory (plus a
 `config.yaml` if you want to set the backend, budgets, or the evaluator). You get
 back `pipeline.ipynb` (the reproducible answer) alongside the run's evaluation
-record and logs. See [Authoring a study](authoring-a-study.md) to set one up,
-[Watching a run](watching-a-run.md) to follow it live (and answer it, if it
-asks), [Understanding a run's output](reading-a-run.md) for what comes back, and
+record and logs. See [Authoring a study](author-a-study.md) to set one up,
+[Watching a run](watch-and-steer-a-run.md) to follow it live (and answer it, if it
+asks), [Understanding a run's output](read-a-runs-output.md) for what comes back, and
 the [Quickstart](notebooks/quickstart.ipynb) to run one.

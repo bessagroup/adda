@@ -289,7 +289,7 @@ runtime:
 or pass it as `AgenticRun(runtime={"science_monitor": False})`.
 Precedence is explicit argument, then `config.yaml`, then the feature's own
 `default`; the environment sets no knob. The switches are listed together under
-*Ablation switches* in [Authoring a study](authoring-a-study.md).
+*Ablation switches* in [Authoring a study](author-a-study.md).
 
 What that one line does, with no other change anywhere:
 
@@ -342,7 +342,7 @@ telemetry, so cost and throughput stay comparable.
 
 ### Claude CLI (default)
 
-Uses the local `claude` CLI: see [Installation](installation.md) if you
+Uses the local `claude` CLI: see [Installation](install.md) if you
 haven't set it up yet. Once `claude` runs on its own in your terminal,
 there's nothing else to configure beyond the model:
 

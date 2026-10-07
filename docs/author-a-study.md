@@ -247,7 +247,7 @@ per column) in a compact table, because they are not ordered stages unless you s
 At the study root you get **`pipeline.ipynb`**, the deliverable. Its opening
 cells are the write-up; its code cells reproduce the headline result. Each run
 also writes a timestamped folder under `runs/` with the evaluation record, logs,
-and a status file. See [Understanding a run's output](reading-a-run.md) for what's
+and a status file. See [Understanding a run's output](read-a-runs-output.md) for what's
 in there and how to read it.
 
 Everything above is `config.yaml` and `PROBLEM_STATEMENT.md`; the graph itself
@@ -264,7 +264,7 @@ four specialists aren't the shape your problem needs.
   real lookup pool.
 - Your evaluator imports and runs on one sample without error.
 - Your backend is reachable (for the default Claude backend, you're logged in;
-  see [Installation](installation.md)).
+  see [Installation](install.md)).
 
 ## A minimal worked example
 

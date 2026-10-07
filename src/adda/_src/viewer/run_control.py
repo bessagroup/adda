@@ -174,7 +174,7 @@ def _evaluator_check(study_dir: Path, cfg: dict) -> dict[str, Any]:
 
 
 def preflight(study_dir: Path | str) -> list[dict[str, Any]]:
-    """What ``docs/authoring-a-study.md`` "Before a long run, check" asks for,
+    """What ``docs/author-a-study.md`` "Before a long run, check" asks for,
     as ``{name, ok, detail}`` rows. A failed row (``ok`` False) blocks Start;
     ``ok`` None is something that cannot be decided without side effects."""
     from ..runtime.run_setup import _parse_budget_str

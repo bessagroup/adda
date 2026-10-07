@@ -1,13 +1,13 @@
 """Executable study-folder contract.
 
-Pins docs/agentic/authoring-a-study.md to the runtime by running the canonical
+Pins docs/agentic/author-a-study.md to the runtime by running the canonical
 example study (docs/agentic/example_study/) through the REAL config loader and
 get_evaluator() path. If the study-folder contract drifts, this fails — forcing
 the doc to be updated. Same "executable docs" guarantee as idioms.py /
 test_f3dasm_idioms.py.
 
 Forward-compatibility: DOCUMENTED_*_KEYS below is the canonical config surface.
-Adding a config key means updating both this set AND authoring-a-study.md; the
+Adding a config key means updating both this set AND author-a-study.md; the
 example is asserted to use only documented keys, so it can't silently drift.
 """
 from __future__ import annotations
@@ -23,7 +23,7 @@ from f3dasm._src.experimentsample import ExperimentSample, JobStatus
 _REPO = Path(__file__).resolve().parents[1]
 EXAMPLE = _REPO / "studies" / "example_study"
 
-# The config surface the contract documents (authoring-a-study.md). Keep in sync.
+# The config surface the contract documents (author-a-study.md). Keep in sync.
 DOCUMENTED_TOP_KEYS = {
     "model", "backend", "budget", "budget_usd", "eval_budget",
     "required_deliverables", "evaluator", "runtime", "objective",

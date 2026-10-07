@@ -62,7 +62,7 @@ The header shows the vitals of the selected run:
   free call.
 - **Delegations**, done and running.
 - **Best row**, the best counted row by the study's declared
-  [objective](authoring-a-study.md#declaring-the-objective). It is not the
+  [objective](author-a-study.md#declaring-the-objective). It is not the
   run's headline claim. Click it to open the row. Without a declared
   objective the field shows a dash.
 
@@ -249,7 +249,7 @@ never asked for.
 
 ## Next
 
-- [Understanding a run's output](reading-a-run.md): what to read once a run
+- [Understanding a run's output](read-a-runs-output.md): what to read once a run
   finishes.
 - [How a run is kept honest](how-a-run-is-kept-honest.md): the checks a run has
   to pass before it can close.

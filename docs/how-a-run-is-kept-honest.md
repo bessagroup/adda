@@ -150,8 +150,8 @@ test suite. It is not restated anywhere else.
 - **UNGATED** / **FAILED** — it did not. The result is unaudited; treat it
   as a draft.
 
-See [Understanding a run's output](reading-a-run.md) for what to read when
-it comes back UNGATED, and [Troubleshooting](troubleshooting.md) for the
+See [Understanding a run's output](read-a-runs-output.md) for what to read when
+it comes back UNGATED, and [Troubleshooting](troubleshoot.md) for the
 common causes.
 
 ## Summary of the switches

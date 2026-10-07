@@ -77,8 +77,8 @@ f3dasm dependency and must stay `f3dasm`. Review each hit.
       (module narratives are already strong; class/function docstrings need the
       typed Parameters/Returns/Raises sections so mkdocstrings renders cleanly).
 - [ ] Author `docs/notebooks/quickstart.ipynb` (a small end-to-end AgenticRun,
-      distinct from the internal `studies/*`) and flesh `docs/concepts.md`.
-- [ ] Confirm the ported `FEATURES.md`, `BACKLOG.md`, and `authoring-a-study.md`
+      distinct from the internal `studies/*`) and flesh `docs/permission-graph.md`.
+- [ ] Confirm the ported `FEATURES.md`, `BACKLOG.md`, and `author-a-study.md`
       render in the docs nav (already referenced in `mkdocs.yml`).
 - [ ] Update `CLAUDE.md` paths for the standalone layout (it currently assumes
       the monorepo `studies/` and `README-agentic.md` locations).

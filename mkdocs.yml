@@ -53,6 +53,14 @@ plugins:
         exclude:
             - "_overrides"
     - ipynb
+    - redirects:
+        redirect_maps:
+            'installation.md': 'install.md'
+            'concepts.md': 'permission-graph.md'
+            'authoring-a-study.md': 'author-a-study.md'
+            'watching-a-run.md': 'watch-and-steer-a-run.md'
+            'reading-a-run.md': 'read-a-runs-output.md'
+            'troubleshooting.md': 'troubleshoot.md'
     - mkdocstrings:
         handlers:
             python:
@@ -75,18 +83,19 @@ plugins:
 
 nav:
     - Home: 'index.md'
-    - Getting started:
-        - 'installation.md'
+    - Get started:
+        - 'Install': 'install.md'
         - 'Quickstart': 'notebooks/quickstart.ipynb'
-        - 'concepts.md'
     - Guides:
-        - 'Authoring a study': 'authoring-a-study.md'
-        - 'Watching a run': 'watching-a-run.md'
-        - "Understanding a run's output": 'reading-a-run.md'
+        - 'Author a study': 'author-a-study.md'
+        - 'Watch and steer a run': 'watch-and-steer-a-run.md'
+        - "Read a run's output": 'read-a-runs-output.md'
+        - 'Customize a run': 'customizing-a-run.md'
+        - 'Troubleshoot': 'troubleshoot.md'
+    - Concepts:
+        - 'The permission graph': 'permission-graph.md'
         - 'How a run is kept honest': 'how-a-run-is-kept-honest.md'
-        - 'Customizing a run': 'customizing-a-run.md'
-        - 'Troubleshooting': 'troubleshooting.md'
-    - API reference:
+    - Reference:
         - 'api/run.md'
         - 'api/agents.md'
         - 'api/graph.md'

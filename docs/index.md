@@ -15,13 +15,13 @@ system's job, not yours.
 
 ## Get started
 
-1. [Installation](installation.md): the package, plus a model to drive the
+1. [Installation](install.md): the package, plus a model to drive the
    agents. Two commands.
 2. [Quickstart](notebooks/quickstart.ipynb): a real problem in, a real
    answer out, a couple of minutes start to finish.
-3. [Core concepts](concepts.md): once you've seen it run once, what the
+3. [Core concepts](permission-graph.md): once you've seen it run once, what the
    pieces are actually called and why.
-4. [Authoring a study](authoring-a-study.md): write your own problem.
+4. [Authoring a study](author-a-study.md): write your own problem.
 
 ## Under the hood
 
