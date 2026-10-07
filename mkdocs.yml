@@ -87,6 +87,7 @@ nav:
     - Get started:
         - 'Install': 'install.md'
         - 'Quickstart': 'notebooks/quickstart.ipynb'
+        - 'Your first run in the viewer': 'first-run-in-the-viewer.md'
     - Guides:
         - 'Author a study': 'author-a-study.md'
         - 'Watch and steer a run': 'watch-and-steer-a-run.md'

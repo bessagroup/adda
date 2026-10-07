@@ -11,6 +11,7 @@ reproduces the result end to end.
 - [Install adda](install.md) and connect a model.
 - [Run the quickstart](notebooks/quickstart.ipynb): a real problem, a real
   answer, a couple of minutes.
+- [Tour the viewer](first-run-in-the-viewer.md) on a finished run.
 
 **Do a task**
 
