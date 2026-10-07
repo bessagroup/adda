@@ -1117,17 +1117,18 @@ function renderGates(){
 function renderConfig(){
   return `<p class="eyebrow">Machinery</p>
     <h1>Config knobs</h1>
-    <p class="lede">Everything a reviewer can change without editing code. Resolution order is
-      environment variable, then the study's <code>config.yaml</code> <code>runtime:</code> block,
-      then the default — and an unrecognised key is reported rather than silently ignored.</p>
+    <p class="lede">Everything a reviewer can change without editing code. A knob is set in the
+      study's <code>config.yaml</code> <code>runtime:</code> block, else it takes its default. The
+      environment sets no knob: an exported <code>F3DASM_&lt;KEY&gt;</code> stops the run with an
+      error. Environment-only rows are internal channels. An unrecognised key is reported rather
+      than silently ignored.</p>
     <div class="sectionhead"><h2>${DATA.switches.length} knobs</h2>
       <p>Read from <code>runtime/settings.py</code> and from the environment reads found in source.</p></div>
     <div class="tablewrap"><table>
-      <thead><tr><th>Key</th><th>Set via</th><th>Environment override</th><th>Read at</th></tr></thead>
+      <thead><tr><th>Key</th><th>Set via</th><th>Read at</th></tr></thead>
       <tbody>${DATA.switches.map(s=>`<tr>
         <td class="m">${esc(s.key)}</td>
         <td>${esc(s.kind)}</td>
-        <td class="m">${esc(s.env)}</td>
         <td class="m path">${esc((s.sites||[s.file]).join("  "))}</td>
       </tr>`).join("")}</tbody>
     </table></div>`;

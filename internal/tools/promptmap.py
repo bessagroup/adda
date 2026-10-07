@@ -1559,7 +1559,7 @@ GATES: list[dict] = [
          effect="Prompts for a falsification attempt when the ledger has gone one-sided."),
     dict(id="verdict_advisory", title="Verdict advisory note", kind="soft",
          phase="HypothesisUpdate()", module="nodes/tools/routing/ledger.py",
-         symbol="LedgerTools._verdict_advisory", switch="F3DASM_VERDICT_VALIDATOR",
+         symbol="LedgerTools._verdict_advisory", switch="verdict_validator",
          effect="The referee's ruling is returned as advice attached to the update."),
     dict(id="budget", title="Evaluation budget broadcast", kind="soft",
          phase="continuous", module="nodes/tools/routing/delegation.py",
@@ -1591,7 +1591,7 @@ GATES: list[dict] = [
          effect="A run closes only on a critic PASS."),
     dict(id="verdict", title="Live verdict validator", kind="soft",
          phase="HypothesisUpdate()", module="epistemics/verdict_validator.py",
-         symbol="build_judge_prompt", switch="F3DASM_VERDICT_VALIDATOR",
+         symbol="build_judge_prompt", switch="verdict_validator",
          effect="An independent referee judges a closing verdict against the same charter."),
     dict(id="supported", title="SUPPORTED needs an attempt", kind="hard",
          phase="HypothesisUpdate()", module="nodes/tools/routing/ledger.py",
@@ -1765,6 +1765,14 @@ def build_reflection() -> dict:
 #: generated; this is the one place a reader learns what changed in the map
 #: itself (not in the prompts, which git history covers).
 CHANGELOG: list[dict] = [
+    dict(date="2026-10-07", text=(
+        "The Config knobs view no longer says the environment overrides a "
+        "config.yaml knob: since b4ff757 an exported F3DASM_<KEY> is a hard "
+        "error, so the Environment override column is gone and only the "
+        "internal environment-only channels stay listed. The verdict validator "
+        "gate now names its runtime: key, verdict_validator, as the way to "
+        "turn it off."
+    )),
     dict(date="2026-09-30", text=(
         "Checked for Elvis, at adda-boss-whopper's request, against the prompt changes "
         "since the last campaign (the build stamp, top left, names the commit this page "
@@ -1889,7 +1897,7 @@ def _switches() -> list[dict]:
     the env-only kill switches actually consulted in the source."""
     from adda._src.runtime import settings
     path = PKG / "runtime" / "settings.py"
-    keys = [{"key": k, "kind": "config.yaml runtime:", "env": f"F3DASM_{k.upper()}",
+    keys = [{"key": k, "kind": "config.yaml runtime:",
              "file": _rel(path)} for k in sorted(settings.KNOWN_KEYS)]
     env_only: dict[str, list[str]] = {}
     for p in _py_files():
@@ -1899,7 +1907,7 @@ def _switches() -> list[dict]:
                 continue
             env_only.setdefault(name, []).append(
                 f"{_rel(p)}:{_line_of(_read(p), m.start())}")
-    keys += [{"key": n, "kind": "environment only", "env": n,
+    keys += [{"key": n, "kind": "environment only",
               "file": sites[0].rsplit(":", 1)[0], "sites": sorted(set(sites))}
              for n, sites in sorted(env_only.items())]
     return keys
