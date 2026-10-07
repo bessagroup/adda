@@ -176,6 +176,7 @@ class InstrumentedDataGenerator(DataGenerator):
         # worker's self-report"), this only feeds the soft nudge.
         self._dedup_skipped_total = 0
         self._dedup_skipped_revs: set[str] = set()
+        self._skip_notes: list[tuple] = []
         self._rev_changed: list[tuple] = []
         self.fidelity_column = fidelity_column  # unused Phase 1
         self.flush_every = flush_every
@@ -402,6 +403,8 @@ class InstrumentedDataGenerator(DataGenerator):
             self._maybe_nudge_budget(_n_total + self._dedup_skipped_total)
         if n_skipped:
             self._record_dedup(n_skipped)
+            self._notify_dedup_skips()
+        self._skip_notes.clear()
         if self._rev_changed:
             self._notify_rev_changed()
 
@@ -454,6 +457,7 @@ class InstrumentedDataGenerator(DataGenerator):
             canon_outputs: list[dict] = []
             canon_revs: list[str | None] = []
             self._dedup_skipped_revs = set()
+            self._skip_notes = []
             self._rev_changed = []
             if canon is not None:
                 df_in, df_out = canon.to_pandas()
@@ -512,8 +516,8 @@ class InstrumentedDataGenerator(DataGenerator):
                         stored_outputs, stored_rev = out_row, rev
                         break
                 if k in seen_in_batch or stored_outputs is not None:
-                    self._notify_dedup_skip(
-                        k, s._output_data, stored_outputs, stored_rev)
+                    self._skip_notes.append(
+                        (k, s._output_data, stored_outputs, stored_rev))
                     if stored_rev:
                         self._dedup_skipped_revs.add(stored_rev)
                     continue
@@ -532,52 +536,75 @@ class InstrumentedDataGenerator(DataGenerator):
         except Exception:  # noqa: BLE001
             return 0
 
-    def _notify_dedup_skip(
-            self, key: tuple, new_outputs: dict,
-            stored_outputs: dict | None,
-            stored_rev: str | None = None) -> None:
+    def _skip_summary(self) -> dict | None:
+        """Aggregate of the skips collected by the last dedup pass: counts, the
+        stored revisions, and the first few skipped designs with whether the
+        discarded output differs from the stored row. ``None`` when nothing
+        was skipped."""
+        notes = self._skip_notes
+        if not notes:
+            return None
+        examples, n_differs = [], 0
+        for key, new_outputs, stored_outputs, stored_rev in notes:
+            new_clean = {c: v for c, v in new_outputs.items()
+                         if c not in _PROVENANCE_COLS}
+            differs = stored_outputs is not None and (
+                any(_round_coord(new_clean.get(c)) != _round_coord(v)
+                    for c, v in stored_outputs.items())
+                or set(new_clean) != set(stored_outputs))
+            n_differs += bool(differs)
+            if len(examples) < 3 and (differs or not examples):
+                examples.append({
+                    "design": {c: v for c, v in key}, "differs": bool(differs),
+                    "new": new_clean if differs else None,
+                    "stored": stored_outputs if differs else None,
+                    "stored_rev": stored_rev})
+        return {"n_skipped": len(notes), "n_differs": n_differs,
+                "examples": examples}
+
+    def _notify_dedup_skips(self) -> None:
         """Never let a computed-but-discarded evaluation pass silently: tell
         the calling agent's own script, via the same stdout channel
         ``_maybe_nudge_budget`` uses (Channel 1 — the campaign's OWN stdout,
-        captured into the offender's delegation report). Best-effort: a
-        notice must never break the eval path."""
+        captured into the offender's delegation report). ONE bounded line per
+        flush, however many designs were skipped: a line per design made a
+        150-design campaign print 185 KB, which the CLI cut to a 2 KB preview
+        that never reached the warning. Best-effort: a notice must never break
+        the eval path."""
         try:
-            design = ", ".join(f"{c}={v}" for c, v in key)
-            new_clean = {
-                c: v for c, v in new_outputs.items()
-                if c not in _PROVENANCE_COLS}
+            summ = self._skip_summary()
+            if summ is None:
+                return
+            n, nd = summ["n_skipped"], summ["n_differs"]
+            ex = next((e for e in summ["examples"] if e["differs"]),
+                      summ["examples"][0])
+            design = ", ".join(f"{c}={v}" for c, v in ex["design"].items())
             msg = (
-                f"[EVAL NOT STORED — {self.delegation_id}] design ({design}) "
-                "already has a row in the canonical store; this evaluation "
-                "was NOT written (dedup-on-write keeps the first row for a "
-                "design and never mutates it). The compute for this run "
-                "still counts as spent against this delegation's SOFT eval-"
-                "budget, but it does NOT add a row to the canonical store, "
-                "so it is not reflected in the store's evals_used count. "
-                "If this was a deliberate correction, call supersede(...) "
+                f"[EVAL NOT STORED — {self.delegation_id}] {n} evaluation(s) "
+                "were NOT written: their design already has a row in the "
+                "canonical store (dedup-on-write keeps the first row for a "
+                "design and never mutates it). The compute still counts "
+                "against this delegation's SOFT eval-budget but adds no row, "
+                "so it is not in the store's evals_used count. "
+                + (f"NEW output differs from the STORED row for {nd} of "
+                   f"the {n}. " if nd else "Every output matches its stored "
+                   "row. ")
+                + "If this was a deliberate correction, call supersede(...) "
                 "instead of execute() to REPLACE the stored row."
             )
-            if stored_rev:
+            revs = sorted(self._dedup_skipped_revs)
+            if revs:
                 msg += (
-                    f" The stored row was written by oracle revision "
-                    f"{stored_rev}"
-                    + (" (the revision that just ran)"
-                       if stored_rev == self.oracle_rev else "")
-                    + ". Editing the oracle's source is not a correction "
-                    "in this sense: a changed revision is stored as a new "
-                    "row beside the old one, so this skip means the oracle "
-                    "source did not change between the two evaluations."
-                )
-            if stored_outputs is not None:
-                differs = any(
-                    _round_coord(new_clean.get(c)) != _round_coord(v)
-                    for c, v in stored_outputs.items()
-                ) or set(new_clean) != set(stored_outputs)
-                if differs:
-                    msg += (
-                        f" NEW output differs from the STORED row: "
-                        f"new={new_clean!r}, stored={stored_outputs!r}."
-                    )
+                    f" Stored by oracle revision {', '.join(revs)}"
+                    f" (this run: {self.oracle_rev}). Editing the oracle's "
+                    "source is not a correction in this sense: a changed "
+                    "revision is stored as a new row beside the old one, so "
+                    "a skip means the oracle source did not change.")
+            msg += f" Example: ({design})"
+            if ex["differs"]:
+                msg += f" new={ex['new']!r}, stored={ex['stored']!r}"
+            if len(msg) > 1500:
+                msg = msg[:1500] + " …"
             print(msg, flush=True)
         except Exception:  # noqa: BLE001
             pass
@@ -619,6 +646,8 @@ class InstrumentedDataGenerator(DataGenerator):
                         + (f"; stored by oracle revision "
                            f"{', '.join(sorted(self._dedup_skipped_revs))}"
                            if self._dedup_skipped_revs else "")),
+                    **({"detail": summ} if (summ := self._skip_summary())
+                       else {}),
                 }
                 with diag.open("a", encoding="utf-8") as f:
                     f.write(_json.dumps(rec) + "\n")

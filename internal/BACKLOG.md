@@ -31,7 +31,6 @@ before. Until one is answered or closed, treat it as known, not news.
 - [ ] **#18** Critic should flag an infeasible-extremum headline on a constrained study — *open, §4 user-owned* — grounding moved to the critic (`6494489b`) but it only checks the value is real, not feasible
 - [ ] **#42** Same study, two Haiku runs, opposite gate outcomes (RunScratch vs. a token Delegate()-registered oracle) — *open, §4 user-owned* — see §42 below
 
-- [ ] **#50** Two delegations edit the registered oracle file concurrently — *open, §4 user-owned* — see §50 below
 
 ## Actionable
 
@@ -52,6 +51,8 @@ before. Until one is answered or closed, treat it as known, not news.
 - [ ] **#20** Open design-space discovery (agent invents new low-D parametrizations) — *spec approved, §4 user-owned, awaiting 2D experiment* — see [`OPEN_DESIGN_SPACE_FRAMEWORK.md`](OPEN_DESIGN_SPACE_FRAMEWORK.md); branch `exp/open-design-space`
 - [ ] **#23** Rename `literature_reviewer` → `consultant` + give it live-web tools so it answers tech-stack/API/doc questions, not only academic literature — *spec, not built (user decision 2026-06-30)* — see §23 below
 - [ ] **#45** `SummarizeDelegations` — a git-timeline-derived delegation summary tool — *idea, not an approved design* — see §45 below
+- [ ] **#50** Two delegations edit the registered oracle file concurrently — *decided 2026-10-06: NO rule for now* — rely on the oracle-revision visibility (`1b356e4`); reopen only if a new run shows harm — see §50 below
+- [ ] **#53** User-defined Features (`features.register()` / config-declared features) — *decided 2026-10-06: not built (YAGNI until a real user needs it)* — see §53 below
 - [ ] **#46** Cross-run hypothesis ledger, study-scoped by default — *idea, not an approved design* — see §46 below
 
 ---
@@ -711,13 +712,14 @@ line: that would be a workaround, not a principle). Option (b), enabling it, is
 gated on a live test that Monitor's async event notifications reach a headless
 per-turn query.
 
-## 50. Two delegations edit the registered oracle file concurrently — §4
+## 50. Two delegations edit the registered oracle file concurrently — parked
 
 Run `truss-iscso2015-open` / `20261007T002015`: the registered oracle is
 `workspace/data_generator.py`, a plain file. D002 (builder) and D001 (DoE
 runner) both rewrote it between 00:23 and 00:30 UTC. Oracle revisions now make
 the change visible in the store (`_oracle_rev`), but nothing says who may edit
-the file. Whether to forbid it, serialize it or leave it is the user's call.
+the file. Whether to forbid it, serialize it or leave it was the user's call. Decided
+2026-10-06: no rule for now; reopen only if a new run shows harm.
 
 ## 51. Superseded-revision rows still count
 
@@ -733,3 +735,14 @@ inside a 185 KB tool output cut to a 2 KB preview, so the warning never arrived.
 Find where the preview cut happens and whether harness notices can travel in a
 channel that is never truncated (prepended, or injected like the science
 monitor's notices). Report before fixing.
+
+## 53. User-defined Features — parked idea
+
+Not built (decided 2026-10-06, YAGNI until a real user needs it). Sketch:
+`features.register(Feature(...))` appends to `FEATURES`, and
+`settings.KNOWN_KEYS` is derived from `FEATURES` instead of listed by hand, so
+a registered key is a valid `runtime:` knob and an arm switch. A Feature
+covers prompt sections (`<tag>` blocks, `[[if key]]` gates) and tool names
+only. It cannot carry behaviour: code that must change when the knob flips
+(object construction, a gate, a validator) still needs an `enabled(key)` check
+written in the package.

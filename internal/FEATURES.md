@@ -96,7 +96,12 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   net-count-preservingly (old out, new in = same count, FINISHED preserved), so
   the PROTECTED-store shrink/regression guard still holds; reachable by agents as
   `get_evaluator().supersede(sample)`. The ledger is append-only otherwise.
-  A skip is also printed in-band to the campaign and counts toward the soft
+  Skips are announced by ONE bounded `[EVAL NOT STORED]` line per flush (count,
+  how many outputs differ from the stored rows, one example), never one line per
+  design: a per-design line once made a 150-design campaign print 185 KB, which
+  the CLI cut to a 2 KB preview that never held the warning. The first examples
+  and the counts are also in the `DEDUP_SKIPPED` diagnostic (`detail`). A skip is
+  also printed in-band to the campaign and counts toward the soft
   eval-budget nudge (not the canonical store tally). The key is computed from the
   inputs as submitted, before `execute()`, so evaluator-stamped kwargs can't
   defeat dedup or supersede. `dedup_scope="all"` (reproduction/deliverable

@@ -1095,3 +1095,41 @@ def test_editing_the_registered_oracle_file_is_stored_not_skipped(
     _, df_out = ExperimentData.from_file(project_dir=store_dir).to_pandas()
     assert sorted(float(v) for v in df_out["f"]) == [1.0, 100.0]
     assert df_out["_oracle_rev"].nunique() == 2
+
+
+def test_a_150_design_skip_prints_one_bounded_line_and_records_detail(
+    tmp_path, capsys,
+):
+    """A per-design notice made a 150-design campaign print ~185 KB, which the
+    CLI cut to a 2 KB preview that never held the warning. One line per flush,
+    bounded, carrying the count of differing outputs; the detail is in the
+    DEDUP_SKIPPED diagnostic."""
+    import json
+
+    from adda._src.evaluation.instrumented import InstrumentedDataGenerator
+
+    (tmp_path / "debug").mkdir()
+    store = tmp_path / "experiment_data"
+    gen = InstrumentedDataGenerator(
+        inner=_StampingGenerator(), store_dir=store,
+        delegation_id="D001", flush_every=1000)
+    for i in range(150):
+        gen.execute(_make_sample(i / 1000), override="K1")
+    gen.flush()
+    capsys.readouterr()
+    for i in range(150):
+        gen.execute(_make_sample(i / 1000), override="K2")
+    gen.flush()
+
+    lines = [ln for ln in capsys.readouterr().out.splitlines()
+             if "EVAL NOT STORED" in ln]
+    assert len(lines) == 1
+    assert len(lines[0]) < 2000
+    assert "150 evaluation(s)" in lines[0]
+    assert "differs from the STORED row for 150 of the 150" in lines[0]
+
+    recs = [json.loads(ln) for ln in
+            (tmp_path / "debug" / "diagnostics.jsonl").read_text().splitlines()]
+    detail = [r for r in recs if r["error_type"] == "DEDUP_SKIPPED"][-1]["detail"]
+    assert detail["n_skipped"] == 150 and detail["n_differs"] == 150
+    assert 1 <= len(detail["examples"]) <= 3
