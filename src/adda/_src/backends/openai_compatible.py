@@ -879,6 +879,9 @@ class OpenAICompatibleAdapter:
         backend's post-tool hook returns. Tool closures run on other threads,
         so the delegation context is the one bound at invoke time."""
         from ..infra.pending_notices import post_tool_context
+        from ..runtime import features
+        if not features.enabled("science_monitor"):
+            return None
         debug_dir, did = self._notice_ctx
         return post_tool_context(
             self._oracle_nudge, tool_name, tool_input, debug_dir, did)

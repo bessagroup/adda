@@ -676,6 +676,9 @@ class ClaudeAdapter:
         # Best-effort — if the SDK hook API is unavailable, run without it.
         _hooks = None
         try:
+            from ..runtime import features
+            if not features.enabled("science_monitor"):
+                raise RuntimeError("science_monitor is off: no hook")
             from claude_agent_sdk import HookMatcher
 
             from .base import (

@@ -117,7 +117,9 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   (Claude: the PostToolUse hook that carries the raw-oracle nudge; OpenAI-
   compatible: the Bash/Write tool's nudge slot, one shared
   `post_tool_context`) drains the file for its own delegation and returns the
-  text, wrapped in `<adda-note>`, as extra context outside the tool result. The
+  text, wrapped in `<adda-note>`, as extra context outside the tool result.
+  The hook belongs to the `science_monitor` feature: with it off, the Claude
+  backend installs no hook and the OpenAI-compatible backend adds no notice. The
   CLI keeps only the first 2 KB of a large result, so stdout alone can hide the
   line behind a long campaign log. stdout keeps its copy. Status: delivered as
   `additionalContext`; that the model receives it is NOT yet verified against a

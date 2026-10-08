@@ -131,3 +131,49 @@ def test_the_openai_compatible_backend_appends_the_notice_to_a_bash_result(
     result = bash.func(command="echo hi")
     assert "hi" in result
     assert "[EVAL NOT STORED — D001] 150 evaluation(s)" in result
+
+
+def test_with_science_monitor_off_the_claude_hook_is_not_installed(
+        tmp_path, capsys):
+    from adda._src.backends.base import set_delegation_id, set_run_config_path
+
+    out, debug = _campaign_with_long_log(tmp_path, capsys)
+    seen = {}
+
+    async def _query(prompt, options):
+        seen["options"] = options
+        return
+        yield  # pragma: no cover
+
+    _install_fake_sdk(
+        query=_query,
+        HookMatcher=lambda hooks: types.SimpleNamespace(hooks=hooks))
+    settings.configure({"science_monitor": False})
+    try:
+        adapter = _get_adapter()("claude-3", "sys", None, [])
+        set_delegation_id("D001")
+        set_run_config_path(str(debug / "run_config.json"))
+        try:
+            adapter.invoke([{"role": "user", "content": "hi"}])
+        finally:
+            set_delegation_id(None)
+            set_run_config_path(None)
+    finally:
+        settings.configure(None)
+    assert "hooks" not in seen["options"]
+
+
+def test_with_science_monitor_off_the_openai_backend_adds_no_notice(
+        tmp_path, capsys):
+    from adda._src.backends.openai_compatible import OpenAICompatibleAdapter
+
+    out, debug = _campaign_with_long_log(tmp_path, capsys)
+    adapter = OpenAICompatibleAdapter(
+        model="m", system_prompt="", closure_tools={}, native_tools=["Bash"],
+        study_dir=Path(tmp_path))
+    adapter._notice_ctx = (debug, "D001")
+    settings.configure({"science_monitor": False})
+    try:
+        assert adapter._post_tool_context("Bash", {}) is None
+    finally:
+        settings.configure(None)
