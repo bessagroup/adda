@@ -40,6 +40,11 @@ _FREE_MODEL = os.environ.get(
 # Wall-clock and eval caps sized for a free-tier model on a trivial problem —
 # tight enough that a stuck/looping run doesn't burn the whole scheduled slot.
 _EVAL_BUDGET = 60
+
+# The free tier answers 503 for minutes at a time. With base 2 s and cap 60 s
+# the sleeps are 2, 4, 8, 16, 32, then 60 s each; 15 attempts make 14 sleeps
+# (62 s + 9 x 60 s = 602 s before jitter, at most 903 s with the +50% jitter).
+_LLM_RETRY_MAX = 15
 _WALLCLOCK_BUDGET_S = 20 * 60
 
 # The run's own wall-clock budget decides, not the repo-wide 120 s unit-test
@@ -145,7 +150,7 @@ def test_quickstart_branin_runs_without_crashing(tmp_path):
         "Report the best design found and the objective value there.\n"
     )
     (study_dir / "config.yaml").write_text(
-        "backend: openrouter\nruntime:\n  debug: true\n")
+        f"backend: openrouter\nruntime:\n  debug: true\n  llm_retry_max: {_LLM_RETRY_MAX}\n")
     _run_and_check(study_dir)
 
 
@@ -169,6 +174,7 @@ def test_authoring_a_study_worked_example_runs_without_crashing(tmp_path):
         "backend: openrouter\n"
         "runtime:\n"
         "  debug: true\n"
+        f"  llm_retry_max: {_LLM_RETRY_MAX}\n"
         "eval_budget: 200\n"
         "evaluator:\n"
         '  entrypoint: "workspace/evaluator.py:evaluate"\n'
