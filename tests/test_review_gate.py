@@ -27,6 +27,10 @@ def _peer_interaction_on():
     set_delegation_id(None)
 
 
+_SECTIONS = ("### Actions taken\nDid it.\n\n### Conclusions\nIt holds.\n\n"
+             "### Numbers\nf = 1.\n")
+
+
 class _FakeWorker:
     """Just enough of an adapter for a real Delegate()/WorkerSession round
     trip: closure_tools for install_worker_tools, .copy() (ClaudeAdapter's
@@ -40,7 +44,7 @@ class _FakeWorker:
         self.closure_tools: dict = {}
         self._text = text
         self._revised_text = revised_text or (
-            "## Report\n\n" + "A revised report.\n\n" * 5)
+            "## Report\n\n" + "A revised report.\n\n" * 5 + _SECTIONS)
         self._raises = raises
         self._resume_raises = resume_raises
         self.last_usage: dict = {}
@@ -818,7 +822,7 @@ def test_retrospective_is_read_from_the_newest_version_that_has_one(tmp_path):
     (tmp_path / "debug").mkdir(parents=True)
     report = ("A full report.\n\n### Retrospective\n- CONSISTENCY: ok\n"
               "- DECISION: seed 0\n- FRICTION: none\n- BLOCKED: none\n")
-    worker = _FakeWorker(text=report, revised_text="## Report\nRevised, no retrospective.")
+    worker = _FakeWorker(text=report, revised_text="## Report\nRevised, no retrospective.\n\n" + _SECTIONS)
     log = DelegationLog(tmp_path / "debug" / "delegation_log.jsonl")
     node = _make_node(worker=worker, delegation_log=log)
     node._current_notes_dir = tmp_path / "debug" / "strategizer_notes"
@@ -850,7 +854,7 @@ def test_a_reply_to_a_question_does_not_replace_the_report(tmp_path):
     from adda._src.infra.delegation_log import DelegationLog
 
     (tmp_path / "debug").mkdir(parents=True)
-    report = "## Report\n\nThe full report.\n"
+    report = "## Report\n\nThe full report.\n\n" + _SECTIONS
     worker = _FakeWorker(text=report, revised_text="Short chat answer.")
     log = DelegationLog(tmp_path / "debug" / "delegation_log.jsonl")
     node = _make_node(worker=worker, delegation_log=log)
@@ -883,7 +887,7 @@ def test_a_reply_to_a_question_does_not_replace_the_report(tmp_path):
 
 
 def test_a_revised_report_replaces_the_report_and_clears_the_reply():
-    worker = _FakeWorker(revised_text="## Report\n\nA second report.\n")
+    worker = _FakeWorker(revised_text="## Report\n\nA second report.\n\n" + _SECTIONS)
     node = _make_node(worker=worker)
     dt = DelegationTools(node)
     set_delegation_id(None)
@@ -895,4 +899,28 @@ def test_a_revised_report_replaces_the_report_and_clears_the_reply():
 
     entry = node._registry[did]
     assert "A second report." in entry["result"]
+    assert entry["reply"] is None
+
+
+def test_a_corrected_report_under_another_heading_is_a_revision():
+    """Regression (run 20261007T205338, D003): a corrected report opened with
+    "## CORRECTED REPORT" was filed as a reply, so the invalid first report
+    stayed the deliverable. A text with the role's declared sections is a
+    revision whatever its title says."""
+    worker = _FakeWorker(
+        text="## Report\n\nThe wrong report.\n\n" + _SECTIONS,
+        revised_text=("Let me provide a corrected final report:\n\n---\n\n"
+                      "## CORRECTED REPORT\n\nThe right report.\n\n"
+                      + _SECTIONS))
+    node = _make_node(worker=worker)
+    dt = DelegationTools(node)
+    set_delegation_id(None)
+
+    dt.Delegate("implementer", "do the thing", "a report", wait=True)
+    did = next(iter(node._registry))
+    dt.SendMessage(did, "the loads were not applied")
+    _join_resume_thread(node, did)
+
+    entry = node._registry[did]
+    assert "The right report." in entry["result"]
     assert entry["reply"] is None

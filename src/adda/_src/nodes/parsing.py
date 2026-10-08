@@ -229,6 +229,21 @@ def _classify_response(
     return None
 
 
+def _is_report(text: str, report_sections) -> bool:
+    """True when ``text`` carries the role's declared report structure: every
+    declared section except the retrospective (a revision may omit it).
+    Defined by the role's own ``report_sections``, so it holds for every role
+    whatever the heading above the sections says."""
+    sections = [
+        s.lstrip("#").strip()
+        for s in (report_sections or _REQUIRED_SUBSECTIONS)
+        if "retrospective" not in s.lower()
+    ]
+    if not sections:
+        return _has_section(text, "Report")
+    return all(_has_section(text, s) for s in sections)
+
+
 def _section_opener(name: str):
     """Compiled regex matching a line that opens the section called ``name``."""
     import re as _re

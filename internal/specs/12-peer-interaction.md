@@ -531,7 +531,8 @@ commit(s) that build this:
   its next user turn, framed with the `<adda-note>`; asserts the resume
   parameter used, not a fresh unrelated session.
 - `test_worker_revises_report_after_a_review_question` — a resumed session
-  that answers with a text carrying the report headings (`## Report`) has
+  that answers with a text carrying the role's declared `report_sections`
+  (all but the retrospective, whatever title heads the text) has
   REVISED its report: that text replaces the delegation's recorded report,
   and it is validated by `_classify_response` again exactly as the first
   was.
@@ -541,6 +542,9 @@ commit(s) that build this:
   OPEN_FOR_REVIEW log row), delivered once through `Wait` as "REPLY to
   your message", and the review stays open. Run 20261007T154633 (D003): a
   1815-char chat reply had replaced a 4385-char report.
+  `test_a_corrected_report_under_another_heading_is_a_revision` — run
+  20261007T205338 (D003): a corrected report titled "## CORRECTED REPORT"
+  was filed as a reply and the invalid report stayed the deliverable.
 - `test_resume_failure_falls_back_and_is_recorded_as_a_diagnostic` — a
   mocked resume failure (SDK error / expired session) falls back to
   reconstructing from recorded history AND fires a diagnostic event

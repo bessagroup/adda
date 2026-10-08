@@ -37,7 +37,7 @@ from ..._constants import (
 from ...notices import wrap_notice
 from ...parsing import (
     _classify_response,
-    _has_section,
+    _is_report,
     _reconcile_delegation_evals,
     _stamped_eval_count,
 )
@@ -986,11 +986,14 @@ class WorkerSession:
             self._flag_mcp_errors(text)
             evals, off_ledger, stamped = self._reconcile_evals()
             text = self._append_budget_report(text)
-            # A revision carries the report headings; a plain answer to the
-            # question does not. Only a revision replaces the report.
+            # A revision carries the role's declared report sections; a plain
+            # answer to the question does not. Only a revision replaces the
+            # report.
             self._open_for_review(
                 text, evals, usage, off_ledger, stamped,
-                reply=None if _has_section(text, "Report") else text)
+                reply=None if _is_report(
+                    text, getattr(self.guard_agent, "report_sections", None))
+                else text)
         except Exception:  # noqa: BLE001
             self._finish_error(traceback.format_exc())
 
