@@ -260,10 +260,69 @@ def test_a_config_tools_list_withholds_the_always_on_closures(tmp_path):
     assert not {"RecallHistory", "Write"} & kept["implementer"]
 
 
-def test_default_keeps_the_sandboxed_write(tmp_path):
-    cut = _live_closures(tmp_path, {"implementer": {"tools": ["Default"]}})
-    assert "Write" in cut["implementer"]
+def test_default_holds_the_native_write_not_the_sandboxed_one(tmp_path):
+    base = _live_closures(tmp_path / "a", None)
+    cut = _live_closures(tmp_path / "b", {"implementer": {"tools": ["Default"]}})
+    assert "Write" in base["implementer"]
+    assert "Write" not in cut["implementer"]
     assert "ConsultHandbook" not in cut["implementer"]
+    assert cut["strategizer"] == base["strategizer"]
+
+
+def test_default_node_write_reaches_the_study_dir_on_both_backends(tmp_path):
+    nodes = _live_nodes(tmp_path / "a", {"strategizer": {"tools": ["Default"]}})
+    node = nodes["strategizer"]
+    assert "Write" not in node.adapter.closure_tools
+    assert "Restricted to your own delegation directory" not in (
+        node.adapter._render_system_prompt())
+    assert "Write" not in _options(["Default"], {})["disallowed_tools"]
+
+    ollama = _live_nodes(tmp_path / "b", {"strategizer": {
+        "tools": ["Default"], "backend": "ollama"}})["strategizer"]
+    assert "Write" not in ollama.adapter.closure_tools
+    assert "Write" in ollama.adapter.native_tools
+    study = tmp_path / "arm"
+    study.mkdir()
+    _native_tool_map(study)["Write"].invoke({"path": "design.json", "content": "{}"})
+    assert (study / "design.json").read_text() == "{}"
+
+
+def _scrub(text, root):
+    import re
+    return re.sub(r"\d{8}T\d{6}", "RUN", text.replace(str(root), "T"))
+
+
+def test_a_non_default_node_keeps_the_sandboxed_write_and_its_prompt(tmp_path):
+    base = _live_nodes(tmp_path / "a", None)
+    other = _live_nodes(tmp_path / "b", {"strategizer": {"tools": ["Default"]}})
+    assert "Write" in base["implementer"].adapter.closure_tools
+    for name in ("implementer", "critic", "datagenerator"):
+        if name in base:
+            assert (_scrub(base[name].adapter.system_prompt, tmp_path / "a")
+                    == _scrub(other[name].adapter.system_prompt, tmp_path / "b"))
+            assert (set(base[name].adapter.closure_tools)
+                    == set(other[name].adapter.closure_tools))
+
+
+def test_plain_claude_code_node_gets_nothing_from_adda(tmp_path):
+    nodes = _live_nodes(tmp_path / "a", {"strategizer": {
+        "tools": ["Default"], "base_prompt": "Default"}})
+    adapter = nodes["strategizer"].adapter
+    assert adapter.closure_tools == {}
+    cap: dict = {}
+    _install_fake_sdk(query=_capture_options_gen(cap), SdkMcpTool=lambda **k: k)
+    adapter.copy().invoke([{"role": "user", "content": "hi"}])
+    o = cap["options"]
+    sp = o["system_prompt"]
+    assert sp["type"] == "preset" and sp["preset"] == "claude_code"
+    assert "mcp__" not in sp["append"]
+    assert sp["append"].startswith(adapter.system_prompt[:200])
+    assert o["tools"] == {"type": "preset", "preset": "claude_code"}
+    assert not o["mcp_servers"]
+    assert not o.get("hooks")
+    assert not o["disallowed_tools"]
+    other = _live_nodes(tmp_path / "b", None)
+    assert other["implementer"].adapter.closure_tools
 
 
 def test_the_notice_names_the_withheld_closures(tmp_path):

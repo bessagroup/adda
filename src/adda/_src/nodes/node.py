@@ -139,6 +139,12 @@ class Node(
             worker_adapters=worker_adapters, notes_dir=notes_dir,
             workspace_dir=workspace_dir, delegation_log=delegation_log,
         )
+        # Plain Claude Code (Default tools + Default prompt) is handed no
+        # adda closure at all, whatever the topology would otherwise grant.
+        from ..runtime.node_tools import is_plain_default
+        if is_plain_default(
+                spec.nodes.get(name) if spec is not None else None):
+            self.adapter.closure_tools.clear()
 
     def __call__(self, state: AgenticState) -> Any:
         """Take one turn. Every node runs the same delegate-or-close loop."""
@@ -278,6 +284,10 @@ class Node(
         """
         if self._workspace_dir is None:
             return  # no sandboxing if study_dir unknown (e.g. tests)
+        from ..runtime.node_tools import withheld_closures
+        if "Write" in withheld_closures(
+                self._spec.nodes.get(self._name) if self._spec is not None else None):
+            return  # a Default node keeps the backend's native Write
 
         # Remove native Write so the SDK doesn't expose an unrestricted version
         if hasattr(self.adapter, "native_tools") and "Write" in self.adapter.native_tools:

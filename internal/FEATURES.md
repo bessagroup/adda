@@ -1071,8 +1071,8 @@ a second config is applied.
 `backends.base.DEFAULT_PROMPT`) keeps Claude Code's own system prompt. The Claude
 backend then passes `{"type": "preset", "preset": "claude_code", "append": <text>}`
 (`ClaudeAdapter._system_prompt_option`) instead of a replacing string. The
-appended text is the node's own prompt plus the tool catalog; the entry/workspace
-preamble is dropped. A backend without its own prompt (`HAS_BASE_PROMPT` false)
+appended text is the node's own prompt plus the tool catalog (none, for a
+plain node, below); the entry/workspace preamble is dropped. A backend without its own prompt (`HAS_BASE_PROMPT` false)
 refuses the setting when the run builds the node's adapter. `Default` is the only
 value.
 
@@ -1081,7 +1081,17 @@ A `tools` list from config also WITHHOLDS the always-on closures it does not nam
 RecallHistory, sandboxed Write). `withheld_closures(agent)` is applied in
 `Node._init_capabilities`, `build_routing_tools` (RecallHistory) and the worker
 install path (ReportEvals, Write). A node with no config list is unchanged; a
-`Default` node keeps the sandboxed Write. `TOOLS_CONFIG_DIFFERS` names them.
+`Default` node withholds the sandboxed Write and keeps the backend's native
+Write. `TOOLS_CONFIG_DIFFERS` names them.
+
+**Plain Claude Code** (`node_tools.is_plain_default`): a node with `tools: [Default]`
+AND `base_prompt: Default` gets nothing from adda on the Claude backend. No
+closure (`Node.__init__` clears `closure_tools` after the topology installs its
+own; `_make_adapter` skips ConsultHandbook, `build_closure_tools` and the
+notebook/gate appends), so no `<tools>` catalog and no MCP server; no PostToolUse
+hook (neither the raw-oracle nudge nor the store notices); no disallowed tools.
+The CLI keeps `setting_sources=[]`, `bypassPermissions`, the session env, cwd and
+the stream buffer.
 
 `Default` is a token (a class `tools` set may hold it too). On the Claude backend
 a node holding it gets the CLI's whole default built-in set (SDK preset

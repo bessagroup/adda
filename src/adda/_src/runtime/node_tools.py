@@ -57,17 +57,19 @@ DIFF_NOTICE = ("node {node}: config.yaml tools differ from the class declaration
 
 
 def withheld_closures(agent: Any) -> frozenset[str]:
-    """Always-on closures a config ``tools`` list leaves out for this agent.
+    """Always-on closures this agent does not receive.
 
-    Empty unless the list came from config.yaml. ``Default`` names the
-    backend's built-in set, which includes ``Write``; the sandboxed ``Write``
-    then stays, so a Default node never falls back to an unrestricted one.
+    A ``nodes.<name>.tools`` list withholds the droppable closures it does not
+    name. A node that holds ``Default`` also withholds the sandboxed ``Write``,
+    whether or not its list came from config: Default is the CLI's own
+    built-in set, and the native ``Write`` is part of it.
     """
-    if agent is None or not getattr(agent, "_tools_pinned", False):
+    if agent is None:
         return frozenset()
     held = frozenset(agent.tools)
-    out = DROPPABLE_CLOSURES - held
-    return out - {"Write"} if DEFAULT in held else out
+    out = (DROPPABLE_CLOSURES - held
+           if getattr(agent, "_tools_pinned", False) else frozenset())
+    return out | {"Write"} if DEFAULT in held else out
 
 
 def validate_nodes_block(nodes: Any) -> list[str]:
@@ -151,8 +153,9 @@ def held_tools(agent: Any, *, native: Any, native_set: Any,
     ``native`` is what its backend picked for it (it may hold the ``Default``
     token, which stands for ``native_set``, the backend's whole built-in set).
     The sandboxed ``Write`` every node receives counts unless a ``nodes:``
-    list withheld it; ``Delegate`` is granted by an outgoing edge. A tool a
-    disabled feature takes away is not held.
+    list withheld it; a Default node holds the native ``Write`` instead.
+    ``Delegate`` is granted by an outgoing edge. A tool a disabled feature
+    takes away is not held.
     """
     from . import features
     held = set(agent.tools) | set(native) | {"Write"}
@@ -160,11 +163,22 @@ def held_tools(agent: Any, *, native: Any, native_set: Any,
         held |= set(native_set)
     if delegates:
         held.add("Delegate")
-    return frozenset(held) - withheld_closures(agent) - features.disabled_tool_names()
+    withheld = withheld_closures(agent)
+    if DEFAULT in held:
+        withheld -= {"Write"}
+    return frozenset(held) - withheld - features.disabled_tool_names()
 
 
 def uses_default(tools: Any) -> bool:
     return DEFAULT in (tools or ())
+
+
+def is_plain_default(agent: Any) -> bool:
+    """True for a node that is plain Claude Code: it holds ``Default`` tools
+    and the ``Default`` base prompt, so adda adds no closure, catalog, hook or
+    disallowed tool to it."""
+    return (agent is not None and uses_default(getattr(agent, "tools", ()))
+            and getattr(agent, "base_prompt", None) == DEFAULT_PROMPT)
 
 
 def _append(debug_dir: Path, record: dict) -> None:

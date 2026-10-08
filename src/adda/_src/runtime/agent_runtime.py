@@ -40,6 +40,7 @@ from .graph_state import AgenticState, Delegation, Report, StudyConfig, Task
 from .node_tools import (
     apply_node_config,
     held_tools,
+    is_plain_default,
     record_builtins,
     record_native_expansion,
     record_resolution,
@@ -1856,7 +1857,8 @@ class AgenticRun:
         # explicitly turns this off has no notebook contract to inject at all.
         from ..evaluation.notebook_exec import notebook_deliverable_spec
         _role = getattr(agent, "role", None)
-        if _role in ("strategizer", "implementer", "critic"):
+        _plain = is_plain_default(agent)
+        if _role in ("strategizer", "implementer", "critic") and not _plain:
             system_prompt = (system_prompt + "[[if pipeline_deliverable]]"
                              + notebook_deliverable_spec(_role) + "[[/if]]")
 
@@ -1867,7 +1869,7 @@ class AgenticRun:
         # pipeline_deliverable above; independent knob (reproduction_gate) —
         # a study can require a notebook without requiring it to reproduce,
         # or vice versa.
-        if _role in ("strategizer", "implementer", "critic"):
+        if _role in ("strategizer", "implementer", "critic") and not _plain:
             from ..nodes.reproduction_gate import gate_contract
             system_prompt = system_prompt + (
                 "[[if reproduction_gate]]\n<reproduction_gate_contract>\n"
@@ -1922,6 +1924,10 @@ class AgenticRun:
             **({"base_url": _endpoint} if _endpoint else {}),
         )
         adapter.base_prompt = agent.base_prompt
+        if _plain:
+            # Plain Claude Code: adda adds no closure of its own.
+            self._watch_default_node(name, adapter, backend)
+            return adapter
         # Universal read-only handbook lookup: EVERY node's adapter gets it
         # here, equally, at construction (copy() returns self, so the
         # per-invocation worker/critic paths inherit it). Single injection

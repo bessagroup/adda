@@ -659,8 +659,14 @@ class ClaudeAdapter:
             mcp_servers = {server_name: mcp_cfg}
             qualified_mcp_tools = list(_qualify_closure_names(self.closure_tools))
 
+        # Plain Claude Code (Default tools + Default prompt): adda hands the
+        # CLI nothing — no closure server, no MCP server, no hook.
+        _plain = self.use_default_tools and self.base_prompt == DEFAULT_PROMPT
+        if _plain:
+            mcp_servers, qualified_mcp_tools = {}, []
+
         # Merge external stdio MCP servers declared by the Agent subclass.
-        if self.extra_mcp_servers:
+        if self.extra_mcp_servers and not _plain:
             mcp_servers.update(self.extra_mcp_servers)
 
         _base_disallowed = ["WebSearch", "WebFetch", "Task", "ExitPlanMode"]
@@ -688,6 +694,8 @@ class ClaudeAdapter:
         # Best-effort — if the SDK hook API is unavailable, run without it.
         _hooks = None
         try:
+            if _plain:
+                raise RuntimeError("plain Claude Code runs without adda hooks")
             from claude_agent_sdk import HookMatcher
 
             from ..runtime import features
@@ -766,7 +774,7 @@ class ClaudeAdapter:
             allowed_tools=self._compute_allowed_tools(qualified_mcp_tools),
             disallowed_tools=_effective_disallowed,
             permission_mode="bypassPermissions",
-            strict_mcp_config=bool(mcp_servers) or bool(self.extra_mcp_servers),
+            strict_mcp_config=bool(mcp_servers),
             # Hermetic session: load NO filesystem settings, so worker/critic
             # subprocesses don't inherit the developer's global ~/.claude hooks
             # (e.g. cbm-code-discovery-gate, which blocked legitimate Read calls
