@@ -336,6 +336,8 @@ def _apply_process_governor(run_config: dict, store_dir: Path,
         import json as _json
         import os as _os
         from datetime import datetime, timezone
+
+        from ..infra.host_provenance import host_provenance
         run_dir = store_dir.parent  # store_dir == <run_dir>/experiment_data
         reg = run_dir / "debug" / "governor_pids.jsonl"
         if reg.parent.exists():
@@ -348,6 +350,7 @@ def _apply_process_governor(run_config: dict, store_dir: Path,
                 # never killed — the ownership guard.
                 "start_time": be.proc_start_time(_pid),
                 "ts": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
+                **host_provenance(),
             }
             with reg.open("a", encoding="utf-8") as f:
                 f.write(_json.dumps(rec) + "\n")

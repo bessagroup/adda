@@ -1199,6 +1199,15 @@ namespace (precomputed-pool rows are reported apart, not counted). `NO_NEW_EVIDE
 0 such rows, and the header counts them ("k of n"). It is a flag for review, not an error, and it classifies
 no claim. A run with no ledger reads "no hypothesis ledger". Tests: `tests/test_run_ledger_verdict_audit.py`.
 
+### Host provenance (2026-10-08)
+
+A run's records name the machine it ran on. `run_config.json["host"]` holds
+`host` (`socket.gethostname()`) plus `slurm_job_id` and `slurmd_nodename` when
+those variables are set. It is written at the first start and kept on resume.
+Every `governor_pids.jsonl` row carries the same keys for its own process,
+because a worker can run on another host. `infra/host_provenance.py`; test
+`tests/test_host_provenance.py`.
+
 ### Per-delegation resource telemetry
 - **What:** `Wait(id, block=False)` shows a delegation's eval count, current RSS, and **peak
   RSS** (the high-water across the watcher's ticks), so the strategizer can see a

@@ -240,6 +240,7 @@ class _BashSession:
             reg = Path(store).parent / "debug" / "governor_pids.jsonl"
             if not reg.parent.exists():
                 return
+            from ..infra.host_provenance import host_provenance
             from ..infra.resource_backend import get_resource_backend
             be = get_resource_backend()
             rec = {
@@ -247,6 +248,7 @@ class _BashSession:
                 "start_time": be.proc_start_time(pid),
                 "ts": datetime.now(tz=timezone.utc).isoformat(
                     timespec="seconds"),
+                **host_provenance(),
             }
             with reg.open("a", encoding="utf-8") as f:
                 f.write(_json.dumps(rec) + "\n")

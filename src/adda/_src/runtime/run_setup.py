@@ -194,6 +194,7 @@ def _init_canonical_store(
         except (OSError, _json.JSONDecodeError):
             existing = {}
 
+    from ..infra.host_provenance import host_provenance
     from . import features as _features
     arms = _features.arm_config()
     _conflicts = _features.conflicts()
@@ -261,6 +262,7 @@ def _init_canonical_store(
         "arms": arms,
         "objective": objective,
         "funnel": funnel,
+        "host": existing.get("host") or host_provenance(),
     }
     if drift_from is not None:
         config["arms_initial"] = existing.get("arms_initial", drift_from)
