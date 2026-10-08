@@ -62,7 +62,8 @@ def _role_prompts(tmp_path):
 
 def test_every_role_prompt_on_claude_names_only_callable_tools(tmp_path):
     for role, prompt, closures in _role_prompts(tmp_path):
-        ns = SimpleNamespace(system_prompt=prompt, closure_tools=closures)
+        ns = SimpleNamespace(system_prompt=prompt, closure_tools=closures,
+                             use_default_tools=False)
         rendered = ClaudeAdapter._render_system_prompt(ns)
         for name in closures:
             multi = re.search(r"[a-z][A-Z]", name)

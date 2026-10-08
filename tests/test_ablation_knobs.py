@@ -25,11 +25,16 @@ def test_the_knobs_are_registered_and_default_on():
     assert set(KNOBS) <= features.FEATURE_KEYS
 
 
+_ALL_TOOLS = frozenset({"Read", "Write", "Bash", "WriteNote", "Delegate"})
+
+
 def test_the_delegation_contract_leaves_the_preamble_when_off():
     settings.configure({})
-    assert "<delegation_contract>" in features.resolve_gates(WORKSPACE_PREAMBLE_TEMPLATE)
+    assert "<delegation_contract>" in features.resolve_gates(
+        WORKSPACE_PREAMBLE_TEMPLATE, holds=_ALL_TOOLS)
     _off("delegation_contract")
-    text = features.resolve_gates(WORKSPACE_PREAMBLE_TEMPLATE)
+    text = features.resolve_gates(
+        WORKSPACE_PREAMBLE_TEMPLATE, holds=_ALL_TOOLS)
     assert "<delegation_contract>" not in text
     assert "get_evaluator" in text
 
