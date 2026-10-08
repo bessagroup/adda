@@ -44,6 +44,7 @@ before. Until one is answered or closed, treat it as known, not news.
 - [ ] **#52** An in-band harness notice that guards data integrity travels inside a tool output that can be truncated — *open, investigate first, report before fixing* — see §52 below
 - [ ] **#54** Per-call input-token size on small studies — *open, investigate first, no work yet* — see §54 below
 - [ ] **#55** Derive the non-Default built-in floor from the CLI init record — *future-proofing, no work yet* — see §55 below
+- [ ] **#59** `run_arm.sh` cannot run one repeat of an arm — *open, benchmarks repo, after the 2026-10-08 campaign* — see §59 below
 - [ ] **#47** Computed cost sits 0-8% below the SDK's `total_cost_usd` on validator/critic calls — *open, low (telemetry column, not correctness)* — see §47 below
 
 ## Parked — deferred on purpose
@@ -796,3 +797,12 @@ and D006 made 59 outside `get_evaluator()`). The just-in-time nudge missed them
 delegation close, scan the delegation's scripts statically for the wrapped module's
 imports and write one diagnostic. Not now (boss, 2026-10-08). Revisit if the nudge
 still lets a headline rest on unmetered calls.
+
+## 59. `run_arm.sh` cannot run one repeat of an arm (benchmarks repo)
+`ablations/scripts/run_arm.sh` in adda-benchmarks has only `--repeat K`: K sequential
+runs of one arm, indexed 1..K. Every new invocation is run 1, so it re-locks adda to the
+main tip and re-syncs the study venv. Arms cannot be interleaved by repeat on one pin
+without a re-sync per call. Evidence: the 2026-10-08 truss-10bar campaign ran arm by arm
+for this reason. Wanted: `--start-index` (or `--repeat-index`) so a call can run repeat
+N only and reuse the pinned lock. Do after the campaign (freeze); the change belongs in
+adda-benchmarks, not here.
