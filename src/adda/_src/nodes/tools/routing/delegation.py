@@ -2545,9 +2545,11 @@ class DelegationTools:
         That is how you collect a fan-out: dispatch several with
         Delegate(wait=False), then call Wait() once per worker — each call
         hands back one delegation's report (labelled with its ID, plus a note
-        of what is still in flight) and blocks only while nothing is ready. Naming an ID instead waits for that
-        specific worker, which leaves any others finishing unread, so prefer
-        the bare form whenever more than one delegation is in flight.
+        of what is still in flight) and blocks only while nothing is ready. Naming
+        an ID instead waits for that worker, but returns early, with a note,
+        when another of your delegations becomes ready (open for review, Done
+        or Errored); call Wait(id) again to keep waiting. Prefer the bare form
+        whenever more than one delegation is in flight.
 
         block=False (with a delegation_id) → do not wait: return that
         delegation's status right now — 'Working (running for Xs, polled N
@@ -2773,6 +2775,9 @@ class DelegationTools:
                     "keep waiting]")
             while t.is_alive():
                 node._raise_if_abandoned()
+                other = self._other_ready(delegation_id)
+                if other:
+                    return prefix + other
                 t.join(timeout=_NOTICE_POLL_S)
                 text, woke = self._drain_while_waiting()
                 prefix += text
@@ -2797,6 +2802,30 @@ class DelegationTools:
             body = (f"{entry.get('status', 'Unknown')}\n\n"
                     f"{entry.get('result', '')}")
         return prefix + body + (("\n\n" + cp) if cp else "")
+
+    def _other_ready(self, waited_id: str) -> str:
+        """A note when ANOTHER delegation of this caller is ready (open for
+        review, Done or Errored, not yet read) while a named Wait blocks on
+        *waited_id*; "" otherwise. A blocking Wait ends no turn, so a report
+        that is ready would sit unseen until the named one finishes."""
+        from ....backends.base import get_delegation_id
+        node = self.node
+        me = get_delegation_id() or "entry"
+        with node._registry_lock:
+            ready = sorted(
+                i for i, e in node._registry.items()
+                if i != waited_id and e.get("parent") == me
+                and e.get("status") in ("Done", "Errored", "OpenForReview")
+                and not e.get("waited"))
+            if not ready:
+                return ""
+            start = (node._registry.get(waited_id) or {}).get("start_time")
+        secs = int(time.monotonic() - start) if start else 0
+        other = ready[0]
+        return (
+            f"[{other} is ready for review; {waited_id} is still running "
+            f"({secs} s); call Wait({waited_id!r}) again to keep waiting. "
+            f"Wait() returns {other}'s report.]")
 
     def _woken_early_note(self, my_identity: str) -> str:
         """What a Wait that returned early on an operator note or a

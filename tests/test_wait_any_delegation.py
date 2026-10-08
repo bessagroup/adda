@@ -315,3 +315,33 @@ def test_every_wait_path_gives_the_same_open_for_review_message(tmp_path):
     assert wait(0) == expected
     assert wait(1, "D001") == expected
     assert wait(2, "D001", block=False) == expected
+
+
+def test_named_wait_returns_early_when_another_delegation_is_ready(tmp_path):
+    """Wait(D005) must not leave D002's report unseen while D005 runs on."""
+    node, Wait = _wait(tmp_path, {
+        "D005": {"status": "Working", "start_time": time.monotonic() - 30},
+        "D002": {"status": "OpenForReview", "result": "report"},
+    })
+    gate = threading.Event()
+    t = threading.Thread(target=gate.wait, args=(10,), daemon=True)
+    t.start()
+    node._threads["D005"] = t
+    try:
+        started = time.monotonic()
+        out = Wait("D005")
+        assert time.monotonic() - started < 5, "Wait(D005) did not return"
+        assert "D002 is ready for review; D005 is still running (30 s)" in out, out
+        assert "call Wait('D005') again to keep waiting" in out, out
+        assert node._registry["D002"].get("waited") is not True
+        assert "report" in Wait()  # a bare Wait still delivers D002
+    finally:
+        gate.set()
+
+
+def test_named_wait_ignores_another_delegators_ready_delegation(tmp_path):
+    node, Wait = _wait(tmp_path, {
+        "D005": {"status": "Done", "result": "mine"},
+        "D002": {"status": "OpenForReview", "parent": "D001"},
+    })
+    assert "mine" in Wait("D005")
