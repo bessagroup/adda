@@ -16,8 +16,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from ..agents import ImplementerAgent, StrategizerAgent, _default_graph
-from ..backends.base import DEFAULT_PROMPT
-from ..backends.base import Agent, Graph
+from ..backends.base import DEFAULT_PROMPT, Agent, Graph
 from ..infra import run_abandon as abandon
 from ..infra.container_runner import ContainerRunner
 from ..infra.delegation_log import DelegationLog
