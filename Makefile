@@ -3,7 +3,7 @@
 PACKAGEDIR := dist
 COVERAGEREPORTDIR := coverage_html_report
 
-.PHONY: help test test-html build docs lint paper promptmap promptmap-status attest-paper decline-paper
+.PHONY: help test test-html build docs lint paper promptmap promptmap-status prepush attest-paper decline-paper
 
 help:
 	@echo "Please use \`make <target>' where <target> is one of:"
@@ -15,6 +15,7 @@ help:
 	@echo "  paper       Rebuild paper/main.pdf reproducibly"
 	@echo "  promptmap   Regenerate internal/promptmap.html (prompt + gate provenance)"
 	@echo "  promptmap-status  Is the map in sync with the code, and with what is published?"
+	@echo "  prepush     Run what CI runs: ruff, tests, promptmap diff, promptmap tests"
 	@echo "  attest-paper   Sign that paper/ reflects the code as of HEAD"
 	@echo "  decline-paper  WHY='...' Sign, recording that no decision was taken"
 
@@ -44,6 +45,16 @@ promptmap:
 
 promptmap-status:
 	uv run python internal/tools/promptmap_sync.py
+
+# Mirrors .github/workflows/pull_request.yml: run-tests, check_promptmap (the
+# raw diff of internal/promptmap.html, then `pytest -m promptmap`). Re-read
+# that file when it changes. The API keys are unset so no wet test can run.
+prepush:
+	uv run ruff check
+	env -u OPENROUTER_API_KEY -u ANTHROPIC_API_KEY uv run pytest -n auto -m "not integration and not ollama and not corpus and not promptmap and not docling" -p no:cacheprovider --no-cov
+	uv run --python 3.12 python internal/tools/promptmap.py -o /tmp/promptmap.html
+	diff -q internal/promptmap.html /tmp/promptmap.html
+	uv run pytest -m promptmap --no-cov -n0 -p no:cacheprovider
 
 attest-paper:
 	uv run python internal/tools/paper_attestation.py --attest
