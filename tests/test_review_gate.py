@@ -924,3 +924,34 @@ def test_a_corrected_report_under_another_heading_is_a_revision():
     entry = node._registry[did]
     assert "The right report." in entry["result"]
     assert entry["reply"] is None
+
+
+def test_the_resumed_turn_runs_under_the_same_backend_context_as_the_first():
+    """Regression (run 20261007T205338): the resume thread never bound the
+    delegation id, so a resumed worker's SendMessage found no delegator
+    ("no live delegation found for 'strategizer'") and its evaluator env
+    would have lacked the id. Both turns must see the same context."""
+    from adda._src.backends import base
+
+    seen: list = []
+
+    class _Probe(_FakeWorker):
+        def invoke(self, messages, resume=None):
+            seen.append((resume is not None, base.get_delegation_id(),
+                         base.get_namespace(), base.get_run_config_path()))
+            return super().invoke(messages, resume=resume)
+
+    node = _make_node(worker=_Probe())
+    dt = DelegationTools(node)
+    set_delegation_id(None)
+
+    dt.Delegate("implementer", "do the thing", "a report", wait=True)
+    did = next(iter(node._registry))
+    dt.SendMessage(did, "please fix the bound")
+    _join_resume_thread(node, did)
+
+    first = seen[0]
+    (resumed,) = [x for x in seen if x[0]]
+    assert first[0] is False
+    assert first[1] == did
+    assert resumed[1:] == first[1:]

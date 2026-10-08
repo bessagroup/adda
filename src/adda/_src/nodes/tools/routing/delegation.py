@@ -453,7 +453,8 @@ class WorkerSession:
 
         The backend reads these thread-locals when it builds the worker's
         session environment, so they must be set on the worker's OWN thread —
-        which is this one.
+        which is this one. EVERY thread that runs this delegation's turn
+        calls this first: the first run and the resume that revises its report.
         """
         from ....backends.base import (
             debug_enabled as _dbg,
@@ -959,6 +960,7 @@ class WorkerSession:
     def _resume_and_revise(self, message: str, sender_label: str) -> None:
         node, delegation_id = self.node, self.delegation_id
         try:
+            self._bind_backend_context()
             with node._registry_lock:
                 entry = node._registry.get(delegation_id) or {}
                 session_id = entry.get("session_id")
