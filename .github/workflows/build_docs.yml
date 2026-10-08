@@ -42,7 +42,6 @@ jobs:
       - name: Install Vale
         run: |
           curl -sSfL https://github.com/errata-ai/vale/releases/download/v3.24.0/vale_3.24.0_Linux_64-bit.tar.gz | sudo tar -xz -C /usr/local/bin vale
-          vale sync
       - name: Style check docs
         run: vale docs
       - name: Upload Pages artifact
