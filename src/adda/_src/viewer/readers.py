@@ -754,7 +754,7 @@ def _read_one_store(
     dom = data / "domain.json"
     if dom.exists():
         parsed = _read_json_object(dom)
-        space = sorted((parsed.get("input_space") or {}).keys())
+        space = list((parsed.get("input_space") or {}).keys())
 
     in_head, in_rows = _read_csv_rows(data / "input.csv")
     out_head, out_rows = _read_csv_rows(data / "output.csv")

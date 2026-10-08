@@ -1213,3 +1213,69 @@ def test_oracle_revision_follows_an_imported_study_local_module(tmp_path):
     assert oracle_revision(cfg, study) == r1
     (study / "workspace" / "solver" / "core.py").write_text("k = 2\n")
     assert oracle_revision(cfg, study) != r1
+
+
+# ---------------------------------------------------------------------------
+# Input column order is the generator's order, never lexicographic
+# ---------------------------------------------------------------------------
+
+
+class _EchoGenerator(DataGenerator):
+    def execute(self, experiment_sample, **kwargs):
+        experiment_sample._output_data["f"] = float(
+            sum(experiment_sample._input_data.values()))
+        experiment_sample.job_status = JobStatus.FINISHED
+        return experiment_sample
+
+
+def _sample_with(names, offset=0.0):
+    return ExperimentSample(
+        _input_data={n: float(i) + offset for i, n in enumerate(names)},
+        _output_data={}, job_status=JobStatus.OPEN)
+
+
+@pytest.mark.parametrize("prefix,count", [("A", 10), ("x", 12)])
+def test_store_keeps_generator_input_order(tmp_path, prefix, count):
+    from adda._src.evaluation.instrumented import InstrumentedDataGenerator
+
+    names = [f"{prefix}{i}" for i in range(1, count + 1)]
+    gen = InstrumentedDataGenerator(
+        inner=_EchoGenerator(), store_dir=tmp_path, delegation_id="D001",
+        source="t", flush_every=1)
+    for k in range(3):
+        gen.execute(_sample_with(names, offset=k))
+    gen.flush()
+
+    data = ExperimentData.from_file(project_dir=tmp_path)
+    assert list(data.domain.input_names) == names
+    df_in, _ = data.to_pandas()
+    assert list(df_in.columns) == names
+    x, _y = data.to_numpy()
+    assert x.shape[1] == count
+    assert list(x[0]) == [float(i) for i in range(count)]
+    on_disk = json.loads((tmp_path / "experiment_data" / "domain.json").read_text())
+    assert list(on_disk["input_space"]) == names
+
+
+def test_store_with_old_sorted_domain_still_loads(tmp_path):
+    from adda._src.evaluation.instrumented import InstrumentedDataGenerator
+
+    names = [f"A{i}" for i in range(1, 11)]
+    gen = InstrumentedDataGenerator(
+        inner=_EchoGenerator(), store_dir=tmp_path, delegation_id="D001",
+        source="t", flush_every=1)
+    gen.execute(_sample_with(names))
+    gen.flush()
+    path = tmp_path / "experiment_data" / "domain.json"
+    dom = json.loads(path.read_text())
+    dom["input_space"] = dict(sorted(dom["input_space"].items()))
+    path.write_text(json.dumps(dom))
+
+    data = ExperimentData.from_file(project_dir=tmp_path)
+    assert sorted(data.domain.input_names) == sorted(names)
+    gen2 = InstrumentedDataGenerator(
+        inner=_EchoGenerator(), store_dir=tmp_path, delegation_id="D002",
+        source="t", flush_every=1)
+    gen2.execute(_sample_with(names, offset=1))
+    gen2.flush()
+    assert len(ExperimentData.from_file(project_dir=tmp_path)) == 2

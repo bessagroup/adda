@@ -828,18 +828,20 @@ class InstrumentedDataGenerator(DataGenerator):
         d = Domain()
         # Declare input columns (base Parameter — bounds come from the
         # canonical domain on merge, not from this batch).
-        all_input_keys: set[str] = set()
+        # First-seen order: the store's column order is positional for every
+        # reader (to_numpy, input_names), so it must be the generator's order.
+        all_input_keys: dict[str, None] = {}
         for sample in self._buffer:
-            all_input_keys.update(sample._input_data.keys())
-        for key in sorted(all_input_keys):
+            all_input_keys.update(dict.fromkeys(sample._input_data))
+        for key in all_input_keys:
             # Public API for a bounds-less base input column (constructs the
             # Parameter and registers it, replacing the private d._add).
             d.add_parameter(key)
         # Collect all output keys from the buffer.
-        all_keys: set[str] = set()
+        all_keys: dict[str, None] = {}
         for sample in self._buffer:
-            all_keys.update(sample._output_data.keys())
-        for key in sorted(all_keys):
+            all_keys.update(dict.fromkeys(sample._output_data))
+        for key in all_keys:
             d.add_output(key, exist_ok=True)
         return d
 
