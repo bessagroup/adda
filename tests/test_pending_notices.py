@@ -133,7 +133,7 @@ def test_the_openai_compatible_backend_appends_the_notice_to_a_bash_result(
     assert "[EVAL NOT STORED — D001] 150 evaluation(s)" in result
 
 
-def test_with_science_monitor_off_the_claude_hook_is_not_installed(
+def test_with_science_monitor_off_the_claude_hook_keeps_store_notices(
         tmp_path, capsys):
     from adda._src.backends.base import set_delegation_id, set_run_config_path
 
@@ -160,10 +160,13 @@ def test_with_science_monitor_off_the_claude_hook_is_not_installed(
             set_run_config_path(None)
     finally:
         settings.configure(None)
-    assert "hooks" not in seen["options"]
+    assert adapter._oracle_nudge.enabled is False
+    hook = seen["options"]["hooks"]["PostToolUse"][0].hooks[0]
+    result = asyncio.run(hook({"tool_name": "Bash", "tool_input": {}}, "t", None))
+    assert "[EVAL NOT STORED" in result["hookSpecificOutput"]["additionalContext"]
 
 
-def test_with_science_monitor_off_the_openai_backend_adds_no_notice(
+def test_with_science_monitor_off_the_openai_backend_drops_only_the_nudge(
         tmp_path, capsys):
     from adda._src.backends.openai_compatible import OpenAICompatibleAdapter
 
@@ -172,8 +175,14 @@ def test_with_science_monitor_off_the_openai_backend_adds_no_notice(
         model="m", system_prompt="", closure_tools={}, native_tools=["Bash"],
         study_dir=Path(tmp_path))
     adapter._notice_ctx = (debug, "D001")
+    consulted = []
+    adapter._oracle_nudge = types.SimpleNamespace(
+        check=lambda *a: consulted.append(a) or "ORACLE ACCESS")
+    raw = {"command": "python3 -c 'from evaluator import evaluate'"}
     settings.configure({"science_monitor": False})
     try:
-        assert adapter._post_tool_context("Bash", {}) is None
+        out = adapter._post_tool_context("Bash", raw)
     finally:
         settings.configure(None)
+    assert "[EVAL NOT STORED" in out and "ORACLE ACCESS" not in out
+    assert consulted == []

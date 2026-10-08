@@ -688,11 +688,9 @@ class ClaudeAdapter:
         # Best-effort — if the SDK hook API is unavailable, run without it.
         _hooks = None
         try:
-            from ..runtime import features
-            if not features.enabled("science_monitor"):
-                raise RuntimeError("science_monitor is off: no hook")
             from claude_agent_sdk import HookMatcher
 
+            from ..runtime import features
             from .base import (
                 OracleNudgeBudget,
                 get_delegation_id,
@@ -702,7 +700,11 @@ class ClaudeAdapter:
             # Silent until an oracle is registered: pre-registration work (the
             # datagenerator wrapping/validating its raw source) has no
             # get_evaluator() to use, so nudging it is a false positive.
-            _nudge = OracleNudgeBudget(enabled=oracle_registered())
+            # The nudge is a monitor intervention; the store notices the same
+            # hook carries are store integrity and stay on in every arm.
+            _nudge = OracleNudgeBudget(
+                enabled=oracle_registered()
+                and features.enabled("science_monitor"))
             # Expose on the adapter so the runtime can drain + log its
             # firings as direct evidence (see _record_intervention).
             _nudge.run_config_path = get_run_config_path()
