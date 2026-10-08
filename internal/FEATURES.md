@@ -648,6 +648,11 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   written to the canonical store with provenance, under a file lock.
 - **Where:** `instrumented.py` (the wrapper), `oracle_resolution.py` (`get_evaluator`).
   **Tools (worker scratch):** `RunScratch`, `ReportEvals`.
+- **Atomic store writes:** `ExperimentData.store()` writes each of the four files
+  to a temp name, fsyncs, then renames (domain, input, jobs, output last). A writer
+  killed mid-store leaves the old or the new file, never a torn one. Between two
+  renames, input may be one batch ahead of output; every reader keys on output.
+  `_f3dasm_compat.py`; test `tests/test_atomic_store.py`.
 - **Status:** core.
 
 ### Design namespaces — multiple oracles + ledgers per run (#20, Axis 3)

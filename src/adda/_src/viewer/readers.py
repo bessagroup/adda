@@ -761,7 +761,9 @@ def _read_one_store(
     _, job_rows = _read_csv_rows(data / "jobs.csv")
     statuses = [r[1] if len(r) > 1 else "" for r in job_rows]
 
-    n = max(len(in_rows), len(out_rows))
+    # The output rows are the ledger. An input one batch ahead of it (a store
+    # killed between two renames) is not an evaluation yet.
+    n = len(out_rows) if out_rows else len(in_rows)
     # Newest first: a live run's interesting rows are the ones just added.
     order = list(range(n))[::-1][after:after + limit]
     evals = []
