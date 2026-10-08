@@ -51,7 +51,8 @@ def tool_summary(fn: Callable, name: str = "") -> str:
     return (doc.split("\n")[0].strip() if doc else "") or name
 
 
-def render_tool_catalog(closure_tools: dict[str, Callable]) -> str:
+def render_tool_catalog(closure_tools: dict[str, Callable],
+                        *, builtins_held: bool = False) -> str:
     """Render a ``<tools>`` block from the LIVE closure dict.
 
     Per tool: the exact registered name (the dict key — so a tool can never be
@@ -61,6 +62,10 @@ def render_tool_catalog(closure_tools: dict[str, Callable]) -> str:
     NOT re-emit parameter types/schema — the backends already carry those to the
     model via the tool-use API. Deterministic (sorted by name) for cache
     stability. Returns "" when there are no closures.
+
+    ``builtins_held``: the node also holds its backend's own built-in tools
+    (the ``Default`` token). The catalog then lists only what adda adds, and
+    must not claim that anything it omits is unavailable.
     """
     if not closure_tools:
         return ""
@@ -75,21 +80,29 @@ def render_tool_catalog(closure_tools: dict[str, Callable]) -> str:
         if examples:
             block += "\nExamples:\n" + "\n".join(f"  - {e}" for e in examples)
         blocks.append(block)
-    return (
-        "\n\n<tools>\n"
+    head = (
+        "Tools adda adds to your built-in tools, generated from the live tool "
+        "set (these exact names are the ones you call):"
+        if builtins_held else
         "Your available tools, generated from the live tool set (AUTHORITATIVE "
         "— these exact names are the ones you call; anything not listed here is "
-        "not available):\n\n"
+        "not available):"
+    )
+    return (
+        "\n\n<tools>\n"
+        + head + "\n\n"
         + "\n\n".join(blocks)
         + "\n</tools>"
     )
 
 
-def system_prompt_with_catalog(base_prompt: str, closure_tools: dict) -> str:
+def system_prompt_with_catalog(base_prompt: str, closure_tools: dict,
+                               *, builtins_held: bool = False) -> str:
     """Base prompt + the generated tool catalog. Computed at prompt-assembly
     time so it always reflects the current closures; never mutates state."""
     from ..runtime.features import resolve_gates
-    return resolve_gates(base_prompt + render_tool_catalog(closure_tools))
+    return resolve_gates(base_prompt + render_tool_catalog(
+        closure_tools, builtins_held=builtins_held))
 
 
 def qualify_tool_mentions(text: str, names: Mapping[str, str]) -> str:

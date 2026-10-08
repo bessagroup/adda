@@ -154,3 +154,24 @@ def test_claude_catalog_names_match_sdk_registration():
     assert set(qualified) <= allowed
     # native tools stay bare (they are SDK built-ins, not MCP-namespaced)
     assert "Read" in allowed and "Bash" in allowed
+
+
+def test_a_node_holding_builtins_is_not_told_the_rest_are_unavailable():
+    def T():
+        """t"""
+    plain = render_tool_catalog({"T": T})
+    held = render_tool_catalog({"T": T}, builtins_held=True)
+    assert "anything not listed here is not available" in plain
+    assert "not available" not in held
+    assert "### T" in held
+
+
+def test_claude_adapter_with_default_tools_renders_the_additive_header():
+    from adda._src.backends.claude import ClaudeAdapter
+
+    def T():
+        """t"""
+    for native, additive in ((["Default"], True), ([], False)):
+        a = ClaudeAdapter(model="m", system_prompt="S", native_tools=native,
+                          closure_tools={"T": T})
+        assert ("not available" not in a._render_system_prompt()) is additive

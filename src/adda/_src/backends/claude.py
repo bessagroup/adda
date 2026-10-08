@@ -527,7 +527,8 @@ class ClaudeAdapter:
             system_prompt_with_catalog,
         )
         qualified = _qualify_closure_names(self.closure_tools)
-        rendered = system_prompt_with_catalog(self.system_prompt, qualified)
+        rendered = system_prompt_with_catalog(
+            self.system_prompt, qualified, builtins_held=self.use_default_tools)
         return qualify_tool_mentions(rendered, {
             bare: f"mcp__{_CLOSURE_MCP_SERVER}__{bare}"
             for bare in self.closure_tools
