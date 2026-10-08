@@ -57,7 +57,8 @@ class _Worker:
         with self._lock:
             return self.gates.setdefault(i, threading.Event())
 
-    def invoke(self, messages, on_session_start=None, on_session_end=None):
+    def invoke(self, messages, on_session_start=None, on_session_end=None,
+               background_watch=None):
         with self._lock:
             self._n += 1
             i = self._n

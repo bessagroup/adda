@@ -575,14 +575,10 @@ class WorkerSession:
         (the queued->started patch). A worker whose invoke accepts neither
         (an older/custom stub) falls back to a plain call.
         """
-        cbs: dict[str, Any] = {"on_session_end": self._capture_invoke_result}
-        import inspect
-        try:
-            _params = inspect.signature(self.worker.invoke).parameters
-        except (TypeError, ValueError):
-            _params = {}
-        if "background_watch" in _params:
-            cbs["background_watch"] = self._background_watch
+        cbs: dict[str, Any] = {
+            "on_session_end": self._capture_invoke_result,
+            "background_watch": self._background_watch,
+        }
         if first:
             cbs["on_session_start"] = self._mark_session_started_if_queued
         try:

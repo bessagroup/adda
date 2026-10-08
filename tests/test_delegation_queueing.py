@@ -56,7 +56,8 @@ class _BlockingWorker:
         self.release = threading.Event()
         self.entered = threading.Event()
 
-    def invoke(self, messages, on_session_start=None, on_session_end=None):
+    def invoke(self, messages, on_session_start=None, on_session_end=None,
+               background_watch=None):
         with self._lock:
             if on_session_start is not None:
                 on_session_start()
@@ -195,7 +196,8 @@ class _SessionWorker:
         self._first_thread: int | None = None
         self.second_turn_done = threading.Event()
 
-    def invoke(self, messages, on_session_start=None, on_session_end=None):
+    def invoke(self, messages, on_session_start=None, on_session_end=None,
+               background_watch=None):
         with self._lock:
             if on_session_start is not None:
                 on_session_start()
