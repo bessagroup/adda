@@ -233,6 +233,11 @@ def append_transcript(record: dict) -> None:
 #: Tool-set token: "this backend's whole built-in set" (see runtime/node_tools.py).
 DEFAULT_TOOLS = "Default"
 
+#: Base-prompt token: "the backend's own default system prompt, with adda's
+#: text appended" (see runtime/node_tools.py). Claude Code is the one backend
+#: that has such a prompt.
+DEFAULT_PROMPT = "Default"
+
 
 class Agent:
     """Base class for all agentic nodes in a Graph.
@@ -297,6 +302,9 @@ class Agent:
     backend: str | None = None
     #: Endpoint override (OpenAI-compatible backends); config.yaml sets it per node.
     base_url: str | None = None
+    #: ``DEFAULT_PROMPT`` keeps the backend's own system prompt and appends
+    #: this node's text to it; None replaces it. config.yaml sets it per node.
+    base_prompt: str | None = None
     mcp_servers: dict = {}
     extra_allowed_tools: frozenset[str] = frozenset()
     max_history_pairs: int = 5

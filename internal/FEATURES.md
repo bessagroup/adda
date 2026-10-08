@@ -1067,6 +1067,15 @@ that is not a list of strings is a startup error (`runtime/node_tools.py`);
 which `apply_node_config` installs on the Agent; the class values come back when
 a second config is applied.
 
+**`base_prompt: Default`** (`nodes.<node>.base_prompt`, `Agent.base_prompt`,
+`backends.base.DEFAULT_PROMPT`) keeps Claude Code's own system prompt. The Claude
+backend then passes `{"type": "preset", "preset": "claude_code", "append": <text>}`
+(`ClaudeAdapter._system_prompt_option`) instead of a replacing string. The
+appended text is the node's own prompt plus the tool catalog; the entry/workspace
+preamble is dropped. A backend without its own prompt (`HAS_BASE_PROMPT` false)
+refuses the setting when the run builds the node's adapter. `Default` is the only
+value.
+
 A `tools` list from config also WITHHOLDS the always-on closures it does not name
 (`node_tools.DROPPABLE_CLOSURES`: ConsultHandbook, ConsultLiterature, ReportEvals,
 RecallHistory, sandboxed Write). `withheld_closures(agent)` is applied in

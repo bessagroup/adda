@@ -23,10 +23,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ..backends.base import DEFAULT_PROMPT
 from ..backends.base import DEFAULT_TOOLS as DEFAULT
 
 #: Keys a ``nodes.<name>`` entry may hold.
-NODE_KEYS = frozenset({"tools", "model", "backend", "base_url"})
+NODE_KEYS = frozenset({"tools", "model", "backend", "base_url", "base_prompt"})
 
 #: Built-ins that were reviewed (what each does, whether it can leave adda's
 #: paths). A built-in outside this set in the first init record is reported,
@@ -91,6 +92,10 @@ def validate_nodes_block(nodes: Any) -> list[str]:
         for key in ("model", "backend", "base_url"):
             if key in entry and not (isinstance(entry[key], str) and entry[key]):
                 errors.append(f"nodes.{name}.{key} must be a non-empty string")
+        if "base_prompt" in entry and entry["base_prompt"] != DEFAULT_PROMPT:
+            errors.append(f"nodes.{name}.base_prompt must be {DEFAULT_PROMPT!r} "
+                          "(the only value; leave the key out to replace the "
+                          "backend's prompt)")
     return errors
 
 
@@ -121,6 +126,9 @@ def apply_node_config(graph: Any, nodes_cfg: Any) -> list[dict]:
         agent.model = entry.get("model", declared_id[0])
         agent.backend = entry.get("backend", declared_id[1])
         agent.base_url = entry.get("base_url", declared_id[2])
+        agent._declared_base_prompt = getattr(
+            agent, "_declared_base_prompt", agent.base_prompt)
+        agent.base_prompt = entry.get("base_prompt", agent._declared_base_prompt)
         override = entry.get("tools")
         resolved = frozenset(override) if override is not None else declared
         agent.tools = resolved

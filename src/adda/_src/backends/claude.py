@@ -13,7 +13,7 @@ from typing import Any
 
 from ..infra.run_abandon import raise_if_stopped
 from ..infra.telemetry import call_shape, normalized_usage
-from .base import DEFAULT_TOOLS, record_stream_diagnostic
+from .base import DEFAULT_PROMPT, DEFAULT_TOOLS, record_stream_diagnostic
 
 __all__ = ["ClaudeAdapter"]
 
@@ -451,6 +451,9 @@ class ClaudeAdapter:
 
     # CLI tools the Claude SDK executes natively. A node's other declared tools
     # are injected as Python closures (MCP), not passed here.
+    #: This backend has its own default system prompt that a node may keep.
+    HAS_BASE_PROMPT = True
+    base_prompt: str | None = None
     NATIVE_TOOLS = frozenset({
         "Bash", "Edit", "Read", "Write", "Glob", "Grep",
         # Bash's own SDK companions: poll a backgrounded shell / kill it. These
@@ -517,6 +520,15 @@ class ClaudeAdapter:
         # the last AssistantMessage carried.
         self.last_session_id: str | None = None
         self._background_watch: Any = None
+
+    def _system_prompt_option(self):
+        """What the CLI receives: the text alone (it REPLACES Claude Code's
+        prompt), or, for a node with ``base_prompt: Default``, a preset that
+        keeps Claude Code's prompt and appends the text."""
+        text = self._render_system_prompt()
+        if self.base_prompt == DEFAULT_PROMPT:
+            return {"type": "preset", "preset": "claude_code", "append": text}
+        return text
 
     def _render_system_prompt(self) -> str:
         """The system prompt exactly as the model sees it: base prompt plus
@@ -743,7 +755,7 @@ class ClaudeAdapter:
                 pass
 
         options = ClaudeAgentOptions(
-            system_prompt=self._render_system_prompt(),
+            system_prompt=self._system_prompt_option(),
             model=self.model,
             cwd=str(self.study_dir) if self.study_dir else None,
             tools=({"type": "preset", "preset": "claude_code"}

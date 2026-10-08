@@ -16,6 +16,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from ..agents import ImplementerAgent, StrategizerAgent, _default_graph
+from ..backends.base import DEFAULT_PROMPT
 from ..backends.base import Agent, Graph
 from ..infra import run_abandon as abandon
 from ..infra.container_runner import ContainerRunner
@@ -1789,6 +1790,12 @@ class AgenticRun:
             agent, native=_adapter_cls.select_native_tools(agent.tools),
             native_set=getattr(_adapter_cls, "NATIVE_TOOLS", ()),
             delegates=bool(self._graph_spec.outgoing(name)))
+        _own_base = agent.base_prompt == DEFAULT_PROMPT
+        if _own_base and not getattr(_adapter_cls, "HAS_BASE_PROMPT", False):
+            raise ValueError(
+                f"node {name}: base_prompt: {DEFAULT_PROMPT} needs a backend "
+                f"with its own default system prompt; {_backend_name!r} has "
+                "none. Use the claude backend or remove base_prompt.")
         if is_entry:
             notes_dir = Path(run_dir) / "debug" / "strategizer_notes"
             debug_dir = Path(run_dir) / "debug"
@@ -1807,7 +1814,8 @@ class AgenticRun:
                 knowledge=self._kb_menu(_role, agent),
                 roster=self._team_roster(name),
             )
-            system_prompt = preamble + features.strip_disabled_sections(
+            system_prompt = ("" if _own_base else preamble
+                             ) + features.strip_disabled_sections(
                 agent.system_prompt)
             cwd = self.study_dir
         else:
@@ -1829,7 +1837,8 @@ class AgenticRun:
                 resources=self._resource_stanza(run_dir, for_worker=_is_campaign),
                 knowledge=self._kb_menu(_role, agent),
             )
-            system_prompt = preamble + features.strip_disabled_sections(
+            system_prompt = ("" if _own_base else preamble
+                             ) + features.strip_disabled_sections(
                 agent.system_prompt)
             # Critics read from the study tree, not from a delegation subfolder.
             if getattr(agent, "role", None) == "critic":
@@ -1913,6 +1922,7 @@ class AgenticRun:
             max_history_pairs=_max_history_pairs,
             **({"base_url": _endpoint} if _endpoint else {}),
         )
+        adapter.base_prompt = agent.base_prompt
         # Universal read-only handbook lookup: EVERY node's adapter gets it
         # here, equally, at construction (copy() returns self, so the
         # per-invocation worker/critic paths inherit it). Single injection

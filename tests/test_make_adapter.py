@@ -435,3 +435,53 @@ def test_tool_gate_without_a_held_set_is_an_error():
         "[[if tool:Read]]x[[else]]y[[/if]]", holds={"Read"}) == "x"
     assert features.resolve_gates(
         "[[if tool:Read]]x[[else]]y[[/if]]", holds=set()) == "y"
+
+
+# ---------------------------------------------------------------------------
+# base_prompt: Default keeps the backend's own system prompt
+# ---------------------------------------------------------------------------
+
+
+def test_base_prompt_default_validation_and_round_trip():
+    from adda._src.runtime.node_tools import apply_node_config, validate_nodes_block
+
+    assert validate_nodes_block({"a": {"base_prompt": "Default"}}) == []
+    assert validate_nodes_block({"a": {"base_prompt": "other"}})
+    g = Graph(nodes={"a": _agent_with_tools("Bash")}, edges=[], entry="a")
+    apply_node_config(g, {"a": {"base_prompt": "Default"}})
+    assert g.nodes["a"].base_prompt == "Default"
+    apply_node_config(g, {})
+    assert g.nodes["a"].base_prompt is None
+
+
+def test_claude_passes_a_preset_append_only_under_base_prompt(tmp_path):
+    from adda._src.backends.claude import ClaudeAdapter
+
+    a = ClaudeAdapter(model="m", system_prompt="own text", study_dir=tmp_path,
+                      native_tools=["Default"])
+    assert a._system_prompt_option() == a._render_system_prompt()
+    a.base_prompt = "Default"
+    opt = a._system_prompt_option()
+    assert opt["type"] == "preset" and opt["preset"] == "claude_code"
+    assert opt["append"] == a._render_system_prompt()
+    assert "own text" in opt["append"]
+
+
+def test_base_prompt_drops_the_preamble_and_openai_refuses(tmp_path):
+    def build(backend, bp):
+        run = _make_run(tmp_path, backend=backend)
+        agent = _agent_with_tools("Bash")
+        agent.base_prompt = bp
+        run._graph_spec = MagicMock()
+        run._graph_spec.entry = "strategizer"
+        run._graph_spec.outgoing.return_value = []
+        with patch("adda._src.backends.claude.ClaudeAdapter") as M:
+            M.return_value = MagicMock(closure_tools={})
+            M.HAS_BASE_PROMPT = True
+            run._make_adapter("strategizer", agent)
+            return M.call_args[1]["system_prompt"]
+
+    assert "<workspace>" in build("claude", None)
+    assert "<workspace>" not in build("claude", "Default")
+    with pytest.raises(ValueError, match="base_prompt"):
+        build("ollama", "Default")
