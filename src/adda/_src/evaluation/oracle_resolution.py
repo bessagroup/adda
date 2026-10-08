@@ -241,6 +241,48 @@ def _oracle_source_files(run_config: dict, study_dir: Path) -> list[Path]:
     return sorted(files)
 
 
+def oracle_module_names(run_config: dict, study_dir: Path) -> list[str]:
+    """Dotted names of the modules that ARE the oracle: the registered
+    entrypoint's own module plus each study-local module it imports directly
+    (the solver it wraps). A worker that imports one of these reaches the
+    oracle without the ledger. Read from the source (``ast``); empty for a
+    lookup oracle or none registered."""
+    import ast
+
+    entry = run_config.get("evaluator_entrypoint")
+    if run_config.get("evaluator_lookup") or not entry:
+        return []
+    study = Path(study_dir).resolve()
+    file_part, _, _ = entry.rpartition(":")
+    entry_file = (study / file_part).resolve()
+    roots = list(dict.fromkeys([entry_file.parent, study]))
+    names: list[str] = [entry_file.stem]
+    try:
+        tree = ast.parse(entry_file.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, ValueError):
+        return names
+
+    def is_local(dotted: str) -> bool:
+        parts = dotted.split(".")
+        return any((r.joinpath(*parts).with_suffix(".py")).is_file()
+                   or (r.joinpath(*parts) / "__init__.py").is_file()
+                   for r in roots)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            cands = [a.name for a in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            cands = [node.module] + [f"{node.module}.{a.name}" for a in node.names]
+        else:
+            continue
+        local = [c for c in cands if is_local(c)]
+        if isinstance(node, ast.ImportFrom):
+            deeper = [c for c in local if c != node.module]
+            local = deeper or local
+        names.extend(local)
+    return list(dict.fromkeys(names))
+
+
 def oracle_revision(run_config: dict, study_dir: Path) -> str:
     """A short fingerprint of the registered oracle's SOURCE.
 

@@ -647,11 +647,26 @@ _ORACLE_NUDGE_MESSAGE = (
 )
 
 
-def detect_raw_oracle_access(tool_name: str, tool_input: dict) -> str | None:
+def module_patterns(dotted: str) -> tuple[re.Pattern, ...]:
+    """Regexes for a worker importing the module *dotted* directly."""
+    name = re.escape(dotted)
+    pats = [re.compile(rf"\bfrom\s+{name}\s+import\b"),
+            re.compile(rf"\bimport\s+{name}\b")]
+    if "." in dotted:
+        parent, _, leaf = dotted.rpartition(".")
+        pats.append(re.compile(
+            rf"\bfrom\s+{re.escape(parent)}\s+import\s+\(?[^\n]*\b"
+            rf"{re.escape(leaf)}\b"))
+    return tuple(pats)
+
+
+def detect_raw_oracle_access(tool_name: str, tool_input: dict,
+                             extra_patterns: tuple = ()) -> str | None:
     """Return a nudge string if a Bash/Write call appears to reach the
     ground-truth oracle directly (bypassing get_evaluator), else None.
 
     Pure and best-effort. Only inspects Bash commands and Write content.
+    ``extra_patterns`` are the registered oracle's own module imports.
     """
     if tool_name not in ("Bash", "Write"):
         return None
@@ -665,7 +680,7 @@ def detect_raw_oracle_access(tool_name: str, tool_input: dict) -> str | None:
     if not parts:
         return None
     text = "\n".join(parts)
-    for pat in _RAW_ORACLE_PATTERNS:
+    for pat in (*_RAW_ORACLE_PATTERNS, *extra_patterns):
         if pat.search(text):
             return _ORACLE_NUDGE_MESSAGE
     return None
@@ -687,6 +702,11 @@ class OracleNudgeBudget:
         # is the datagenerator's situation during pre-registration validation).
         self.enabled = enabled
         self.used = 0
+        # Path to run_config.json: the registered oracle's own imports are
+        # derived from it (see ``_oracle_patterns``).
+        self.run_config_path: str | None = None
+        self._patterns: tuple = ()
+        self._patterns_rev: str | None = None
         # Firings since the last reset, so the runtime can LOG them as direct
         # evidence the nudge acted (not just infer it). Each: {"tool", "snip"}.
         self.events: list[dict] = []
@@ -695,10 +715,35 @@ class OracleNudgeBudget:
         self.used = 0
         self.events = []
 
+    def _oracle_patterns(self) -> tuple:
+        """Patterns for the modules the registered oracle is made of, derived
+        from its source and refreshed whenever its revision changes."""
+        if not self.run_config_path:
+            return ()
+        try:
+            import json as _json
+
+            from ..evaluation.oracle_resolution import (
+                oracle_module_names,
+                oracle_revision,
+            )
+            cfg = _json.loads(Path(self.run_config_path).read_text())
+            study = Path(cfg["study_dir"])
+            rev = f"{cfg.get('evaluator_entrypoint')}|{oracle_revision(cfg, study)}"
+            if rev != self._patterns_rev:
+                self._patterns = tuple(
+                    p for m in oracle_module_names(cfg, study)
+                    for p in module_patterns(m))
+                self._patterns_rev = rev
+        except Exception:  # noqa: BLE001 — the nudge is best-effort
+            pass
+        return self._patterns
+
     def check(self, tool_name: str, tool_input: dict) -> str | None:
         if not self.enabled or self.used >= self.cap:
             return None
-        msg = detect_raw_oracle_access(tool_name, tool_input)
+        msg = detect_raw_oracle_access(
+            tool_name, tool_input, self._oracle_patterns())
         if msg is None:
             return None
         self.used += 1

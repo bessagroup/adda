@@ -191,3 +191,64 @@ class TestCorrectPathApiIsReal:
         text = entry.read_text(encoding="utf-8")
         assert "data.run(" not in text
         assert "gen.call(" in text
+
+
+class TestDerivedFromRegisteredOracle:
+    """The patterns come from the registered generator's own imports, not
+    from one module name."""
+
+    def _study(self, tmp_path, generator_src, module_file):
+        import json
+        study = tmp_path / "study"
+        (study / "workspace").mkdir(parents=True)
+        mod = study / module_file
+        mod.parent.mkdir(parents=True, exist_ok=True)
+        mod.write_text("def evaluate(x):\n    return x\n")
+        (study / "workspace" / "data_generator.py").write_text(generator_src)
+        (study / "solver" / "__init__.py").touch() if (study / "solver").is_dir() else None
+        run = study / "runs" / "r" / "debug"
+        run.mkdir(parents=True)
+        rc = run / "run_config.json"
+        rc.write_text(json.dumps({
+            "study_dir": str(study),
+            "store_dir": str(study / "runs" / "r" / "experiment_data"),
+            "evaluator_entrypoint": "workspace/data_generator.py:Gen"}))
+        return rc
+
+    def _budget(self, rc):
+        b = OracleNudgeBudget()
+        b.run_config_path = str(rc)
+        return b
+
+    def test_wrapped_solver_module_is_nudged(self, tmp_path):
+        rc = self._study(
+            tmp_path, "from solver import evaluate\nclass Gen: ...\n",
+            "solver/evaluate.py")
+        b = self._budget(rc)
+        assert b.check("Write", {"content": "from solver import evaluate as ev\n"})
+        assert b.check("Bash", {"command": "python -c 'import solver.evaluate'"})
+
+    def test_module_named_evaluator_still_nudged(self, tmp_path):
+        rc = self._study(
+            tmp_path, "import evaluator\nclass Gen: ...\n", "evaluator.py")
+        b = self._budget(rc)
+        assert b.check("Bash", {"command": "python -c 'from evaluator import evaluate'"})
+
+    def test_unrelated_import_is_not_nudged(self, tmp_path):
+        rc = self._study(
+            tmp_path, "from solver import evaluate\nclass Gen: ...\n",
+            "solver/evaluate.py")
+        b = self._budget(rc)
+        assert b.check("Write", {"content": "import numpy\nfrom solver import plotting\n"}) is None
+        assert b.check("Write", {"content": "import json\nfrom os import path\n"}) is None
+
+    def test_patterns_follow_the_oracle_revision(self, tmp_path):
+        rc = self._study(
+            tmp_path, "from solver import evaluate\nclass Gen: ...\n",
+            "solver/evaluate.py")
+        b = self._budget(rc)
+        assert b.check("Write", {"content": "from other import f\n"}) is None
+        gen = rc.parents[3] / "workspace" / "data_generator.py"
+        (rc.parents[3] / "other.py").write_text("def f(): ...\n")
+        gen.write_text("from other import f\nclass Gen: ...\n")
+        assert b.check("Write", {"content": "from other import f\n"})

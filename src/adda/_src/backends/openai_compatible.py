@@ -1206,6 +1206,7 @@ class OpenAICompatibleAdapter:
         self._oracle_nudge.reset()
         from .base import get_delegation_id, get_run_config_path
         _rc = get_run_config_path()
+        self._oracle_nudge.run_config_path = _rc
         self._notice_ctx = (Path(_rc).parent if _rc else None,
                             get_delegation_id())
         if self._agent is None:

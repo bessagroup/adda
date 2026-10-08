@@ -787,3 +787,12 @@ Run 20261007T154633: a required `design.json` was written as a status report,
 not a design. A declared schema per deliverable would catch it. Dropped: n=1,
 and a schema needs content specific to each problem. Revisit if a second run
 shows the same failure.
+
+## 58. A close-time scan for unmetered oracle calls
+Run 20261008T152224 (truss-iscso2015 baseline): 21 of 22 feasible designs came from
+unmetered solver calls (662 solver-ledger rows against 601 metered; D001 made 2 calls
+and D006 made 59 outside `get_evaluator()`). The just-in-time nudge missed them
+(fixed: it now reads the registered generator's own imports). A second layer: at
+delegation close, scan the delegation's scripts statically for the wrapped module's
+imports and write one diagnostic. Not now (boss, 2026-10-08). Revisit if the nudge
+still lets a headline rest on unmetered calls.

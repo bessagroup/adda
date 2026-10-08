@@ -688,6 +688,7 @@ class ClaudeAdapter:
             _nudge = OracleNudgeBudget(enabled=oracle_registered())
             # Expose on the adapter so the runtime can drain + log its
             # firings as direct evidence (see _record_intervention).
+            _nudge.run_config_path = get_run_config_path()
             self._oracle_nudge = _nudge
 
             # The hook may run on another thread, so bind the delegation and

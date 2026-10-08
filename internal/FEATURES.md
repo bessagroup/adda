@@ -106,6 +106,11 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   leading word stays first, and the notice stays in the head of a large result
   whatever the host keeps. A long first line that opens like JSON gets the
   notice in front of it.
+  **Raw-oracle nudge** (`backends/base.py`): besides the fixed `evaluator` patterns,
+  `OracleNudgeBudget` derives patterns from the registered generator's own
+  study-local imports (`oracle_module_names`, read with `ast`) and refreshes them
+  when the oracle revision changes. A worker that imports the wrapped solver gets
+  the same nudge, capped at `ORACLE_NUDGE_CAP`.
   **Pending-notice bridge** (`infra/pending_notices.py`): the wrapper also
   queues each aggregate `[EVAL NOT STORED]` / `[ORACLE CHANGED]` notice in
   `<run>/debug/pending_notices/<delegation>.jsonl`. The backend's post-tool hook
