@@ -1175,3 +1175,41 @@ def test_a_misnamed_execute_parameter_fails_alike_on_both_paths(tmp_path):
     for result in (plain, metered):
         _, df_out = result.to_pandas()
         assert "f" not in df_out.columns or df_out["f"].isna().all()
+
+
+def _oracle_study(tmp_path):
+    study = tmp_path / "study"
+    (study / "workspace" / "solver").mkdir(parents=True)
+    (study / "workspace" / "solver" / "__init__.py").write_text("")
+    (study / "workspace" / "solver" / "core.py").write_text("k = 1\n")
+    (study / "workspace" / "unrelated.py").write_text("u = 1\n")
+    (study / "workspace" / "gen.py").write_text(
+        "from solver.core import k\n")
+    (study / "runs" / "r1" / "experiment_data").mkdir(parents=True)
+    cfg = {"evaluator_entrypoint": "workspace/gen.py:G",
+           "store_dir": str(study / "runs" / "r1" / "experiment_data")}
+    return study, cfg
+
+
+def test_oracle_revision_does_not_depend_on_what_the_process_loaded(
+        tmp_path, monkeypatch):
+    import sys
+    import types
+    from adda._src.evaluation.oracle_resolution import oracle_revision
+    study, cfg = _oracle_study(tmp_path)
+    r1 = oracle_revision(cfg, study)
+    other = study / "workspace" / "unrelated.py"
+    mod = types.ModuleType("unrelated")
+    mod.__file__ = str(other)
+    monkeypatch.setitem(sys.modules, "unrelated", mod)
+    assert oracle_revision(cfg, study) == r1
+
+
+def test_oracle_revision_follows_an_imported_study_local_module(tmp_path):
+    from adda._src.evaluation.oracle_resolution import oracle_revision
+    study, cfg = _oracle_study(tmp_path)
+    r1 = oracle_revision(cfg, study)
+    (study / "workspace" / "unrelated.py").write_text("u = 2\n")
+    assert oracle_revision(cfg, study) == r1
+    (study / "workspace" / "solver" / "core.py").write_text("k = 2\n")
+    assert oracle_revision(cfg, study) != r1

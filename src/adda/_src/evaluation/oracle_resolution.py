@@ -174,26 +174,70 @@ def load_inner_evaluator(
 # ==========================================================================
 
 
+def _local_imports(path: Path, roots: list[Path]) -> set[Path]:
+    """The ``.py`` files under ``roots`` that ``path`` imports, read from its
+    source: ``import a.b``, ``from a.b import c`` (``c`` may be a submodule)
+    and relative imports. A name that matches no local file is not local."""
+    import ast
+
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, ValueError):
+        return set()
+    found: set[Path] = set()
+
+    def add(base: Path, parts: list[str]) -> None:
+        cur = base
+        for part in parts:
+            cur = cur / part
+            init = cur / "__init__.py"
+            if init.is_file():
+                found.add(init.resolve())
+        mod = cur.with_suffix(".py")
+        if mod.is_file():
+            found.add(mod.resolve())
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                for root in roots:
+                    add(root, alias.name.split("."))
+        elif isinstance(node, ast.ImportFrom):
+            parts = node.module.split(".") if node.module else []
+            bases = roots
+            if node.level:
+                bases = [path.parent.joinpath(*[".."] * (node.level - 1))]
+            for base in bases:
+                add(base, parts)
+                for alias in node.names:
+                    add(base, parts + [alias.name])
+    return found
+
+
 def _oracle_source_files(run_config: dict, study_dir: Path) -> list[Path]:
     """The files whose bytes make up the oracle's revision: the entrypoint
-    file and every study-local module the entrypoint imported. The run
-    directory is left out. Empty for a lookup oracle or none registered."""
-    import sys
-
+    file and every study-local module it imports, directly or through
+    another. The set comes from the source (``ast``), never from what a
+    process happens to have loaded, so every process computes the same
+    revision. The run directory is left out. Empty for a lookup oracle or
+    none registered."""
     entry = run_config.get("evaluator_entrypoint")
     if run_config.get("evaluator_lookup") or not entry:
         return []
     study = Path(study_dir).resolve()
     file_part, _, _ = entry.rpartition(":")
-    files = {(study / file_part).resolve()}
+    entry_file = (study / file_part).resolve()
     run_dir = Path(run_config.get("store_dir", study)).resolve().parent
-    for mod in list(sys.modules.values()):
-        f = getattr(mod, "__file__", None)
-        if not f or not str(f).endswith(".py") or mod.__name__ == "__main__":
-            continue
-        p = Path(f).resolve()
-        if study in p.parents and run_dir not in p.parents:
-            files.add(p)
+    files = {entry_file}
+    todo = [entry_file]
+    while todo:
+        cur = todo.pop()
+        roots = list(dict.fromkeys([cur.parent, entry_file.parent, study]))
+        for p in _local_imports(cur, roots):
+            if (study in p.parents and run_dir not in p.parents
+                    and p not in files):
+                files.add(p)
+                todo.append(p)
     return sorted(files)
 
 
