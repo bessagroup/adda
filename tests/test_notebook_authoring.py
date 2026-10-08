@@ -255,3 +255,18 @@ def test_check_deliverable_sees_evals_in_a_design_namespace_only(tmp_path):
     assert "no evaluations yet" not in result, (
         f"CheckDeliverable falsely blocked a namespace-only run: {result!r}"
     )
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"content": "text"},
+    {"code": "x = 1", "why": "because"},
+    {"code": "x = 1"},
+])
+def test_a_pillar_explainer_is_never_created_on_its_own(tmp_path, kwargs):
+    """The explainer is written WITH its pillar, on both CREATE paths: a
+    standalone '<pillar>__why' cell would shadow the real one."""
+    n = _node(tmp_path)
+    out = n.adapter.closure_tools["WriteCell"]("doe__why", **kwargs)
+    assert out.startswith("ERROR:") and "WHY-explainer" in out
+    assert not (tmp_path / "pipeline.ipynb").exists() or \
+        "doe__why" not in _named(_read(tmp_path))

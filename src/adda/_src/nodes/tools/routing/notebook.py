@@ -44,6 +44,17 @@ from ....prompts.tool_catalog import tool_examples
 _PILLARS = ("doe", "data_generation", "ml", "optimization", "analysis")
 
 
+def _reserved_name_refusal(name: str, *, markdown: bool) -> str | None:
+    """The one name check both CREATE paths share. A pillar's WHY-explainer is
+    never a cell of its own, and a pillar name is a code cell, never markdown."""
+    explainer = (name.endswith("__why")
+                 and name[:-len("__why")] in _PILLARS)
+    if explainer or (markdown and name in _PILLARS):
+        return (f"ERROR: {name!r} belongs to a pillar's code cell or its "
+                "WHY-explainer — create it with `code` + `why`.")
+    return None
+
+
 def _canonical_cell_order() -> list[str]:
     """The order cells are re-emitted in: narrative spine, then pillars."""
     order = ["problem", "hypotheses"]
@@ -779,10 +790,9 @@ class NotebookTools:
         name = (name or "").strip()
         if not name:
             return "ERROR: `name` is required."
-        if name in _PILLARS or (name.endswith("__why")
-                                and name[:-len("__why")] in _PILLARS):
-            return (f"ERROR: {name!r} belongs to a pillar's code cell or its "
-                    "WHY-explainer — create it with `code` + `why`.")
+        refusal = _reserved_name_refusal(name, markdown=True)
+        if refusal:
+            return refusal
         if not (content or "").strip():
             return f"ERROR: `content` is empty for {name!r}."
         nb, nb_path = self._load_or_new_notebook()
@@ -834,6 +844,9 @@ class NotebookTools:
         # (edit/delete it), so a non-pillar phase just PROCEEDS with a tip — never
         # a refusal or a confirm. The deliverable's structure must not constrain
         # what science can be expressed.
+        refusal = _reserved_name_refusal(phase, markdown=False)
+        if refusal:
+            return refusal
         _custom_phase = phase not in _PILLARS
         if not (why or "").strip():
             return ("ERROR: `why` is required — every pillar cell needs its "
