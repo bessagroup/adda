@@ -349,16 +349,27 @@ def strip_disabled_sections(prompt: str) -> str:
 _GATE_TOKEN = re.compile(r"\[\[(?:if ([\w:]+)|(else)|(/if))\]\]")
 
 
-def gate_on(key: str) -> bool:
-    """A gate key is a feature knob, or ``node:<name>`` for graph membership."""
+def gate_on(key: str, holds: frozenset[str] | None = None) -> bool:
+    """A gate key is a feature knob, ``node:<name>`` for graph membership, or
+    ``tool:<name>`` for a tool the node being assembled holds."""
+    if key.startswith("tool:"):
+        if holds is None:
+            raise ValueError(
+                f"[[if {key}]] needs the node's tool set: pass holds= when "
+                "resolving the text a node is handed")
+        return key[5:] in holds
     if key.startswith("node:"):
         nodes = settings.graph_nodes()
         return nodes is None or key[5:] in nodes
     return enabled(key)
 
 
-def resolve_gates(text: str) -> str:
+def resolve_gates(text: str, *, holds: frozenset[str] | None = None) -> str:
     """Resolve inline ``[[if <feature>]]…[[else]]…[[/if]]`` gates.
+
+    ``[[if tool:Read]]`` is the per-node kind: true while ``holds`` (the tools
+    the node being assembled has) contains that name. Text that names a tool
+    belongs to a node only if the node holds it.
 
     ``[[if node:critic]]`` is the topology kind: true while the live graph
     contains that node (``build_graph`` records the set once; before any graph
@@ -383,7 +394,7 @@ def resolve_gates(text: str) -> str:
         pos = m.end()
         key, is_else, is_end = m.groups()
         if key is not None:
-            on = gate_on(key)
+            on = gate_on(key, holds)
             stack.append([live, on, False])
             live = live and on
         elif is_else:

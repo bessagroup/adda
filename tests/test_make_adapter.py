@@ -54,7 +54,7 @@ def test_make_adapter_entry_node_uses_run_paths_preamble(tmp_path):
     regression test below for why that distinction matters)."""
     run = _make_run(tmp_path)
 
-    agent = _agent_with_tools("Bash")
+    agent = _agent_with_tools("Bash", "WriteNote")
 
     # Patch ClaudeAdapter so we don't need real credentials
     with patch("adda._src.backends.claude.ClaudeAdapter") as MockClaude:
@@ -386,3 +386,52 @@ def test_reproduction_gate_contract_suppressed_when_reproduction_gate_false(
         assert "DELIVERABLE = pipeline.ipynb" in system_prompt  # untouched
     finally:
         settings.configure(None)
+
+
+# ---------------------------------------------------------------------------
+# A preamble line that names a tool appears only if the node holds the tool
+# ---------------------------------------------------------------------------
+
+
+def _prompt_for(tmp_path, name, tools, *, entry, outgoing):
+    run = _make_run(tmp_path)
+    with patch("adda._src.backends.claude.ClaudeAdapter") as MockClaude:
+        MockClaude.return_value = MagicMock(closure_tools={})
+        MockClaude.select_native_tools = lambda t: [x for x in t if x != "Delegate"]
+        run._graph_spec = MagicMock()
+        run._graph_spec.entry = "strategizer" if entry else "other"
+        run._graph_spec.outgoing.return_value = outgoing
+        run._make_adapter(name, _agent_with_tools(*tools))
+    return MockClaude.call_args[1]["system_prompt"]
+
+
+def test_entry_preamble_names_only_tools_the_node_holds(tmp_path):
+    held = _prompt_for(tmp_path, "strategizer", ("Read", "Bash"),
+                       entry=True, outgoing=["implementer"])
+    assert "Read() reads FILES" in held
+    assert "calling Read()" in held
+    bare = _prompt_for(tmp_path, "strategizer", ("Bash",),
+                       entry=True, outgoing=[])
+    assert "Read()" not in bare
+    assert "Workers write exclusively" not in bare
+
+
+def test_worker_preamble_names_only_tools_the_node_holds(tmp_path):
+    held = _prompt_for(tmp_path, "implementer", ("Read", "Bash"),
+                       entry=False, outgoing=[])
+    assert "get_evaluator" in held
+    assert "may Read() files" in held
+    bare = _prompt_for(tmp_path, "critic", ("Grep",), entry=False, outgoing=[])
+    assert "get_evaluator" not in bare
+    assert "Read()" not in bare
+
+
+def test_tool_gate_without_a_held_set_is_an_error():
+    from adda._src.runtime import features
+
+    with pytest.raises(ValueError):
+        features.resolve_gates("[[if tool:Read]]x[[/if]]")
+    assert features.resolve_gates(
+        "[[if tool:Read]]x[[else]]y[[/if]]", holds={"Read"}) == "x"
+    assert features.resolve_gates(
+        "[[if tool:Read]]x[[else]]y[[/if]]", holds=set()) == "y"

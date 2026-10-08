@@ -820,7 +820,7 @@ def test_run_paths_preamble_template_placeholders():
         experiment_data_dir="/a/study/runs/ts/experiment_data",
         resources="",
         knowledge="",
-        roster="",
+        roster="", path_tools="",
     )
     assert "/a/study" in result, (
         "study_dir substitution not found in result"

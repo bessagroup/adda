@@ -39,6 +39,7 @@ from .graph_builder import build_graph
 from .graph_state import AgenticState, Delegation, Report, StudyConfig, Task
 from .node_tools import (
     apply_node_config,
+    held_tools,
     record_builtins,
     record_native_expansion,
     record_resolution,
@@ -1780,10 +1781,23 @@ class AgenticRun:
         # truth (run 20260718T132852, D010's retrospective: "cost an extra
         # stat/inode-comparison round-trip to notice").
         is_entry = run_dir and name == getattr(self._graph_spec, "entry", None)
+        from ..backends.registry import get_adapter_class
+        _backend_name = resolve_node_identity(
+            agent, self._model, self._backend)[1]
+        _adapter_cls = get_adapter_class(_backend_name)
+        held = held_tools(
+            agent, native=_adapter_cls.select_native_tools(agent.tools),
+            native_set=getattr(_adapter_cls, "NATIVE_TOOLS", ()),
+            delegates=bool(self._graph_spec.outgoing(name)))
         if is_entry:
             notes_dir = Path(run_dir) / "debug" / "strategizer_notes"
             debug_dir = Path(run_dir) / "debug"
-            preamble = RUN_PATHS_PREAMBLE_TEMPLATE.format(
+            _path_tools = [f"{t}()" for t in ("Read", "WriteNote") if t in held]
+            preamble = features.resolve_gates(
+                RUN_PATHS_PREAMBLE_TEMPLATE, holds=held).format(
+                path_tools=("Use these absolute paths when calling "
+                            + " and ".join(_path_tools) + ".\n"
+                            if _path_tools else ""),
                 study_dir=self.study_dir,
                 run_dir=run_dir,
                 debug_dir=debug_dir,
@@ -1806,7 +1820,8 @@ class AgenticRun:
             # eval-parallelism nudge; the critic/datagenerator/literature get the
             # resource facts alone.
             _is_campaign = getattr(agent, "role", None) == "implementer"
-            preamble = features.resolve_gates(WORKSPACE_PREAMBLE_TEMPLATE).format(
+            preamble = features.resolve_gates(
+                WORKSPACE_PREAMBLE_TEMPLATE, holds=held).format(
                 workspace_dir=workspace_dir,
                 study_dir=self.study_dir,
                 entry=getattr(self._graph_spec, "entry", None) or "the entry agent",

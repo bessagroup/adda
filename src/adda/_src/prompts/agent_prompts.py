@@ -229,8 +229,8 @@ RUN_PATHS_PREAMBLE_TEMPLATE = """\
 study_dir             = {study_dir}
 run_dir               = {run_dir}
 debug_dir             = {debug_dir}
-strategizer_notes_dir = {notes_dir}
-[[if hypothesis_ledger]]hypotheses_json       = {notes_dir}/hypotheses.json
+[[if tool:WriteNote]]strategizer_notes_dir = {notes_dir}
+[[/if]][[if hypothesis_ledger]]hypotheses_json       = {notes_dir}/hypotheses.json
 [[/if]]delegation_log_jsonl  = {debug_dir}/delegation_log.jsonl
 diagnostics_jsonl     = {debug_dir}/diagnostics.jsonl
 canonical_store       = {experiment_data_dir}
@@ -241,18 +241,17 @@ canonical_store       = {experiment_data_dir}
   parametrizations), each its own store at a nested path — to load them all,
   use `from adda import load_experiments; experiments = load_experiments()`
   (returns {{name: ExperimentData}}; {{'default': ...}} for a single-experiment run).
-delegations_dir       = {debug_dir}/delegations
-Use these absolute paths when calling Read() and WriteNote().
-Read() reads FILES, not directories — calling it on a folder fails with EISDIR.
+[[if tool:Delegate]]delegations_dir       = {debug_dir}/delegations
+[[/if]]{path_tools}[[if tool:Read]]Read() reads FILES, not directories — calling it on a folder fails with EISDIR.
 To see what is INSIDE a directory (e.g. the store layout), use Glob('<dir>/*')
 (or `ls <dir>` via Bash if you have it), not Read.
-WriteNote also accepts a bare filename such as 'meta_errors.md',
+[[/if]][[if tool:WriteNote]]WriteNote also accepts a bare filename such as 'meta_errors.md',
 which is anchored under strategizer_notes_dir automatically.
-Workers write exclusively inside their own delegation directory,
+[[/if]][[if tool:Delegate]]Workers write exclusively inside their own delegation directory,
 delegations_dir/D###/ — NOT study_dir's own workspace/ (a different,
 study-level directory: see WORKSPACE_PREAMBLE_TEMPLATE for when a worker
 may also write there).
-{resources}</workspace>
+[[/if]]{resources}</workspace>
 {roster}{knowledge}
 """
 """The entry node's preamble, injected at the head of its system prompt for
@@ -287,18 +286,18 @@ shared, study-level directory. Write ALSO reaches study_dir/workspace/, but
 ONLY when your task explicitly names a deliverable path there (e.g. a
 problem statement asking for "workspace/model.m") — never for scratch
 files, which stay in your own D### subfolder.
-You may Read() files from other delegations' subfolders but may NOT
-write outside your own delegation subfolder or study_dir/workspace/ — the
-Write tool will reject it.
+[[if tool:Read]]You may Read() files from other delegations' subfolders but may NOT[[else]]You may NOT[[/if]]
+write outside your own delegation subfolder or study_dir/workspace/[[if tool:Write]] — the
+Write tool will reject it[[/if]].
 To access study assets (evaluator, lookup pools, etc.) use study_dir.
 Do NOT write to /tmp or any other path — files there
 will be lost and are invisible to {entry}.
-Evaluate designs ONLY through the instrumented evaluator: \
+[[if tool:Bash]]Evaluate designs ONLY through the instrumented evaluator: \
 `from adda import get_evaluator; gen = get_evaluator()` \
 — results are recorded in the run's canonical evaluation store \
 automatically. Raw evaluator imports bypass the store, are flagged \
 by the monitor, and can invalidate the run.
-{resources}</workspace>
+[[/if]]{resources}</workspace>
 [[if delegation_contract]]<delegation_contract>
 You carry out one delegated task and answer it with a Report, in the format
 your <output_format> gives.

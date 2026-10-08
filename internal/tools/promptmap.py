@@ -509,6 +509,7 @@ _PATH_STUB = {
     "notes_dir": "<study_dir>/runs/<run_id>/debug/strategizer_notes",
     "experiment_data_dir": "<study_dir>/runs/<run_id>/experiment_data",
     "workspace_dir": "<study_dir>/runs/<run_id>/debug/delegations",
+    "path_tools": "Use these absolute paths when calling <the path tools the node holds>.\n",
 }
 
 #: The two ``.format()`` fields that are whole BLOCKS of prompt text produced

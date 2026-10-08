@@ -136,6 +136,25 @@ def apply_node_config(graph: Any, nodes_cfg: Any) -> list[dict]:
     return records
 
 
+def held_tools(agent: Any, *, native: Any, native_set: Any,
+               delegates: bool) -> frozenset[str]:
+    """The tool names a node really holds: what its prompt may name.
+
+    ``native`` is what its backend picked for it (it may hold the ``Default``
+    token, which stands for ``native_set``, the backend's whole built-in set).
+    The sandboxed ``Write`` every node receives counts unless a ``nodes:``
+    list withheld it; ``Delegate`` is granted by an outgoing edge. A tool a
+    disabled feature takes away is not held.
+    """
+    from . import features
+    held = set(agent.tools) | set(native) | {"Write"}
+    if DEFAULT in held:
+        held |= set(native_set)
+    if delegates:
+        held.add("Delegate")
+    return frozenset(held) - withheld_closures(agent) - features.disabled_tool_names()
+
+
 def uses_default(tools: Any) -> bool:
     return DEFAULT in (tools or ())
 
