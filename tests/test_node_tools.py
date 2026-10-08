@@ -195,7 +195,7 @@ def test_viewer_refuses_a_secret_in_the_runtime_block():
     assert any("SEMANTIC_SCHOLAR_API_KEY" in e for e in out["errors"])
 
 
-def _live_closures(tmp_path, nodes_block):
+def _live_nodes(tmp_path, nodes_block):
     import shutil
     from pathlib import Path
 
@@ -223,10 +223,28 @@ def _live_closures(tmp_path, nodes_block):
                     interactive=False, notes_dir=ctx.notes_dir,
                     workspace_dir=ctx.workspace_dir,
                     delegation_log=ctx.delegation_log, node_registry=live)
-        return {n: set(node.adapter.closure_tools) for n, node in live.items()}
+        return live
     finally:
         logging.disable(logging.NOTSET)
         settings.configure(None)
+
+
+def _live_closures(tmp_path, nodes_block):
+    return {n: set(node.adapter.closure_tools)
+            for n, node in _live_nodes(tmp_path, nodes_block).items()}
+
+
+def test_the_handbook_menu_follows_the_handbook_tool(tmp_path):
+    """A node whose tools list withholds ConsultHandbook must not be shown a
+    menu that tells it to call ConsultHandbook; every other node keeps it."""
+    base = _live_nodes(tmp_path / "a", None)
+    cut = _live_nodes(tmp_path / "b", {"strategizer": {"tools": ["Default"]}})
+    assert "<knowledge_base>" in base["strategizer"].adapter.system_prompt
+    assert "<knowledge_base>" not in cut["strategizer"].adapter.system_prompt
+    assert "<knowledge_base>" in cut["implementer"].adapter.system_prompt
+    kept = _live_nodes(tmp_path / "c", {"strategizer": {
+        "tools": ["Default", "ConsultHandbook"]}})
+    assert "<knowledge_base>" in kept["strategizer"].adapter.system_prompt
 
 
 def test_a_config_tools_list_withholds_the_always_on_closures(tmp_path):

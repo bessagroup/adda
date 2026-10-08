@@ -1729,11 +1729,16 @@ class AgenticRun:
         except Exception:  # noqa: BLE001 — telemetry must never break a run
             return ""
 
-    def _kb_menu(self, role) -> str:
+    def _kb_menu(self, role, agent=None) -> str:
         """Audience-filtered handbook MENU injected at the head of an agent's
         prompt — so it always SEES the latent knowledge it can pull (mirroring
         how it always sees its tool list), instead of only discovering a chapter
-        if it already thought to call ConsultHandbook. Cached; empty on failure."""
+        if it already thought to call ConsultHandbook. Cached; empty on failure.
+        Empty too for a node whose ``nodes:`` list withholds ConsultHandbook: a
+        menu that names a tool the node lacks is a prompt-vs-tool contradiction."""
+        from .node_tools import withheld_closures
+        if "ConsultHandbook" in withheld_closures(agent):
+            return ""
         try:
             if getattr(self, "_kb", None) is None:
                 from ..knowledge import KnowledgeBase
@@ -1785,7 +1790,7 @@ class AgenticRun:
                 notes_dir=notes_dir,
                 experiment_data_dir=Path(run_dir) / "experiment_data",
                 resources=self._resource_stanza(run_dir, for_worker=False),
-                knowledge=self._kb_menu(_role),
+                knowledge=self._kb_menu(_role, agent),
                 roster=self._team_roster(name),
             )
             system_prompt = preamble + features.strip_disabled_sections(
@@ -1807,7 +1812,7 @@ class AgenticRun:
                 entry=getattr(self._graph_spec, "entry", None) or "the entry agent",
                 roster=self._team_roster(name),
                 resources=self._resource_stanza(run_dir, for_worker=_is_campaign),
-                knowledge=self._kb_menu(_role),
+                knowledge=self._kb_menu(_role, agent),
             )
             system_prompt = preamble + features.strip_disabled_sections(
                 agent.system_prompt)
