@@ -653,6 +653,13 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   killed mid-store leaves the old or the new file, never a torn one. Between two
   renames, input may be one batch ahead of output; every reader keys on output.
   `_f3dasm_compat.py`; test `tests/test_atomic_store.py`.
+- **Background jobs at session end:** a job a worker left running when its session
+  ends is reported, never stopped. A job is a descendant process that carries the
+  delegation's `F3DASM_DELEGATION_ID` and was not running at session start. The
+  report opens with one line per job (command, pid, end time, dead or alive at
+  delivery). Diagnostics row `BACKGROUND_JOB_AT_END`; a process whose environment
+  cannot be read is logged as `environ unreadable`, not guessed. Both backends.
+  `infra/background_jobs.py`; test `tests/test_background_jobs.py`.
 - **Status:** core.
 
 ### Design namespaces — multiple oracles + ledgers per run (#20, Axis 3)

@@ -516,6 +516,7 @@ class ClaudeAdapter:
         # ResultMessage's when the turn completed normally, else whatever
         # the last AssistantMessage carried.
         self.last_session_id: str | None = None
+        self._background_watch: Any = None
 
     def _render_system_prompt(self) -> str:
         """The system prompt exactly as the model sees it: base prompt plus
@@ -1010,6 +1011,10 @@ class ClaudeAdapter:
             if _capture:
                 _flush_partial()  # disclose a stuck/torn-down turn's tail
             self._settle_usage(last_result, _msg_usage, last_assistant)
+            _watch = getattr(self, "_background_watch", None)
+            if _watch is not None:
+                # Depth 2: the CLI itself (depth 1) is not a background job.
+                _watch.end(min_depth=2)
             aclose = getattr(gen, "aclose", None)
             if aclose:
                 try:
@@ -1127,6 +1132,7 @@ class ClaudeAdapter:
         resume: str | None = None,
         on_session_start: Any = None,
         on_session_end: Any = None,
+        background_watch: Any = None,
     ) -> str:
         """Synchronous wrapper around :meth:`ainvoke`.
 
@@ -1156,9 +1162,16 @@ class ClaudeAdapter:
         per-call output; a caller that needs ITS OWN values takes them from
         here rather than from ``last_session_id`` / ``last_usage``. Best-effort
         like ``on_session_start``.
+
+        ``background_watch``: an ``infra.background_jobs.BackgroundJobWatch``.
+        It takes its baseline here and its end snapshot inside ``ainvoke``
+        just before the CLI is closed, while the CLI's children still live.
         """
         from .base import retry_on_transient
         with self._lock:
+            self._background_watch = background_watch
+            if background_watch is not None:
+                background_watch.start()
             if on_session_start is not None:
                 try:
                     on_session_start()

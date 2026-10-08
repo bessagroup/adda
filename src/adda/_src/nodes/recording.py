@@ -247,7 +247,8 @@ class RecordingMixin:
             pass
 
     def _record_intervention(
-        self, kind: str, target: str, message: str, **extra
+        self, kind: str, target: str, message: str, *,
+        fault: str = "nudge", **extra
     ) -> None:
         """Log a scientific-correction event (a nudge/bounce firing) to
         diagnostics.jsonl — direct evidence the self-healing layer acted,
@@ -255,7 +256,9 @@ class RecordingMixin:
 
         Neutral classification: fault='nudge' — a nudge is a correction, not
         an agent error, so this must NOT bump the error/escalation counters
-        (unlike _record_tool_error). Best-effort; never raises.
+        (unlike _record_tool_error). ``fault='observation'`` is for a row that
+        only records what was seen (adda said nothing to the agent); it also
+        bumps no counter. Best-effort; never raises.
         """
         notes = self._current_notes_dir
         if notes is None:
@@ -268,7 +271,7 @@ class RecordingMixin:
             "node": target,
             "tool": kind,
             "error_type": kind,
-            "fault": "nudge",
+            "fault": fault,
             "message": message,
         }
         record.update(extra)

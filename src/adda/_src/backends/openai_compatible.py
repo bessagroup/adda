@@ -294,11 +294,13 @@ def _render(out: str, spool: str, *, exit_code=None, interrupted=False,
     return "".join(parts)
 
 
-def _shell_env() -> dict:
+def _shell_env(delegation_id: str | None = None) -> dict:
     """The agent's shell must run the SAME interpreter as the agent loop (the
     Claude backend does the same): else bare ``python`` resolves via the
     inherited PATH to whatever else is installed, e.g. a stale ``adda``."""
     env = dict(os.environ)
+    if delegation_id:
+        env["F3DASM_DELEGATION_ID"] = delegation_id
     _bin = os.path.dirname(sys.executable)
     if _bin:
         env["PATH"] = _bin + os.pathsep + env.get("PATH", "")
@@ -306,7 +308,8 @@ def _shell_env() -> dict:
 
 
 def _make_bash_tool(cwd: Path | None, nudge: Any = None,
-                    session: _BashSession | None = None) -> Any:
+                    session: _BashSession | None = None,
+                    delegation_id: Any = None) -> Any:
     import subprocess
     import tempfile
 
@@ -343,7 +346,7 @@ def _make_bash_tool(cwd: Path | None, nudge: Any = None,
         # No start_new_session: the child MUST stay in the run's process group
         # so the watchdog group-kill and governor tree-walk can reach it.
         proc = subprocess.Popen(
-            command, shell=True, cwd=sess.cwd, env=_shell_env(),
+            command, shell=True, cwd=sess.cwd, env=_shell_env(delegation_id() if delegation_id else None),
             stdout=handle, stderr=subprocess.STDOUT)
 
         def _nudge_msg():
@@ -504,12 +507,14 @@ def _guard_native(tool: Any, on_error: Any = None) -> Any:
 
 
 def _native_tool_map(cwd: Path | None, nudge: Any = None,
-                     on_error: Any = None) -> dict[str, Any]:
+                     on_error: Any = None,
+                     delegation_id: Any = None) -> dict[str, Any]:
     # One BashSession shared by Bash/BashOutput/KillShell so background shells
     # launched by Bash are visible to the companion tools.
     session = _BashSession(cwd)
     tools = {
-        "Bash":  _make_bash_tool(cwd, nudge, session=session),
+        "Bash":  _make_bash_tool(cwd, nudge, session=session,
+                                 delegation_id=delegation_id),
         "BashOutput": _make_bashoutput_tool(session),
         "KillShell":  _make_killshell_tool(session),
         "Read":  _make_read_tool(cwd),
@@ -895,7 +900,10 @@ class OpenAICompatibleAdapter:
 
         from ..prompts.tool_catalog import tool_summary
         native_map = _native_tool_map(
-            self.study_dir, self._post_tool_context, self._record_native_error)
+            self.study_dir, self._post_tool_context, self._record_native_error,
+            # A callable, not thread-local state: LangGraph runs tools on its
+            # own threads. _notice_ctx is set per invoke, on the invoking thread.
+            delegation_id=lambda: self._notice_ctx[1])
         tools: list[Any] = [
             native_map[name]
             for name in self.native_tools
@@ -1154,6 +1162,7 @@ class OpenAICompatibleAdapter:
         idle_timeout: float | None = None, retry_max: int | None = None,
         on_session_start: Any = None,
         on_session_end: Any = None,
+        background_watch: Any = None,
     ) -> str:
         """Run one full agent turn; return final assistant text.
 
@@ -1178,6 +1187,8 @@ class OpenAICompatibleAdapter:
         """
         from .base import retry_on_transient
         with self._lock:
+            if background_watch is not None:
+                background_watch.start()
             if on_session_start is not None:
                 try:
                     on_session_start()
@@ -1192,6 +1203,8 @@ class OpenAICompatibleAdapter:
                     lambda: self._invoke_once(messages), max_attempts=retry_max,
                     on_retry=getattr(self, "on_retry", None))
             finally:
+                if background_watch is not None:
+                    background_watch.end(min_depth=1)
                 if on_session_end is not None:
                     try:
                         on_session_end(

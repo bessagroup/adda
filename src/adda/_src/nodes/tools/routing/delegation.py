@@ -359,6 +359,10 @@ class WorkerSession:
         # never-reported means the adapter takes no callbacks.
         self._pending_usage: list[dict] = []
         self._usage_reported = False
+        # Observes jobs still running when the session ends (never kills).
+        from ....infra.background_jobs import BackgroundJobWatch
+        self._background_watch = BackgroundJobWatch(
+            delegation_id, ignore=self._mcp_server_signatures(worker))
         # Honour-system eval count, set by ReportEvals; reconciled against the
         # provenance-stamped ledger rows before it is believed.
         self.claimed_evals: int = 0
@@ -572,12 +576,52 @@ class WorkerSession:
         (an older/custom stub) falls back to a plain call.
         """
         cbs: dict[str, Any] = {"on_session_end": self._capture_invoke_result}
+        import inspect
+        try:
+            _params = inspect.signature(self.worker.invoke).parameters
+        except (TypeError, ValueError):
+            _params = {}
+        if "background_watch" in _params:
+            cbs["background_watch"] = self._background_watch
         if first:
             cbs["on_session_start"] = self._mark_session_started_if_queued
         try:
             return self.worker.invoke(messages, **kw, **cbs)
         except TypeError:
             return self.worker.invoke(messages, **kw)
+
+    @staticmethod
+    def _mcp_server_signatures(worker: Any) -> tuple[str, ...]:
+        """Command lines of the worker's stdio MCP servers: tool servers, not jobs."""
+        sigs: list[str] = []
+        servers = getattr(worker, "extra_mcp_servers", None) or {}
+        for cfg in servers.values():
+            if isinstance(cfg, dict) and cfg.get("command"):
+                sigs.append(" ".join(
+                    [str(cfg["command"]), *map(str, cfg.get("args") or [])]))
+        return tuple(sigs)
+
+    def _background_job_notes(self) -> str:
+        """One line per job still running at session end, plus a diagnostics
+        row each. The state is re-checked now, at delivery."""
+        try:
+            rows = self._background_watch.report_lines()
+        except Exception:  # noqa: BLE001
+            return ""
+        ended = self._background_watch.ended_at
+        lines = []
+        for job, state, text in rows:
+            self.node._record_intervention(
+                "BACKGROUND_JOB_AT_END", self.target,
+                f"{self.delegation_id}: {text}", fault="observation",
+                delegation_id=self.delegation_id, pid=job.pid,
+                command=job.command,
+                session_end=ended.isoformat(timespec="seconds")
+                if ended else None,
+                state_at_delivery=state)
+            if job.attributed:
+                lines.append(text)
+        return "\n".join(lines)
 
     def _mark_session_started_if_queued(self) -> None:
         """Patch in the real session-start time, once, for a delegation that
@@ -761,6 +805,9 @@ class WorkerSession:
                     text = text + _footer
         except Exception:  # noqa: BLE001
             pass
+        _jobs = self._background_job_notes()
+        if _jobs:
+            text = _jobs + "\n\n" + text
         return text
 
     def _mem_cap_bytes(self) -> int | None:
