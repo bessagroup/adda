@@ -720,8 +720,11 @@ class NotebookTools:
                   expected_rev: str = None, delete: bool = False) -> str:
         """Create, edit or delete ONE named cell of pipeline.ipynb.
 
-        `name` is the cell: a pillar (doe, data_generation, ml, optimization,
-        analysis), its '<pillar>__why' explainer, a narrative cell — 'problem',
+        A pillar (doe, data_generation, ml, optimization, analysis) takes
+        `code` AND `why` in ONE call. The `why` explainer is part of the
+        pillar and is never written on its own.
+
+        `name` is the cell: a pillar, a narrative cell — 'problem',
         'hypotheses' and 'verdict' get a canonical heading added for you — or
         any custom name (a bespoke section, appended after the standard
         cells). Cells stay in canonical order whatever the call order;
