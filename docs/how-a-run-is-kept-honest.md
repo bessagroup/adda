@@ -25,7 +25,7 @@ criteria, validity, deliverables.
 
 This is **advisory**. It always writes a report and it *never* blocks a run.
 If you are running interactively it may ask you up to `max_ask` clarifying
-questions; set `review_statement=False` on `AgenticRun` to skip it entirely.
+questions; set `review_statement: false` in `config.yaml` to skip it entirely.
 
 A vague brief is the single most common cause of a disappointing run, and
 this is the cheapest place to catch one—but the decision stays yours.
@@ -158,7 +158,7 @@ common causes.
 
 | What | Switch | Default |
 |---|---|---|
-| Pre-run problem-statement review | `review_statement=False` on `AgenticRun` | on (advisory) |
+| Pre-run problem-statement review | `review_statement: false` in `config.yaml` | on (advisory) |
 | Interactive prompting | `interactive=False` on `AgenticRun` | on |
 | Process milestones (both the delegation block and the close gate) | `runtime: milestones_enabled` | `true` |
 | Notebook deliverable + reproduction gate | `runtime: pipeline_deliverable` | `true` |

@@ -1058,10 +1058,8 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   `debug/problem_statement_review.md`; never blocks. Interactive runs may offer a
   per-gap refine and append accepted clarifications. Fresh runs only (skipped on
   resume and with an injected graph).
-- **Config:** `AgenticRun(review_statement=True)`.
-- **Known inconsistency (code):** the `cfg["review_statement"]` fallback applies
-  only when the caller passes `None`; the parameter defaults to `True`, so the
-  config key is effectively ignored (`agent_runtime.py`).
+- **Config:** `review_statement:` in `config.yaml` (default on); an explicit
+  `AgenticRun(review_statement=...)` argument outranks it.
 - **Where:** `epistemics/reviewer.py` (`ProblemStatementReviewerAgent`,
   `REVIEW_ELEMENTS`, `parse_review`), `runtime/agent_runtime.py::_review_problem_statement`.
   **Status:** core.
