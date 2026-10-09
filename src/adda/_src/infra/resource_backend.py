@@ -77,12 +77,13 @@ class PsutilBackend(ResourceBackend):
         try:
             proc = self._psutil.Process(pid)
             try:
-                # Seconds since boot: stable across wall-clock steps. The
-                # epoch value adds boot_time(), which Linux re-derives from
-                # the wall clock on every call, so one process can read two
-                # values a second apart.
-                return proc.create_time(monotonic=True)
-            except TypeError:
+                # psutil's own identity key: seconds since boot on Linux,
+                # stable across wall-clock steps. The public create_time()
+                # adds boot_time(), which Linux re-derives from the wall
+                # clock on every call, so one process can read two values a
+                # second apart.
+                return float(proc._get_ident()[1])
+            except Exception:  # noqa: BLE001
                 return proc.create_time()
         except self._psutil.Error:
             return None
