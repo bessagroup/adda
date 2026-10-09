@@ -806,3 +806,16 @@ without a re-sync per call. Evidence: the 2026-10-08 truss-10bar campaign ran ar
 for this reason. Wanted: `--start-index` (or `--repeat-index`) so a call can run repeat
 N only and reuse the pinned lock. Do after the campaign (freeze); the change belongs in
 adda-benchmarks, not here.
+
+## 61. Real Claude Code on qwen through ANTHROPIC_BASE_URL (vLLM /v1/messages)
+Wanted: a claude-backend node with `base_url` (per-node env ANTHROPIC_BASE_URL plus a token placeholder) so Q-off is real Claude Code on qwen. Evidence (2026-10-08, Oscar live test): vLLM 0.19.1 `/v1/messages` rejects Claude Code's first request with HTTP 400, a message with role "system" at messages[1]; vLLM accepts only user and assistant. Blocked on the server side, so the local adapter change was not pushed. Revisit with a newer vLLM or a translating proxy.
+
+## 64. Next campaign needs a metered solo arm and one hard eval cap for every arm
+The solo arm is unmetered: its self-reported num_evaluations is unreliable. Audit of
+12 valid solo runs (Haiku r2-r6, r102-r106; qwen r2, r4) found true simulator calls of
+about 1,300 to 77,000 or more, against a self-report of 119 to 1,037 (e.g. r2 119 vs
+>=65,000; r103 1000 vs ~77,300). 0 of 12 comply with the 1,000-simulation limit; both
+qwen arms also exceeded 30 min. Wanted: wrap the study simulator so every call is
+counted outside the agent's control, and enforce one hard eval cap the same way for
+every arm, so quality compares at equal budget. A hard cap needs Elvis's approval.
+Audit scripts: scratchpad `audit/`. Local note only.

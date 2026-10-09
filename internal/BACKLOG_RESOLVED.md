@@ -11,6 +11,9 @@ true when it was closed.
 
 ## Resolved
 
+- [x] **#60** Sandboxed Write routes a required deliverable to the wrong directory — *RESOLVED (`2afcad8`)* — see §60 below
+- [x] **#62** ConsultLiterature docstring names a paper_id argument that does not exist — *RESOLVED (`e9b7b04`)* — see §62 below
+- [x] **#63** The 2x wall-clock stop did not fire in a Haiku run — *RESOLVED (`d39325f`)* — see §63 below
 - [x] **#41** The whole watchdog subsystem had no local caller — a watchdog kill in this repo left no retrospective, no process reap, and a hung run ran forever — *RESOLVED 2026-09-21.* Verified directly against every function in `infra/watchdog_cleanup.py` before fixing (not inferred): `write_watchdog_retrospective`, `reap_process_group`, `read_governor_pids`/`check_memory_and_kill`, and `reap_governor_pids` all existed, were tested, and had zero production callers anywhere in the package — they ran only because the separate out-of-repo `f3dasm-agentic-benchmarks` harness called them from its own launcher; none of the 8 local `studies/*/run.py` wired any of it, and `internal/FEATURES.md`'s own "Synthetic watchdog retrospective (#12)" entry said so honestly. The maintainer's explicit decision (`paper/sections/03-method.tex`, "A wall-clock watchdog outside the run"): the timer must live OUTSIDE the run process — a backstop that is a thread inside the very process it is meant to catch cannot be trusted, since the thing most likely to be stuck (a hung model call, a wedged simulation) can wedge the watchdog thread right alongside it. Shipped `python -m adda.watchdog <study-dir> --budget <duration>` (`src/adda/_src/infra/watchdog_launcher.py`, thin top-level forwarding package `src/adda/watchdog/` mirroring `adda/viewer/`'s own convention): it runs the study as a CHILD process in its own process group, waits with a hard deadline derived from the SAME budget value the run itself resolves (`run_setup._parse_budget_str`) at a 2× floor that cannot be tightened (`resolve_deadline_seconds` raises below it), and on timeout SIGTERMs the whole child process group, escalates to SIGKILL after a short grace period, reaps any registered campaign PIDs via the existing `reap_governor_pids` (catches detached/new-session descendants a plain process-group signal misses), and appends a labelled post-mortem via the existing `write_watchdog_retrospective` — reusing every existing cleanup primitive rather than writing a second implementation of any of them. Exits `124` (distinguishable from any real exit code the run itself could produce) on a kill; propagates the run's own exit status otherwise. `python -m adda <study-dir>` itself is completely unchanged and still works exactly as before — this is an additional, safer way to launch the same run, not a replacement. Headless-tested against a trivial sub-second child (`tests/test_watchdog_launcher.py`) covering: a fast child is left alone and its exit status propagates; a slow child is killed and the timeout reported distinguishably; a GRANDCHILD process is also reaped (not just the direct child); a post-mortem lands in `retrospectives.jsonl` labelled `role="watchdog"`/`source_id="WATCHDOG"`, never as first-person text; and the 2× arithmetic itself is asserted directly so it cannot be silently tightened later. **What is still NOT wired by this fix, deliberately:** BACKLOG #22 (stall detection via `seconds_since_last_activity` — "liveness = file written, not progress made") is a *separate* signal this launcher does not consult; the deadline here is a flat 2×-budget hard stop, not a liveness check, so a run that stalls early but stays within budget is not caught until the deadline — matching CLAUDE.md §4's "science budgets stay SOFT... the one approved hard cap" framing, since this timer is the one approved exception and #22 was never part of its scope.
 - [x] **#27** `pipeline_deliverable: false` doesn't suppress the notebook-deliverable prompt injection — *RESOLVED (`744f38b`)*. `notebook_deliverable_spec()` (`notebook_exec.py:92`) was appended to the strategizer's system prompt unconditionally (no `pipeline_deliverable` check) and states "DELIVERABLE = pipeline.ipynb... this SUPERSEDES every... instruction above" — overriding even a `PROBLEM_STATEMENT.md` that explicitly says there is no pipeline deliverable. The knob only suppressed the `CRAFT_PIPELINE` milestone nudge (`nodes/strategizer.py:137`), a soft nudge, not this harder-worded injection. Found running `mathexpert_kinematic_matching_test` (run `20260903T130138`): the strategizer wrote `pipeline.ipynb` anyway and failed the reproduction gate. Fixed by gating the injection itself on `settings.get_bool("pipeline_deliverable", True)` (`agent_runtime.py`).
 - [x] **#28** `nbformat.write` crashes with `AttributeError: outputs` on a hand-authored notebook — *RESOLVED (`bf2c9f1`)*. `WriteDeliverable`'s `.ipynb` validation used only `nbformat.reads()`, which accepts a code cell missing `outputs` with no validation error (confirmed empirically — `normalize()` doesn't backfill it either); the malformed cell reached disk verbatim and crashed every later `nbformat.write` through that file (`split_lines` in nbformat's own `rwbase.py` unconditionally iterates `cell.outputs` for `cell_type=="code"`). Found in `mathexpert_kinematic_matching_test` run `20260903T130138` (cost $1.84, 0 evals, ended FAILED) — downstream of #27 (the strategizer authored `pipeline.ipynb` raw, bypassing `AddPipelineCell`, which never has this gap). Fixed with a shared `repair_code_cells()` helper (`notebook_exec.py`) called at every `nbformat.read`/`reads()` site that can observe an externally-authored notebook.
@@ -376,3 +379,34 @@ full-field edit lacking `expected_rev` (an optimistic-concurrency guard) → one
 recurrence before treating as a fix.
 
 ---
+
+## 60. Sandboxed Write routes a required deliverable to the wrong directory
+The entry node's sandboxed Write (`build_sandboxed_write`) roots a bare relative path at
+`<run>/debug/delegations`. A config `required_deliverables` name such as `design.json` is
+checked at `<study>/<name>`, so the write reports "Written" and the file lands where the
+check never looks. Evidence: the 2026-10-08 solo `design.json` misplacement. Wanted: the
+sandboxed Write maps a required-deliverable name to the study dir. Not needed for a
+Default node, which now keeps the native Write.
+
+**Resolved 2026-10-09 (`2afcad8`).** The sandboxed Write maps a bare name equal to a required deliverable's basename to the study dir (`build_sandboxed_write`: `deliverable_dir`, `deliverable_names`).
+
+## 62. ConsultLiterature docstring names a paper_id argument that does not exist
+The docstring (`agents/literature_tools/corpus.py`, "A paper_id from that list → the full
+extracted ... text") reads as if the tool takes `paper_id=`. The parameter is `query`. A
+Haiku node called `ConsultLiterature(paper_id=...)` 3 times: TypeError, ERROR_RETURN.
+Evidence: campaign H-on r1, arm `truss-10bar__baseline__r1__20261008T222037`,
+diagnostics 02:28:25-26Z. Wanted (after the freeze): say "pass the paper_id as the
+query", or rename the parameter. Affects every adda arm equally. Local note only.
+
+**Resolved 2026-10-09 (`e9b7b04`).** `ConsultLiterature` now takes `paper_id`; the docstring and examples match.
+
+## 63. The 2x wall-clock stop did not fire in a Haiku run
+adda's 2x wall-clock stop did not fire in Haiku run doe_playbook r1: wall_s 5435 (90.6 min),
+3.0x the 30-minute limit. Only one DELEGATE_CUTOFF (1.5x) is in diagnostics.jsonl; a
+delegation and the gate outlived the 2x mark. Evidence: Oscar (read-only),
+`arms-haiku/truss-10bar__doe_playbook__r1__20261008T222058`, run 20261009T022110,
+run_status.json wall_s and diagnostics.jsonl error_type counts (DELEGATE_CUTOFF 1,
+no 2x event). Wanted: find why the 2x check did not run while a delegation and the
+gate were in flight. Local note only; no fix yet.
+
+**Resolved 2026-10-09 (`d39325f`).** Cause: a CLI-backend turn is one long session, so the between-turn check never ran with a delegation or gate in flight. The time backstop is now also checked at every stop checkpoint and by one daemon timer per run.
