@@ -74,6 +74,11 @@ WAIT_TAIL_INTERRUPT = (
 SAVE_TURN = (
     "WIND-DOWN, step 2 of 3: save every result not yet stored. Write a note "
     "that names each file and how it was produced. Then go to step 3.")
+DONE_TURN_NO_DONE = (
+    "WIND-DOWN, step 3 of 3 (forced turn {n} of {k}): write the deliverable "
+    "from what exists, then end your turn. Mark unfinished work as "
+    "unfinished; claim nothing that did not run. The reproduction "
+    "gate runs once and the critic reviews once. There is no rework.")
 DONE_TURN = (
     "WIND-DOWN, step 3 of 3 (forced turn {n} of {k}): write the deliverable "
     "from what exists, then call Done() with your summary. Mark unfinished "
@@ -85,6 +90,14 @@ PENDING_REFUSAL = (
 REVIEW_PREFACE = (
     "[WIND-DOWN REVIEW — the budget is spent. This is the only review "
     "this run gets. There is no rework: judge what exists.]\n\n")
+
+
+def _without_done(text: str) -> str:
+    """The close texts ask for a final call to ``Done()``; a node that does
+    not hold it is asked to reply instead."""
+    return (text.replace("Call Done() ONE more time with",
+                         "Reply ONE more time with")
+            .replace("then call Done() again", "then end your turn again"))
 
 
 class WindDownMixin:
@@ -136,8 +149,9 @@ class WindDownMixin:
                 Path(self._current_run_dir) / "debug", self._wd_started_at)
         fields = {"budget": rules.budget_phrase(), "limit": limit}
         with self._notifications_lock:
-            self._notifications.append(
-                "[" + HUB_NOTICE.format(**fields) + "]")
+            self._notifications.append("[" + (
+                HUB_NOTICE if self._holds("Done") else WORKER_NOTICE
+            ).format(**fields) + "]")
         run_dir = self._current_run_dir
         live: list[str] = []
         if run_dir is not None:
@@ -239,8 +253,11 @@ class WindDownMixin:
             return _say(SAVE_TURN)
         n = self._wd_step_turns["done"] = self._wd_step_turns["done"] + 1
         if n <= k:
-            return _say(DONE_TURN.format(n=n, k=k))
+            return _say((DONE_TURN if self._holds("Done")
+                         else DONE_TURN_NO_DONE).format(n=n, k=k))
         text = FeedbackTools(self)._close_wound_down(str(ai_msg.content), "")
+        if not self._holds("Done"):
+            text = _without_done(text)
         return _say(text, forced=False)
 
     def _wind_down_finish(self) -> None:

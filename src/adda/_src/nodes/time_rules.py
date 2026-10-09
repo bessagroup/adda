@@ -165,7 +165,7 @@ class TimeRulesMixin:
             return
         self._record_intervention(
             "TIME_" + phase.split(":")[0].upper(), "(run)",
-            rules.notice(phase, prog, can_call_done=True),
+            rules.notice(phase, prog, can_call_done=self._holds("Done")),
             fault="observation")
         if features.enabled("budget_notes"):
             self._time_broadcast(phase, prog)
@@ -173,7 +173,8 @@ class TimeRulesMixin:
     def _time_broadcast(self, phase: str, prog: _rules.Progress) -> None:
         """The notice to the entry node and to every running delegation."""
         rules = self._time_rules
-        entry_text = rules.notice(phase, prog, can_call_done=True)
+        entry_text = rules.notice(
+            phase, prog, can_call_done=self._holds("Done"))
         worker_text = rules.notice(phase, prog, can_call_done=False)
         with self._notifications_lock:
             self._notifications.append(f"[TIME — {entry_text}]")
@@ -201,8 +202,8 @@ class TimeRulesMixin:
         prog = self._time_progress(entry)
         if prog.fraction < rules.fraction_of(_rules.CUTOFF):
             return None
+        text = rules.cutoff_refusal(prog, can_call_done=self._holds("Done"))
         self._record_intervention(
             "DELEGATE_CUTOFF", "(refused)",
-            "new delegation refused: " + rules.cutoff_refusal(prog),
-            fault="observation")
-        return "ERROR: " + rules.cutoff_refusal(prog)
+            "new delegation refused: " + text, fault="observation")
+        return "ERROR: " + text

@@ -1137,9 +1137,12 @@ class OrchestrationMixin:
         working = self._working_delegations()
         if not working:
             return None
+        collect = "collect them with Wait" if self._holds("Wait") else (
+            "let them finish")
+        close = "call Done()" if self._holds("Done") else "end your turn"
         msg = (
             f"Delegations still running: {working}. They are"
-            " progressing — collect them with Wait and call Done() only"
+            f" progressing — {collect} and {close} only"
             " once they report (then write any remaining deliverables"
             " from their results). Do NOT close early. This wait does"
             " NOT count against your finish attempts; the wind-down at"
@@ -1168,21 +1171,28 @@ class OrchestrationMixin:
         problems: list[str] = []
         if missing:
             missing_list = "\n".join(f"- {p}" for p in missing)
+            write = ("Write them via WriteDeliverable()"
+                     if self._holds("WriteDeliverable")
+                     else "Write them to the study directory")
+            then = ("calling Done()" if self._holds("Done")
+                    else "ending your turn")
             problems.append(
                 "Required deliverables are missing from the"
                 f" study directory:\n{missing_list}\n"
-                "Write them via WriteDeliverable() before"
-                " calling Done()."
+                f"{write} before {then}."
             )
         if not accepted:
             working = self._working_delegations()
             if working:
+                collect = ("Collect them with Wait" if self._holds("Wait")
+                           else "Let them finish")
+                close = ("call Done()" if self._holds("Done")
+                         else "end your turn")
                 problems.append(
                     f"Delegations still running: {working}."
-                    " Collect them with Wait and call Done()"
-                    " once they finish."
+                    f" {collect} and {close} once they finish."
                 )
-            else:
+            elif self._holds("Done"):
                 problems.append(
                     "You ended your turn without an accepted"
                     " Done(). If Done() was refused (critic"
@@ -1190,6 +1200,11 @@ class OrchestrationMixin:
                     " gate), address the refusal and call Done()"
                     " again. A run only closes through an"
                     " accepted Done()."
+                )
+            else:
+                problems.append(
+                    "You ended your turn before the work was finished."
+                    " Finish it, then end your turn."
                 )
         return Command(
             goto=self._name,
@@ -1204,6 +1219,13 @@ class OrchestrationMixin:
                 ],
             },
         )
+
+    def _holds(self, tool: str) -> bool:
+        """Whether this node was handed the adda tool ``tool``.
+
+        Every text adda writes to a node names only tools the node holds.
+        """
+        return tool in self.adapter.closure_tools
 
     def _working_delegations(self) -> list[str]:
         """Delegation ids still in flight right now."""

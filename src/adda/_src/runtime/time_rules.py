@@ -244,11 +244,12 @@ class TimeRules:
             self._parts()) > 1 else ""
         return f"{text}. The wind-down begins at {self.budget_phrase()}{first}."
 
-    def cutoff_refusal(self, p: Progress) -> str:
-        return (
-            "No new delegations: " + self._clock(p)
-            + " This delegation was NOT started. Wait() for the running "
-            "ones, then write your deliverables and call Done().")
+    def cutoff_refusal(self, p: Progress, *, can_call_done: bool = True) -> str:
+        then = ("Wait() for the running ones, then write your deliverables "
+                "and call Done()." if can_call_done else
+                "Let the running ones finish, then report what you have.")
+        return ("No new delegations: " + self._clock(p)
+                + " This delegation was NOT started. " + then)
 
     def notice(self, phase: str, p: Progress, *, can_call_done: bool) -> str:
         end = ("call Done()" if can_call_done
