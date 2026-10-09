@@ -50,7 +50,7 @@ def test_budget_notes_off_silences_warnings_and_snapshot():
 
 
 def test_reprompt_unfinished_off_lets_the_run_end_and_drops_the_banner():
-    node = SimpleNamespace(_finish_attempts=0)
+    node = SimpleNamespace(_finish_attempts=0, _silent=False)
     settings.configure({})
     held = orchestration.OrchestrationMixin._reprompt_unfinished
     _off("reprompt_unfinished")

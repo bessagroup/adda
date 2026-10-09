@@ -36,7 +36,8 @@ class TimeRulesMixin:
 
     def _time_rules_ensure(self) -> Any | None:
         """The rules for this node's clock, built once from the settings."""
-        if self._time_rules is None and self._run_start is not None:
+        if (self._time_rules is None and self._run_start is not None
+                and not self._silent):
             self._time_rules = _rules.TimeRules.from_settings(
                 self._budget_seconds, token_clock.budget(),
                 getattr(self, "_eval_budget", None))

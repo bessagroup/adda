@@ -1101,6 +1101,17 @@ hook (neither the raw-oracle nudge nor the store notices); no disallowed tools.
 The CLI keeps `setting_sources=[]`, `bypassPermissions`, the session env, cwd and
 the stream buffer.
 
+**`ClaudeCodeAgent`** (`agents/claude_code.py`, exported from `adda`): the same plain
+node as a class, `Graph(nodes={"solo": ClaudeCodeAgent()}, edges=(), entry="solo")`.
+The first message is the statement byte for byte (no `Human:` prefix); the system
+prompt is the stock `claude_code` preset (no `--append-system-prompt`); later turns
+resume the one live session and send only the new text; `BASH_DEFAULT_TIMEOUT_MS` is
+not set (the CLI default, 120000 ms in 2.1.294, applies). `Node._silent` (same
+`is_plain_default` test) turns off the per-turn notices, re-prompts, constraint
+refresh, TimeRules and wind-down; the backend stream-break stop
+(`token_clock.trigger`) ends the session when any set wall or token budget reaches
+100%. Tests: `tests/test_claude_code_agent.py`.
+
 `Default` is a token (a class `tools` set may hold it too). On the Claude backend
 a node holding it gets the CLI's whole default built-in set (SDK preset
 `claude_code`) and NONE of the floor that blocks WebSearch, WebFetch, Task and

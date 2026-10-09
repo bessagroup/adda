@@ -146,8 +146,12 @@ class Node(
         # Plain Claude Code (Default tools + Default prompt) is handed no
         # adda closure at all, whatever the topology would otherwise grant.
         from ..runtime.node_tools import is_plain_default
-        if is_plain_default(
-                spec.nodes.get(name) if spec is not None else None):
+        #: A plain Claude Code node is run by its own session: adda sends it
+        #: the statement and nothing after (no notice, no re-prompt, no
+        #: wind-down). The backend ends it at a budget (``token_clock``).
+        self._silent = is_plain_default(
+            spec.nodes.get(name) if spec is not None else None)
+        if self._silent:
             self.adapter.closure_tools.clear()
 
     def __call__(self, state: AgenticState) -> Any:

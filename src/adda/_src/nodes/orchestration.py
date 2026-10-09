@@ -945,6 +945,8 @@ class OrchestrationMixin:
         tell the runtime's nudge from the human's brief, and the viewer cannot
         style it as anything else.
         """
+        if self._silent:
+            return _to_adapter_messages(state["messages"])
         injected = (
             self._constraint_refresh()
             + budget_warnings
@@ -1163,7 +1165,8 @@ class OrchestrationMixin:
         from langgraph.types import Command
 
         from ..runtime import features
-        if (accepted and not missing) or self._finish_attempts >= 3:
+        if (accepted and not missing) or self._finish_attempts >= 3 \
+                or self._silent:
             return None
         if not features.enabled("reprompt_unfinished"):
             return None

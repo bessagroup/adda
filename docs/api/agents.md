@@ -19,3 +19,5 @@ The specialist roles the strategizer delegates to.
 ::: adda.DebuggerAgent
 
 ::: adda.MathExpertAgent
+
+::: adda.ClaudeCodeAgent

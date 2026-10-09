@@ -175,17 +175,22 @@ def _run_async_safe(coro: Any) -> Any:
         return asyncio.run(coro)
 
 
+def _message_text(m: dict) -> str:
+    content = m.get("content", "")
+    if isinstance(content, list):
+        content = " ".join(
+            c.get("text", "") if isinstance(c, dict) else str(c)
+            for c in content
+        )
+    return content
+
+
 def _format_messages_as_prompt(messages: list[dict]) -> str:
     """Convert LangChain-style message dicts to a plain conversation string."""
     parts: list[str] = []
     for m in messages:
         role = m.get("role", "user")
-        content = m.get("content", "")
-        if isinstance(content, list):
-            content = " ".join(
-                c.get("text", "") if isinstance(c, dict) else str(c)
-                for c in content
-            )
+        content = _message_text(m)
         if role in ("human", "user"):
             prefix = "Human"
         elif role in ("ai", "assistant"):
@@ -377,8 +382,12 @@ async def _stream_with_idle_timeout(
         yield msg
 
 
-def _build_session_env() -> dict:
+def _build_session_env(plain: bool = False) -> dict:
     """Per-session env vars injected into the worker subprocess (thread-local).
+
+    ``plain`` (a plain Claude Code session) leaves the Bash timeout at the
+    CLI's own default (``BASH_DEFAULT_TIMEOUT_MS`` unset; 120000 ms in CLI
+    2.1.294).
 
     - ``F3DASM_DELEGATION_ID`` (race-safe) so get_evaluator() resolves without
       the worker cd-ing into its D### dir (audit Finding 2).
@@ -421,9 +430,10 @@ def _build_session_env() -> dict:
     _bin = os.path.dirname(sys.executable)
     if _bin:
         env["PATH"] = _bin + os.pathsep + os.environ.get("PATH", "")
-    from ..runtime.settings import get_float as _get_float
-    env["BASH_DEFAULT_TIMEOUT_MS"] = str(
-        int(_get_float("bash_timeout_s", 120.0) * 1000))
+    if not plain:
+        from ..runtime.settings import get_float as _get_float
+        env["BASH_DEFAULT_TIMEOUT_MS"] = str(
+            int(_get_float("bash_timeout_s", 120.0) * 1000))
     did = get_delegation_id()
     if did:
         env["F3DASM_DELEGATION_ID"] = did
@@ -537,6 +547,7 @@ class ClaudeAdapter:
         # ResultMessage's when the turn completed normally, else whatever
         # the last AssistantMessage carried.
         self.last_session_id: str | None = None
+        self._session_id: str | None = None
         self._background_watch: Any = None
         self._session_token: str | None = None
 
@@ -546,7 +557,8 @@ class ClaudeAdapter:
         keeps Claude Code's prompt and appends the text."""
         text = self._render_system_prompt()
         if self.base_prompt == DEFAULT_PROMPT:
-            return {"type": "preset", "preset": "claude_code", "append": text}
+            return {"type": "preset", "preset": "claude_code",
+                    **({"append": text} if text.strip() else {})}
         return text
 
     def _render_system_prompt(self) -> str:
@@ -564,6 +576,35 @@ class ClaudeAdapter:
             bare: f"mcp__{_CLOSURE_MCP_SERVER}__{bare}"
             for bare in self.closure_tools
         })
+
+    @property
+    def plain_session(self) -> bool:
+        """True when this adapter runs plain Claude Code: the CLI's own tools
+        and system prompt, nothing of adda's. Its session gets the statement
+        as typed and later turns resume it (``_turn_prompt``)."""
+        return self.use_default_tools and self.base_prompt == DEFAULT_PROMPT
+
+    def _turn_prompt(self, messages: list[dict]) -> tuple[str, str | None]:
+        """``(prompt, resume)`` for this turn.
+
+        An adda node gets the whole conversation flattened to one string,
+        each turn labelled ``Human:`` / ``Assistant:``. A plain session gets
+        its first user message byte for byte, and every later turn only the
+        user text that follows the last assistant message, in the session
+        this adapter already opened (``resume``).
+        """
+        if not self.plain_session:
+            return _format_messages_as_prompt(messages), None
+        texts = [_message_text(m) for m in messages]
+        roles = [m.get("role", "user") for m in messages]
+        users = [t for t, r in zip(texts, roles, strict=True) if r in ("human", "user")]
+        if self._session_id is None:
+            return users[0], None
+        last_ai = max((i for i, r in enumerate(roles)
+                       if r in ("ai", "assistant")), default=-1)
+        return "\n\n".join(
+            t for t, r in zip(texts[last_ai + 1:], roles[last_ai + 1:], strict=True)
+            if r in ("human", "user")), self._session_id
 
     def _compute_allowed_tools(self, qualified_mcp_tools) -> list[str]:
         """All allowed tool names, ALWAYS as a list (never None).
@@ -598,6 +639,7 @@ class ClaudeAdapter:
         twin.last_usage = {}
         twin._attempt_usages = None
         twin.last_session_id = None
+        twin._session_id = None
         return twin
 
     def interrupt(self) -> list[dict]:
@@ -796,7 +838,7 @@ class ClaudeAdapter:
         # Per-session env: the SDK MERGES this over the inherited environment
         # (PATH etc. preserved), so bare extra keys are safe. See
         # _build_session_env for what is injected and why.
-        _sess_env: dict = _build_session_env()
+        _sess_env: dict = _build_session_env(plain=_plain)
         if self._session_token:
             _sess_env[_interrupt.SESSION_TOKEN_ENV] = self._session_token
 
@@ -814,6 +856,9 @@ class ClaudeAdapter:
             except Exception:  # noqa: BLE001 — best-effort; spawn surfaces real errors
                 pass
 
+        prompt_str, _next = self._turn_prompt(messages)
+        if resume is None:
+            resume = _next
         options = ClaudeAgentOptions(
             system_prompt=self._system_prompt_option(),
             model=self.model,
@@ -853,8 +898,6 @@ class ClaudeAdapter:
                 if resume is not None else {}
             ),
         )
-
-        prompt_str = _format_messages_as_prompt(messages)
 
         last_assistant = None
         last_result: Any = None
@@ -1233,6 +1276,8 @@ class ClaudeAdapter:
             getattr(last_result, "session_id", None)
             or getattr(last_assistant, "session_id", None)
         )
+        if self.plain_session and self.last_session_id:
+            self._session_id = self.last_session_id
         if self._attempt_usages is not None:
             self._attempt_usages.append(dict(self.last_usage))
 
