@@ -112,17 +112,18 @@ def build_corpus_read_closures(corpus) -> dict:
     @tool_examples(
         "ConsultLiterature()",
         "ConsultLiterature('lattice buckling under axial compression', limit=5)",
-        "ConsultLiterature('<a paper_id from the list>')",
+        "ConsultLiterature(paper_id='<a paper_id from the list>')",
     )
-    def ConsultLiterature(query: str = "", limit: int = 10, offset: int = 0):
+    def ConsultLiterature(query: str = "", limit: int = 10, offset: int = 0,
+                          paper_id: str = ""):
         """Read the study's literature corpus. It is shared across every run
         of the study, so it may already hold a prior run's answer — look here
         before searching the databases again.
 
         No argument → what is in it: every paper with its paper_id, each
         tagged [full-text] or [abstract-only] so you know which you may quote
-        from. A paper_id from that list → the full extracted, page-annotated
-        text of that paper. Anything else → passage search across the
+        from. `paper_id` (a paper_id from that list) → the full extracted,
+        page-annotated text of that paper. `query` → passage search across the
         full-text papers, best match first, up to `limit`.
 
         Papers enter the corpus only when [[if node:literature_reviewer]]the literature reviewer adds them[[else]]an
@@ -132,9 +133,13 @@ def build_corpus_read_closures(corpus) -> dict:
 
         A paper's text is returned in pages; the end of a page says the
         `offset` to call again with for the next one."""
-        return _cap_result(corpus.consult(query, int(limit)), offset,
-                           f"ConsultLiterature({query!r}, limit={limit}, offset=",
-                           _PAGE_CHARS)
+        if paper_id.strip():
+            text = corpus.get_paper(paper_id.strip())
+            label = f"ConsultLiterature(paper_id={paper_id.strip()!r}, offset="
+        else:
+            text = corpus.consult(query, int(limit))
+            label = f"ConsultLiterature({query!r}, limit={limit}, offset="
+        return _cap_result(text, offset, label, _PAGE_CHARS)
 
     # Lets orchestration.py's _wrap_closure (the one place with both a
     # per-run diagnostics path and a handle back here) notice, once per run,

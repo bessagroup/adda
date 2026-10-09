@@ -131,3 +131,27 @@ def test_lit_reviewer_notes_dir_override_respected_by_default(tmp_path):
     tools["ConsultLiterature"]()
     assert custom_dir.is_dir()
     assert not (tmp_path / "runs" / "lit_reviewer_notes").exists()
+
+
+def test_consult_literature_accepts_paper_id_as_a_keyword():
+    """Agents call ConsultLiterature(paper_id=...), the name the list output
+    and the docstring use; the argument must exist and read that one paper."""
+    import inspect
+
+    from adda._src.agents.literature_tools.corpus import (
+        build_corpus_read_closures,
+    )
+
+    class _Corpus:
+        def consult(self, query, limit):
+            return f"consult:{query}:{limit}"
+
+        def get_paper(self, paper_id):
+            return f"paper:{paper_id}"
+
+    fn = build_corpus_read_closures(_Corpus())["ConsultLiterature"]
+    assert "paper_id" in inspect.signature(fn).parameters
+    assert "paper_id" in (fn.__doc__ or "")
+    assert fn(paper_id="arxiv_2401.00001").startswith("paper:arxiv_2401.00001")
+    assert fn("buckling", limit=3).startswith("consult:buckling:3")
+    assert fn().startswith("consult::")
