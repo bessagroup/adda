@@ -819,3 +819,7 @@ qwen arms also exceeded 30 min. Wanted: wrap the study simulator so every call i
 counted outside the agent's control, and enforce one hard eval cap the same way for
 every arm, so quality compares at equal budget. A hard cap needs Elvis's approval.
 Audit scripts: scratchpad `audit/`. Local note only.
+
+## 65. Two leftovers from the SIGINT flake work (2026-10-09)
+1. `viewer/run_control.py` keeps a persisted epoch `create_time` and compares it with a 1.0 s tolerance. A wall-clock step larger than that makes the viewer treat a live run process as a different process. `resource_backend.proc_start_time` already uses psutil's monotonic identity (af9a31e); run_control should use the same key.
+2. `Node` arms wind-down timers but only `agent_runtime._finalize_run` cancels them. A caller that runs a node outside `agent_runtime` leaks the timers into the process. Tests must cancel by hand (245aa7d).
