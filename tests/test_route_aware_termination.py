@@ -587,3 +587,70 @@ def test_readnote_rejects_paths_escaping_study_dir(tmp_path):
     for r in results:
         assert "outside the study directory" in r, (
             f"escape not contained, got: {r!r}")
+
+
+def test_time_backstop_fires_from_a_checkpoint_inside_a_running_turn(tmp_path):
+    """A CLI turn is one long session, so the between-turn check never runs
+    while a delegation or gate is in flight. A stop checkpoint (tool result,
+    Wait tick) must raise the time backstop itself: one stop request carrying
+    BACKSTOP_TIME and one BACKSTOP_WIND_DOWN row, and only one of each."""
+    import json
+
+    from adda._src.nodes import Node
+
+    run_dir = tmp_path / "study" / "runs" / "T"
+    (run_dir / "debug").mkdir(parents=True)
+    node = Node(StubAdapter(), name="strategizer",
+                outgoing=["implementer"], spec=_minimal_spec())
+    node._current_notes_dir = run_dir / "debug" / "strategizer_notes"
+    node._budget_seconds = 10
+    node._run_start = time.time() - 100
+
+    notice = node._stop_tick()
+    node._stop_tick()
+
+    req = json.loads((run_dir / "debug" / "stop_request.json").read_text())
+    assert req["by"] == "backstop"
+    assert req["termination"] == terminal.BACKSTOP_TIME
+    assert "RUN STOP" in notice and "time backstop" in notice
+    rows = [json.loads(line) for line in
+            (run_dir / "debug" / "diagnostics.jsonl").read_text().splitlines()]
+    kinds = [r.get("error_type") for r in rows]
+    assert kinds.count("BACKSTOP_WIND_DOWN") == 1
+    assert kinds.count("RUN_BACKSTOP") == 1
+
+
+def test_time_backstop_checkpoint_is_quiet_before_the_multiple(tmp_path):
+    from adda._src.nodes import Node
+
+    run_dir = tmp_path / "study" / "runs" / "T"
+    (run_dir / "debug").mkdir(parents=True)
+    node = Node(StubAdapter(), name="strategizer",
+                outgoing=["implementer"], spec=_minimal_spec())
+    node._current_notes_dir = run_dir / "debug" / "strategizer_notes"
+    node._budget_seconds = 100
+    node._run_start = time.time() - 150
+
+    assert node._stop_tick() == ""
+    assert not (run_dir / "debug" / "stop_request.json").exists()
+
+
+def test_time_backstop_timer_fires_with_no_checkpoint(tmp_path):
+    """No tool result and no Wait tick (a gate review in flight): the timer
+    alone writes the backstop's stop request at the deadline."""
+    from adda._src.nodes import Node
+
+    run_dir = tmp_path / "study" / "runs" / "T"
+    (run_dir / "debug").mkdir(parents=True)
+    node = Node(StubAdapter(), name="strategizer",
+                outgoing=["implementer"], spec=_minimal_spec())
+    node._current_notes_dir = run_dir / "debug" / "strategizer_notes"
+    node._budget_seconds = 10
+    node._run_start = time.time() - 100
+    node._start_backstop_timer()
+
+    req = run_dir / "debug" / "stop_request.json"
+    deadline = time.time() + 5
+    while not req.exists() and time.time() < deadline:
+        time.sleep(0.05)
+    assert req.exists()

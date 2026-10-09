@@ -97,6 +97,9 @@ class OrchestrationMixin:
         # Budget state — set at the start of each __call__ from AgenticState
         self._budget_seconds: float | None = None
         self._run_start: float | None = None
+        self._backstop_timer: Any = None
+        self._backstop_requested = False
+        self._backstop_tick_lock = threading.Lock()
         self._stop: dict | None = None
         # Hard USD cost ceiling (None = inactive). Set each __call__ from state.
         self._budget_usd: float | None = None
@@ -837,6 +840,7 @@ class OrchestrationMixin:
         # Store on node so the status poll can compute delegation timeout
         self._budget_seconds = state.get("budget_seconds")
         self._run_start = state.get("start_time")
+        self._start_backstop_timer()
         self._budget_usd = state.get("budget_usd")
 
         # Capture total_delegations so Delegate() can seed the counter.

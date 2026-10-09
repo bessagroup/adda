@@ -102,6 +102,7 @@ class StopMixin:
         Only the node that runs a turn (the one holding the run's start
         time) acts; a worker node's checkpoints leave the request alone.
         """
+        self._time_backstop_tick()
         stop = self._stop
         if stop is None:
             run_dir = self._current_run_dir

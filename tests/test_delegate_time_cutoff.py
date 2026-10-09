@@ -92,12 +92,12 @@ def test_below_cutoff_delegate_works():
 def test_past_cutoff_refuses_and_fires_no_delegation():
     n = _node()
     n._budget_seconds = 100.0
-    n._run_start = time.time() - 200.0  # 2.0x budget, past default 1.5x cutoff
+    n._run_start = time.time() - 160.0  # 1.6x budget: past the 1.5x cutoff, before the 2x backstop
     before = dict(n._registry)
     out = _delegate(n)
     assert out.startswith("ERROR"), out
     assert "1.5" in out
-    assert "150s" in out or "200s" in out  # elapsed/budget figures present
+    assert "160s" in out  # elapsed/budget figures present
     assert n._registry == before, "no new delegation should be registered"
 
 
@@ -116,7 +116,7 @@ def test_past_cutoff_wait_and_done_still_work():
     did = _extract_id(out)
 
     # Now cross the cutoff.
-    n._run_start = time.time() - 200.0
+    n._run_start = time.time() - 160.0
 
     # A NEW delegation is refused...
     refused = _delegate(n)
@@ -147,7 +147,7 @@ def test_in_flight_delegation_untouched_by_cutoff():
     did = _extract_id(out)
 
     # Cross the cutoff mid-flight.
-    n._run_start = time.time() - 200.0
+    n._run_start = time.time() - 160.0
 
     n._threads[did].join(timeout=5)
     with n._registry_lock:
@@ -187,7 +187,7 @@ def test_cutoff_refusal_emits_diagnostic(tmp_path):
     debug_dir.mkdir(parents=True)
     n._current_notes_dir = debug_dir / "notes"
     n._budget_seconds = 100.0
-    n._run_start = time.time() - 200.0
+    n._run_start = time.time() - 160.0
 
     _delegate(n)
 

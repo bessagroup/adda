@@ -229,8 +229,9 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   drained by N calls; it refuses when nothing is in flight, and refuses rather
   than hanging when every in-flight delegation is open for review (finalize with
   `SendMessage(id, …, approve=True)`) or has already died without reporting
-  (read with `Wait(id, block=False)`) (a blocking call ends no turn, so the run's
-  time backstop cannot fire while inside it). A blocked `Wait` (bare or by id)
+  (read with `Wait(id, block=False)`) (a blocking call ends no turn, so the between-turn
+  check cannot run inside it; the time backstop is raised at every `Wait` tick
+  and by a timer instead). A blocked `Wait` (bare or by id)
   also RETURNS EARLY when an operator note or a science-monitor message
   arrives — delivered in-band with a "still in flight" line, nothing harvested
   — so a human's correction or a live nudge is never held unread behind a
@@ -1870,7 +1871,14 @@ its own `termination` (`backstop_time` / `backstop_usd` / `repeated_errors`),
 so the run winds down, collects every retrospective and closes with that
 value (banner "HALTED", not "STOPPED"). The wind-down is bounded: past
 `grace_s` for workers plus an equal allowance for the entry node, or if the
-request cannot be written, the old hard halt fires. A turn that raises during
+request cannot be written, the old hard halt fires. The time backstop does
+not wait for a turn boundary: a CLI-backend turn is one long session, so it is
+also checked at every stop checkpoint (each tool result, each `Wait` tick) and
+by one daemon timer per run set for `run_backstop_multiple` x the time budget;
+either writes the same single stop request and `BACKSTOP_WIND_DOWN` row, so a
+run is asked to wind down at 2x even with a delegation or a gate review in
+flight (`nodes/lifecycle.py`: `_time_backstop_tick`, `_start_backstop_timer`).
+A gate review already inside its own model call still finishes that call. A turn that raises during
 the wind-down closes anyway. Whoever never gave a retrospective is logged by
 delegation id (`RETROSPECTIVES_MISSING`). After a USD cap fires the wind-down
 spends a little more; that is accepted. **Where:** `infra/stop_request.py`,

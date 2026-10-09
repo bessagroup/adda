@@ -2734,10 +2734,10 @@ class DelegationTools:
                     ("Working", "OpenForReview", "Revising")
                 )
                 # Classify what is actually still capable of finishing.
-                # A blocking tool call ends no turn, so the run's time
-                # backstop cannot fire while we are in here (same trap
-                # ReadNote guards against) — this loop must therefore
-                # never be able to wait on something that will never
+                # A blocking tool call ends no turn, so the between-turn
+                # backstop check cannot run while we are in here (the
+                # stop tick and the timer cover the time backstop) — this
+                # loop must therefore never be able to wait on something that will never
                 # arrive. A thread that has died without recording a
                 # terminal status is exactly that: nothing else in the
                 # runtime marks the registry on its behalf. OPEN-FOR-
