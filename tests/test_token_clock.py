@@ -357,3 +357,77 @@ def test_a_wall_budget_next_to_the_token_clock_stops_the_run_at_construction(
         "budget_clock: output_tokens\ntoken_budget: 5000\n")
     with pytest.raises(ValueError, match="two limits"):
         AgenticRun(tmp_path, budget=60)
+
+
+# -- plain Claude Code: the operator ends the session at the cap --------------
+
+def _plain_stream(consumed):
+    """A fake CLI stream: three API calls of 60 output tokens each."""
+    from tests.test_claude_adapter import _StreamEvent
+
+    def ev(**e):
+        m = _StreamEvent()
+        m.event = e
+        return m
+
+    async def _query(prompt, options):
+        _query.options = options
+        for i in range(3):
+            consumed.append(i)
+            yield ev(type="message_start", message={"id": f"m{i}", "usage": {}})
+            yield ev(type="message_delta", usage={"output_tokens": 60})
+    return _query
+
+
+def _plain_adapter(query):
+    from adda._src.backends.base import DEFAULT_PROMPT, DEFAULT_TOOLS
+    from tests.test_claude_adapter import _get_adapter, _install_fake_sdk
+    _install_fake_sdk(
+        query=query, HookMatcher=lambda hooks: SimpleNamespace(hooks=hooks))
+    a = _get_adapter()("claude-3", "", None, [DEFAULT_TOOLS])
+    a.base_prompt = DEFAULT_PROMPT
+    return a
+
+
+def test_the_plain_arm_is_stopped_when_the_count_reaches_the_cap():
+    token_clock.configure(100)
+    consumed: list[int] = []
+    q = _plain_stream(consumed)
+    a = _plain_adapter(q)
+    a.invoke([{"role": "user", "content": "go"}])
+    assert consumed == [0, 1], "the third call is never read"
+    stop = token_clock.stop_info()
+    assert stop["output_tokens_used"] == 120 and stop["tokens_over"] == 20
+    assert not q.options.get("hooks"), "the plain arm still builds no hook"
+
+
+def test_an_adda_node_is_not_stopped_by_the_stream_at_the_cap():
+    from tests.test_claude_adapter import _get_adapter, _install_fake_sdk
+    token_clock.configure(100)
+    consumed: list[int] = []
+    _install_fake_sdk(query=_plain_stream(consumed))
+    _get_adapter()("claude-3", "sys", None, []).invoke(
+        [{"role": "user", "content": "go"}])
+    assert consumed == [0, 1, 2] and token_clock.stop_info() is None
+
+
+def test_a_plain_stop_ends_the_run_with_no_notice_and_records_it(tmp_path):
+    from tests.test_route_aware_termination import (
+        StubAdapter, _make_state, _minimal_spec)
+
+    from adda._src.runtime import terminal
+    study = tmp_path / "study"
+    study.mkdir()
+    (study / "pipeline.ipynb").write_text("# t\n")
+    token_clock.configure(100)
+    token_clock.note_stop()
+    node = Node(StubAdapter(response="partial"), name="strategizer",
+                outgoing=["implementer"], spec=_minimal_spec())
+    cmd = node(_make_state(study_dir=study))
+    assert cmd.update["done"] and cmd.update["termination"] == (
+        terminal.TOKEN_BUDGET)
+    assert cmd.update["outcome"] == terminal.UNGATED
+    assert [m for m in cmd.update["messages"] if m.type == "human"] == []
+    stop = token_clock.stop_info()
+    assert stop["deliverables_present"] == ["pipeline.ipynb"]
+    assert stop["deliverables_missing"] == []

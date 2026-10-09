@@ -67,7 +67,7 @@ def test_an_unaccepted_close_is_still_recorded_ungated_with_reprompts_off():
     node = SimpleNamespace(
         _registry_lock=threading.Lock(), _delegation_seq=0, _seq_at_turn_start=0,
         _registry={}, _route={}, _token_totals={}, _error_counts={},
-        _banner=lambda *a: orchestration.OrchestrationMixin._banner(node, *a),
+        _banner=lambda *a, **k: orchestration.OrchestrationMixin._banner(node, *a, **k),
         _flush_ghost_delegations=lambda: None,
         _ledgered_eval_total=lambda n: n)
     state = {"total_delegations": 0, "evals_used": 0}

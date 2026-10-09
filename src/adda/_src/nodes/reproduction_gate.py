@@ -52,7 +52,13 @@ def _headline_consistency(stdout: str) -> str | None:
 
 class ReproductionGateMixin:
     def _missing_deliverables(self, state: AgenticState) -> list[str]:
-        """Return required deliverable paths not present at study_dir yet.
+        """Return required deliverable paths not present at study_dir yet."""
+        return self._deliverable_status(state)[1]
+
+    def _deliverable_status(
+        self, state: AgenticState
+    ) -> tuple[list[str], list[str]]:
+        """``(present, missing)``: the required deliverables at study_dir.
 
         The single deliverable (pipeline.ipynb) is required, authored before
         Done() is accepted, UNLESS the study turns off pipeline_deliverable —
@@ -83,15 +89,15 @@ class ReproductionGateMixin:
                 not self._tools_declared or self._agent_tools & NOTEBOOK_TOOLS):
             required = [required_deliverable_name()] + required
         seen: set[str] = set()
+        present: list[str] = []
         missing: list[str] = []
         for p in required:
             name = Path(p).name
             if name in seen:
                 continue
             seen.add(name)
-            if not (study_dir / name).exists():
-                missing.append(name)
-        return missing
+            (present if (study_dir / name).exists() else missing).append(name)
+        return present, missing
 
     def _reproduction_gate(self, state: AgenticState | None = None) -> str | None:
         """Before Done() can close a run — and on every RunNotebook(gate=True)

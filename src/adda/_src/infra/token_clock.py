@@ -29,6 +29,7 @@ _budget: int | None = None
 _used = 0
 _seen: dict[str, int] = {}
 _listeners: list[Callable[[], None]] = []
+_stop: dict | None = None
 
 
 def parse(cfg: dict) -> int | None:
@@ -65,12 +66,13 @@ def parse(cfg: dict) -> int | None:
 def configure(budget: int | None, seed: int = 0) -> None:
     """Start the counter for one run. ``seed`` is the count already spent when
     a run resumes. ``None`` switches the token clock off."""
-    global _budget, _used
+    global _budget, _used, _stop
     with _lock:
         _budget = budget
         _used = int(seed) if budget else 0
         _seen.clear()
         _listeners.clear()
+        _stop = None
 
 
 def enabled() -> bool:
@@ -83,6 +85,29 @@ def budget() -> int | None:
 
 def used() -> int:
     return _used
+
+
+def exhausted() -> bool:
+    """True once the count has reached the budget (never on the wall clock)."""
+    return _budget is not None and _used >= _budget
+
+
+def note_stop(**extra: object) -> dict:
+    """Record that a backend stopped its session at the budget (the plain
+    Claude Code arm: it has no wind-down, so the operator ends it). Keeps the
+    first record's count at the stop and tokens over the budget; later calls
+    add their extra fields."""
+    global _stop
+    with _lock:
+        if _stop is None:
+            _stop = {"output_tokens_used": _used,
+                     "tokens_over": max(0, _used - (_budget or 0))}
+        _stop.update(extra)
+        return dict(_stop)
+
+
+def stop_info() -> dict | None:
+    return dict(_stop) if _stop is not None else None
 
 
 def on_change(callback: Callable[[], None]) -> None:

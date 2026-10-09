@@ -1189,6 +1189,9 @@ class AgenticRun:
         output_tokens_used = token_clock.used() if token_clock.enabled() else (
             tokens.get("output_tokens"))
         token_budget = token_clock.budget()
+        cap_stop = token_clock.stop_info() or {}
+        if cap_stop:
+            output_tokens_used = cap_stop["output_tokens_used"]
         token_clock.configure(None)
         cost = tokens.get("total_cost_usd")
         cost_str = f"${cost:.4f}" if cost is not None else "n/a"
@@ -1249,6 +1252,12 @@ class AgenticRun:
             # from file mtimes and gets a different answer.
             wall_s=round(elapsed, 1),
             output_tokens_used=output_tokens_used, token_budget=token_budget,
+            **({"tokens_over": cap_stop.get("tokens_over", 0),
+                "deliverables_present": cap_stop.get(
+                    "deliverables_present", []),
+                "deliverables_missing": cap_stop.get(
+                    "deliverables_missing", [])}
+               if termination == terminal.TOKEN_BUDGET else {}),
             **({"overrun_s": round(max(0.0, elapsed - self._budget), 1)}
                if getattr(self, "_budget", None) else {}),
             **({"wind_down_turns": wind_down.get("forced_turns", 0),

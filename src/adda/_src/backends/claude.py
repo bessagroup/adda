@@ -860,6 +860,7 @@ class ClaudeAdapter:
         last_result: Any = None
         _buffer_overflowed = False
         _deliberate_break = False
+        _cap_stop = False
         _msg_usage: dict[str, dict] = {}
         _cur_msg_id: list[str | None] = [None]
         _counted = [0]
@@ -1012,6 +1013,13 @@ class ClaudeAdapter:
                         getattr(msg, "event", None), _msg_usage, _cur_msg_id)
                     _counted[0] += _count_output_tokens(
                         getattr(msg, "event", None), _cur_msg_id)
+                    if _plain and token_clock.exhausted():
+                        # Nothing is sent to the agent: the operator ends
+                        # the session, as when a user presses Esc. Closing
+                        # the stream (aclose below) takes the CLI down.
+                        token_clock.note_stop()
+                        _cap_stop = True
+                        break
                 elif isinstance(msg, AssistantMessage) \
                         and getattr(msg, "usage", None) \
                         and getattr(msg, "message_id", None):
@@ -1114,7 +1122,8 @@ class ClaudeAdapter:
         # orphaning whatever the first attempt launched, with nothing
         # logged anywhere. This does not change that return behaviour (a
         # future decision, pending Elvis) — it only makes the fact visible.
-        if last_result is None and not _deliberate_break and not _buffer_overflowed:
+        if (last_result is None and not _deliberate_break
+                and not _buffer_overflowed and not _cap_stop):
             _last_tool = None
             if last_assistant is not None:
                 for _b in last_assistant.content:

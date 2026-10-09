@@ -1501,9 +1501,14 @@ because a worker can run on another host. `infra/host_provenance.py`; test
 - **Watchdog:** stays on wall time (host safety). With no wall budget there is
   no multiple: `watchdog_wall_s` is the absolute deadline, required by
   `python -m adda.watchdog` on this clock; `--budget` is refused there.
-- **Plain Claude Code arm:** counted by the same stream accounting and
-  recorded, not enforced: no hook, no notices, no wind-down. The CLI has no
-  token cap (only `--max-budget-usd`, in dollars); it is not wired in.
+- **Plain Claude Code arm:** counted by the same stream accounting (per
+  message end). When the count reaches `token_budget`, adda ends the session
+  as an operator would with Esc: the stream loop breaks and the generator is
+  closed (`query()` has no interrupt handle). No hook, no notice, no
+  wind-down, no gate, no re-prompt. `run_status.json` records termination
+  `token_budget`, `output_tokens_used`, `tokens_over` (overshoot past the cap)
+  and `deliverables_present` / `deliverables_missing`. The CLI's own
+  `--max-budget-usd` (dollars) is not wired in.
 - **Where:** `infra/token_clock.py`; `runtime/time_rules.py` (`tokens`);
   `nodes/time_rules.py`; `runtime/agent_runtime.py`;
   `infra/watchdog_launcher.py`; `studies/run_ledger.py`.

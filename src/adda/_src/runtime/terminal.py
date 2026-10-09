@@ -41,6 +41,7 @@ __all__ = [
     "BACKEND_UNAVAILABLE",
     "KILLED",
     "STOPPED",
+    "TOKEN_BUDGET",
     "TERMINATIONS",
     "HALT_TERMINATIONS",
     "ungated_banner",
@@ -67,11 +68,12 @@ CRASHED = "crashed"                  # unhandled exception
 BACKEND_UNAVAILABLE = "backend_unavailable"  # the LLM endpoint stayed unreachable
 KILLED = "killed"                    # external supervisor (wall-clock watchdog)
 STOPPED = "stopped"                  # operator/watchdog stop request, wound down
+TOKEN_BUDGET = "token_budget"        # plain Claude Code stopped at the token cap
 
 TERMINATIONS = (
     DONE, NO_CLOSE, TIME_BUDGET, BACKSTOP_USD,
     REPEATED_ERRORS, RECURSION_LIMIT, CRASHED, KILLED, STOPPED,
-    BACKEND_UNAVAILABLE,
+    BACKEND_UNAVAILABLE, TOKEN_BUDGET,
 )
 
 # Terminations that mean the run was stopped rather than finished. None of
@@ -84,6 +86,7 @@ TERMINATIONS = (
 HALT_TERMINATIONS = (
     BACKSTOP_USD, REPEATED_ERRORS,
     RECURSION_LIMIT, CRASHED, KILLED, STOPPED, BACKEND_UNAVAILABLE,
+    TOKEN_BUDGET,
 )
 
 

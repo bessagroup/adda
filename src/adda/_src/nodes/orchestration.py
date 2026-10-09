@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 from ..epistemics.hypothesis_ledger import HypothesisLedger
 from ..epistemics.science_monitor import ScienceMonitor
+from ..infra import token_clock
 from ..infra import wind_down as _wind_down
 from ..infra.delegation_log import DelegationLog
 from .notices import insert_notice, wrap_notice
@@ -1110,11 +1111,18 @@ class OrchestrationMixin:
         no separate post-accept repro check here; this handles only deliverable
         presence and un-accepted termination.
         """
+        from ..runtime import terminal
         held = self._wind_down_route(state, ai_msg)
         if held is not None:
             return held
         accepted = self._route.get("kind") == "done"
-        missing = self._missing_deliverables(state)
+        present, missing = self._deliverable_status(state)
+        if token_clock.stop_info() is not None:
+            token_clock.note_stop(
+                deliverables_present=present, deliverables_missing=missing)
+            return self._terminate_run(
+                state, ai_msg, False, missing,
+                termination=terminal.TOKEN_BUDGET)
         for router in (self._reprompt_while_working,
                        self._reprompt_unfinished):
             held = router(ai_msg, accepted, missing)
@@ -1221,7 +1229,8 @@ class OrchestrationMixin:
             ]
 
     def _terminate_run(
-        self, state: AgenticState, ai_msg: Any, accepted: bool, missing: list
+        self, state: AgenticState, ai_msg: Any, accepted: bool, missing: list,
+        termination: str | None = None,
     ) -> Any:
         """Close the run: final counts, banner, ghost flush, terminal Command."""
         from langgraph.graph import END
@@ -1236,7 +1245,8 @@ class OrchestrationMixin:
             evals_new = sum(e["evals"] for e in self._registry.values())
 
         summary = self._banner(
-            self._route.get("summary") or ai_msg.content, accepted, missing)
+            self._route.get("summary") or ai_msg.content, accepted, missing,
+            stopped=termination)
         self._flush_ghost_delegations()
 
         # The persisted (reported) eval total prefers the ledger aggregate over
@@ -1253,7 +1263,8 @@ class OrchestrationMixin:
         _outcome, _termination, _reviewed = terminal.resolve(
             self._route.get("outcome")
             if accepted and not missing else terminal.UNGATED,
-            self._route.get("termination") if accepted else terminal.NO_CLOSE,
+            termination or (self._route.get("termination") if accepted
+                            else terminal.NO_CLOSE),
             self._route.get("reviewed"),
         )
         return Command(
@@ -1272,7 +1283,8 @@ class OrchestrationMixin:
             },
         )
 
-    def _banner(self, summary: str, accepted: bool, missing: list) -> str:
+    def _banner(self, summary: str, accepted: bool, missing: list,
+                stopped: str | None = None) -> str:
         """Prepend the UNGATED banner when the run ends without an accepted Done().
 
         A FAILED-reproduction close carries its own ⛔ banner in the route
@@ -1284,7 +1296,9 @@ class OrchestrationMixin:
                 "reprompt_unfinished"):
             return summary
         flags = []
-        if not accepted:
+        if stopped == terminal.TOKEN_BUDGET:
+            flags.append("the session was stopped at the output-token budget")
+        elif not accepted:
             flags.append(
                 "the run terminated WITHOUT an accepted Done() —"
                 " the final conclusions did NOT pass the"

@@ -103,8 +103,11 @@ writes nothing in their place. `debug/run_status.json` carries `overrun_s`
 not finished `runtime: wind_down_interrupt_after_s` (default `300`) seconds
 after the wind-down began gets SIGINT, only to processes the node itself
 started. A plain Claude Code arm (`Default` tools and prompt) has no
-wind-down: it gets no notices and no gate, and only the external watchdog
-bounds it. These checks run inside the run, so they cannot help if it has
+wind-down: it gets no notices and no gate. On `budget_clock: output_tokens`
+adda ends its session when the count reaches `token_budget`, with no message
+to the agent; `run_status.json` then records termination `token_budget`,
+`tokens_over` and the deliverables present or missing. On the wall clock only
+the external watchdog bounds it. These checks run inside the run, so they cannot help if it has
 genuinely wedged; for that, launch under the external watchdog (twice the
 budget)—see
 [Launching under a watchdog](author-a-study.md#launching-under-a-watchdog).
