@@ -594,7 +594,12 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   only the store is a copy; the study root is read-only reference code. The three
   duplicated sandbox-env blocks are unified in one `sandbox_env()` helper. It also
   sets `F3DASM_DEDUP_SCOPE=all` (+ a synthetic `D999` delegation id) so a replay
-  dedups against every delegation's rows.
+  dedups against every delegation's rows. Agents' own Bash and script sessions
+  (both backends) get the same variable, set to the run's study dir from
+  `run_config.json` and overriding any value the launcher's shell exported; an
+  overridden inherited value writes one `STUDY_ROOT_OVERRIDDEN` diagnostics row
+  per distinct pair (`backends/base.py` `pin_study_root`, called from
+  `claude._build_session_env` and `openai_compatible._shell_env`).
 - **Where:** `evaluation/notebook_exec.py` `sandbox_env`, `replay_sandbox` (gate
   and viewer replay); `nodes/tools/routing/notebook.py` `_ledger_sandbox`
   (RunNotebook, RunScratch). The copy-store logic exists twice.

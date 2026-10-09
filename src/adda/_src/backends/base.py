@@ -141,6 +141,44 @@ def record_stream_diagnostic(event_type: str, message: str, **extra: Any) -> Non
         pass
 
 
+_study_root_overrides_logged: set[tuple[str, str]] = set()
+
+
+def pin_study_root(env: dict, run_config_path: str | None = None) -> None:
+    """Set ``F3DASM_STUDY_ROOT`` in an agent session's env to this run's study
+    dir (read from the run's run_config.json), whatever the launcher's shell
+    had exported. The agents' deliverable instructions tell them to anchor
+    paths on this variable, so a stale inherited value sends them to another
+    study's tree. Logs ``STUDY_ROOT_OVERRIDDEN`` once per distinct pair when an
+    inherited value differs. ``run_config_path`` is for callers on a thread the
+    run context is not bound to (tool threads). Does nothing when no run
+    context is available."""
+    rc = run_config_path or get_run_config_path()
+    if not rc:
+        return
+    try:
+        study = json.loads(Path(rc).read_text(encoding="utf-8")).get("study_dir")
+    except Exception:  # noqa: BLE001
+        return
+    if not study:
+        return
+    study = str(study)
+    inherited = os.environ.get("F3DASM_STUDY_ROOT")
+    env["F3DASM_STUDY_ROOT"] = study
+    if inherited and inherited != study and (
+            (inherited, study) not in _study_root_overrides_logged):
+        _study_root_overrides_logged.add((inherited, study))
+        try:
+            append_diagnostic(
+                Path(rc).parent, get_delegation_id() or "",
+                "STUDY_ROOT_OVERRIDDEN",
+                f"inherited F3DASM_STUDY_ROOT={inherited!r} replaced by this "
+                f"run's study dir {study!r} in the agent session env",
+                inherited=inherited, study_dir=study)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 @contextmanager
 def bind_run_context(label: str | None, run_config_path: str | None):
     """Bind this thread's diagnostics label + run_config path for one call,

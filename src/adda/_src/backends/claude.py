@@ -377,6 +377,8 @@ def _build_session_env() -> dict:
       directly; without this the var is empty in the worker shell, so a campaign
       defaults to the wrong namespace and can overwrite another delegation's
       scratch data (audit run 20260624T021359, D005→D006 sim-dir clobber).
+    - ``F3DASM_STUDY_ROOT`` — this run's study dir (see ``pin_study_root``);
+      overrides any value inherited from the launcher's shell.
     - ``CLAUDE_CODE_DISABLE_AUTO_MEMORY`` — the bundled CLI injects the
       developer's personal auto-memory index (keyed off cwd, unrelated to this
       run) into every agent turn. ``ClaudeAgentOptions.setting_sources=[]``
@@ -392,6 +394,7 @@ def _build_session_env() -> dict:
         get_delegation_id,
         get_namespace,
         get_run_config_path,
+        pin_study_root,
     )
     env: dict = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
     # The agent's shell must run the SAME interpreter as the agent loop, so
@@ -425,6 +428,7 @@ def _build_session_env() -> dict:
                 env["F3DASM_CANONICAL_STORE"] = str(store)
         except Exception:  # noqa: BLE001 — best-effort, never fatal
             pass
+    pin_study_root(env)
     return env
 
 
