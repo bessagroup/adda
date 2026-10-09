@@ -767,7 +767,11 @@ def test_delegation_still_working_returns_working_status(monkeypatch):
     state["budget_seconds"] = 5.0
     state["start_time"] = now[0]
 
-    cmd = node(state)
+    try:
+        cmd = node(state)
+    finally:
+        # The budget's wind-down timer would otherwise fire in a later test.
+        node._time_rules_cancel()
     assert cmd.goto == END
     assert status_seen and status_seen[0].startswith("Working"), (
         f"Expected 'Working...', got: {status_seen[0]!r}"
