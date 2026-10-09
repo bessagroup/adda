@@ -48,7 +48,7 @@ default. The keys you set most often are:
 ```yaml
 model: claude-haiku-4-5-20251001   # which language model to use
 eval_budget: 200                   # soft cap on real evaluations
-budget: "01:00:00"                 # soft wall-clock limit
+budget: "01:00:00"                 # wall-clock limit; the run hard-stops at 100%
 ```
 
 Put settings for your own scripts under `study:`, which adda never reads.
@@ -201,7 +201,7 @@ AgenticRun(study_dir="studies/example_study").execute()
 
 ## Launching under a watchdog
 
-`budget` and `run_backstop_multiple` (described earlier) are both checked from *inside*
+`budget` and its wind-down (`wind_down_at`, described earlier) are both checked from *inside*
 the run, so neither can help if the run genuinely wedges—a hung model call,
 a stuck simulation—and never reaches its own next check. For that, launch
 the study as a child process under an external watchdog instead: it owns the
@@ -214,7 +214,7 @@ python -m adda.watchdog studies/example_study --budget 00:45:00
 
 The deadline is twice whatever budget you give it (or `config.yaml`'s own
 `budget:` if you don't pass `--budget`)—plenty of headroom, since this is a
-last-resort cutoff for a hang, not a way to police a slow run. `python -m
+last-resort cutoff for a hang, not a way to police a slow run. The run's own wind-down at 100% of the budget comes first; the watchdog acts only if the run is still alive at 200%. `python -m
 adda <study-dir>` on its own still works exactly as before; this is an
 additional, safer way to launch the same run when you want a hard outer
 backstop.

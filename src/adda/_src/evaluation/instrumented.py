@@ -151,8 +151,12 @@ class InstrumentedDataGenerator(DataGenerator):
         eval_budget: Optional[int] = None,
         dedup_scope: str = "delegation",
         oracle_rev: Optional[str] = None,
+        stop_after: Optional[float] = None,
     ) -> None:
         self.inner = inner
+        # Epoch seconds from which a live evaluation is refused (the run's
+        # graceful stop). A validation replay (dedup_scope="all") is exempt.
+        self.stop_after = stop_after
         self.oracle_rev = oracle_rev
         self.store_dir = Path(store_dir)
         if dedup_scope not in ("delegation", "all"):
@@ -262,6 +266,12 @@ class InstrumentedDataGenerator(DataGenerator):
         # solver-config kwarg into experiment_sample._input_data as a side
         # effect must not make that column part of this design's identity
         # (see _coord_key's own docstring; real bug, run 20260927T012131).
+        if (self.stop_after is not None and self.dedup_scope == "delegation"
+                and time.time() >= self.stop_after):
+            raise RuntimeError(
+                "ERROR: no new evaluations: the time budget is spent and the "
+                "run is in its graceful stop. Write up what you have; the "
+                "ledger already holds every finished evaluation.")
         _submitted_key = self._coord_key(experiment_sample._input_data)
         _t0 = time.perf_counter()
         try:

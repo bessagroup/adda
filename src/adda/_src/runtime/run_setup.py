@@ -18,6 +18,7 @@ from pathlib import Path
 import yaml  # available via hydra-core
 
 from ..evaluation._f3dasm_compat import PROTECTED_STORE_SENTINEL
+from ..infra.interrupt import register_store_lock
 from . import settings as _settings
 
 __all__ = [
@@ -227,6 +228,7 @@ def _init_canonical_store(
                 "(the first arms stay recorded as arms_initial).")
         drift_from = prior_arms
 
+    register_store_lock(store_dir / "experiment_data" / ".lock")
     config: dict = {
         "store_dir": str(store_dir),
         # Co-locate the lock with the data (store_dir/experiment_data/) so
@@ -354,6 +356,7 @@ def register_evaluator_entrypoint(
         ns_store = base_store / namespace
         ns_store.mkdir(parents=True, exist_ok=True)
         (ns_store / PROTECTED_STORE_SENTINEL).touch()
+        register_store_lock(ns_store / "experiment_data" / ".lock")
         oracles = config.setdefault("oracles", {})
         oracles[namespace] = {
             "store_dir": str(ns_store),

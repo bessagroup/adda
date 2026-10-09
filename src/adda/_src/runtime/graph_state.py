@@ -40,7 +40,7 @@ class AgenticState(MessagesState):
     # banner, which is how a backstop halt used to read as a validated
     # success. Vocabulary + fail-safe resolution live in runtime.terminal.
     outcome: str | None       # GATED | UNGATED | FAILED
-    termination: str | None   # done | backstop_time | crashed | …
+    termination: str | None   # done | time_budget | crashed | …
     reviewed: bool | None     # a critic gate actually ran
 
 

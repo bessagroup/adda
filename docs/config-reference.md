@@ -15,7 +15,7 @@ reads.
 |---|---|---|
 | `model` | The language model to use. | The backend's default. |
 | `backend` | `claude`, `ollama`, `openrouter`, or `vllm`. | `claude` |
-| `budget` | Soft wall-clock limit, as `"HH:MM:SS"` or seconds. It is a nudge, not a hard stop. | none |
+| `budget` | Wall-clock limit, as `"HH:MM:SS"` or seconds. It is the real limit: new delegations stop at 75%, every node is told to wrap up at 90%, and the run is hard-stopped at 100% (`runtime:` keys in the [runtime reference](runtime-reference.md)). | none |
 | `eval_budget` | Soft cap on how many real evaluations the run may spend. | none |
 | `budget_usd` | **Hard** cost ceiling. The run halts when spend reaches it, and you can raise it and resume. Inactive on a backend with no per-call cost data, such as Ollama. | none |
 | `required_deliverables` | Extra files that must exist before the run can finish. | none |

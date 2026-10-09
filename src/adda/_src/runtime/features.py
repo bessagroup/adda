@@ -228,10 +228,11 @@ FEATURES: tuple[Feature, ...] = (
         key="budget_notes",
         default=True,
         # In-band budget text only: the per-turn constraint snapshot, the
-        # budget warnings and wrap-up ladder, the snapshot a delegation report
-        # and a worker's task message carry. The budgets themselves stay SOFT
-        # and the backstop is untouched; the critic still receives the
-        # constraints it judges against.
+        # eval-budget warning, the time notices from 0.75*B, the snapshot a
+        # delegation report and a worker's task message carry. The delegation
+        # cutoff at 0.9*B and the wind-down at B (its refusals and its forced
+        # turns) are rules in code and do not depend on it; the critic still
+        # receives the constraints it judges against.
         behaviours=("budget_notes",),
     ),
     Feature(

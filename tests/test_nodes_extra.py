@@ -158,8 +158,9 @@ def test_ask_for_feedback_absent_without_critic():
 # ---------------------------------------------------------------------------
 
 
-def test_getstatus_includes_budget_warning_when_over_80_pct():
-    """GetStatus() on a Working delegation surfaces BUDGET when >80% elapsed."""
+def test_getstatus_carries_the_time_notice_past_the_cutoff():
+    """Wait(block=False) on a Working delegation carries the time notice once
+    the clock is past the delegation cutoff (75%)."""
     from adda._src.nodes import Node
 
     getstatus_results: list[str] = []
@@ -181,6 +182,7 @@ def test_getstatus_includes_budget_warning_when_over_80_pct():
             )
             did = re.search(r"D\d{3}", did_str).group(0)
             delegation_started.wait(timeout=2)
+            node._run_start = time.time() - 92.0  # 92% elapsed, delegation running
             result = self.closure_tools["Wait"](did, block=False)
             getstatus_results.append(result)
             self.closure_tools["Done"](summary="partial")
@@ -194,16 +196,17 @@ def test_getstatus_includes_budget_warning_when_over_80_pct():
         adapter, name="strategizer", outgoing=["implementer"], spec=spec,
         worker_adapters={"implementer": worker},
     )
-    # Pass budget via state so __call__ picks it up (budget=100s, started 85s ago)
-    run_start = time.time() - 85.0
+    # Pass budget via state so __call__ picks it up (budget=100s, started 10s
+    # ago; the test moves the clock to 85% once the delegation is running)
+    run_start = time.time() - 10.0
     state = _make_state(budget_seconds=100.0)
     state["start_time"] = run_start
     node(state)
 
     assert getstatus_results
-    # At least one GetStatus result should mention BUDGET
-    assert any("BUDGET" in r for r in getstatus_results), (
-        f"Expected BUDGET in GetStatus results, got: {getstatus_results}"
+    assert any("[TIME" in r and "No new delegations" in r
+               for r in getstatus_results), (
+        f"Expected the time notice in the poll result, got: {getstatus_results}"
     )
 
 

@@ -4,7 +4,7 @@ Covers:
 - Bounded re-prompt on unaccepted termination (max 3 attempts)
 - UNGATED banner on exhausted attempts
 - Accepted Done() → clean END with no banner
-- Run-level cost backstop (elapsed > RUN_BACKSTOP_MULTIPLE * budget)
+- Run-level wind-down (elapsed >= wind_down_at * budget)
 - Working delegations survive loopbacks
 - Ledger duplicate-statement guard
 - ReadNote directory guard
@@ -198,10 +198,23 @@ def _halt_after_wind_down(node, state, run_dir):
     return first, req, node(state)
 
 
-def test_run_backstop_halts_resumable_past_multiple(tmp_path):
-    """Past RUN_BACKSTOP_MULTIPLE x budget: invoke skipped, the run HALTS
-    cleanly and resumably — a HALTED banner is prefixed (conclusion kept
-    below it) and debug/run_status.json marks it resumable."""
+def _run_to_the_end(node, state, limit=12):
+    """Drive the entry node turn by turn, as the graph does, until it closes."""
+    for _ in range(limit):
+        cmd = node(state)
+        if cmd.goto == END:
+            return cmd
+        state["messages"] = list(state["messages"]) + list(
+            cmd.update["messages"])
+    raise AssertionError("the wind-down never closed")
+
+
+def test_the_wind_down_closes_ungated_at_the_budget(tmp_path):
+    """At the time budget nothing is killed: the entry node is walked through
+    save and Done, the close runs ONE reproduction gate, and the run ends
+    TIME_BUDGET (a HALT: UNGATED, banner on top, run_status halted)."""
+    import json
+
     from adda._src.nodes import Node
 
     study_dir = tmp_path / "study"
@@ -211,39 +224,25 @@ def test_run_backstop_halts_resumable_past_multiple(tmp_path):
     (run_dir / "debug").mkdir(parents=True)
     (run_dir / "debug" / "thread_id").write_text("tid-xyz")
 
-    adapter = StubAdapter(response="Should not be called.")
-    spec = _minimal_spec()
-    node = Node(
-        adapter, name="strategizer", outgoing=["implementer"], spec=spec,
-    )
-
-    # budget=10s, started 100s ago → elapsed = 10x budget >> 2x backstop.
-    # Provide a prior AI conclusion so we can assert it is preserved.
-    state = _make_state(
-        study_dir=study_dir,
-        messages=[HumanMessage(content="p"), AIMessage(content="CONCLUSION X")],
-    )
+    adapter = StubAdapter(response="CONCLUSION X")
+    node = Node(adapter, name="strategizer", outgoing=["implementer"],
+                spec=_minimal_spec())
+    node._current_notes_dir = run_dir / "debug" / "strategizer_notes"
+    state = _make_state(study_dir=study_dir)
     state["budget_seconds"] = 10
     state["start_time"] = time.time() - 100
     state["run_dir"] = str(run_dir)
 
-    first, req, cmd = _halt_after_wind_down(node, state, run_dir)
+    cmd = _run_to_the_end(node, state)
 
-    assert first is None or first.goto != END, "the first trip must not hard-halt"
-    assert req["by"] == "backstop" and req["termination"] == terminal.BACKSTOP_TIME
-    assert cmd.goto == END
     assert cmd.update.get("done") is True
+    assert cmd.update["termination"] == terminal.TIME_BUDGET
+    assert cmd.update["outcome"] == terminal.UNGATED
     report = cmd.update.get("last_report", "")
-    assert "HALTED (resumable)" in report and "time backstop" in report
-    assert "CONCLUSION X" in report, "the prior conclusion must be preserved"
-
-    import json
-    status = json.loads(
-        (run_dir / "debug" / "run_status.json").read_text()
-    )
-    assert status["status"] == "halted"
-    assert status["resumable"] is True
-    assert status["thread_id"] == "tid-xyz"
+    assert "TIME BUDGET SPENT" in report and "CONCLUSION X" in report
+    rec = json.loads((run_dir / "debug" / "wind_down.json").read_text())
+    assert rec["forced_turns"] >= 1 and "reproduction_gate" in rec
+    assert rec["deliverables_missing"] is not None
 
 
 def test_usd_budget_exhausted_halts_resumable(tmp_path):
@@ -367,9 +366,9 @@ def test_repeated_errors_from_an_unreachable_endpoint_halt_as_backend_unavailabl
         "last_report", "")
 
 
-def test_soft_budget_does_not_terminate_below_backstop():
-    """Time budget is SOFT: past 100% but below the backstop, the run
-    CONTINUES (adapter.invoke is called) — warning only, no force-end."""
+def test_the_run_continues_below_the_wind_down():
+    """Past the delegation cutoff but before the budget, the run CONTINUES
+    (adapter.invoke is called): only the wind-down ends a run."""
     from adda._src.nodes import Node
 
     study_dir = Path(tempfile.mkdtemp(prefix="f3dasm_rat_"))
@@ -381,15 +380,15 @@ def test_soft_budget_does_not_terminate_below_backstop():
         adapter, name="strategizer", outgoing=["implementer"], spec=spec,
     )
 
-    # budget=10s, started 15s ago → 1.5x budget: over 100%, under 2x
+    # budget=100s, started 92s ago → 0.92x budget: past the cutoff, before the stop
     state = _make_state(study_dir=study_dir)
-    state["budget_seconds"] = 10
-    state["start_time"] = time.time() - 15
+    state["budget_seconds"] = 100
+    state["start_time"] = time.time() - 92
 
     node(state)
 
     assert adapter.invoke_count == 1, (
-        "soft budget must NOT force-terminate below the backstop"
+        "the run must NOT be ended before the wind-down"
     )
 
 
@@ -618,13 +617,14 @@ def test_readnote_rejects_paths_escaping_study_dir(tmp_path):
             f"escape not contained, got: {r!r}")
 
 
-def test_time_backstop_fires_from_a_checkpoint_inside_a_running_turn(tmp_path):
+def test_a_checkpoint_inside_a_running_turn_begins_the_wind_down_once(tmp_path):
     """A CLI turn is one long session, so the between-turn check never runs
-    while a delegation or gate is in flight. A stop checkpoint (tool result,
-    Wait tick) must raise the time backstop itself: one stop request carrying
-    BACKSTOP_TIME and one BACKSTOP_WIND_DOWN row, and only one of each."""
+    while a delegation or gate is in flight. A checkpoint (tool result, Wait
+    tick) begins the wind-down itself, once: the gate is on, one TIME_WIND_DOWN
+    row, one hub notice, and nothing is raised or killed."""
     import json
 
+    from adda._src.infra import wind_down
     from adda._src.nodes import Node
 
     run_dir = tmp_path / "study" / "runs" / "T"
@@ -635,21 +635,21 @@ def test_time_backstop_fires_from_a_checkpoint_inside_a_running_turn(tmp_path):
     node._budget_seconds = 10
     node._run_start = time.time() - 100
 
-    notice = node._stop_tick()
-    node._stop_tick()
+    node._time_rules_tick()
+    node._time_rules_tick()
+    node._time_rules_cancel()
 
-    req = json.loads((run_dir / "debug" / "stop_request.json").read_text())
-    assert req["by"] == "backstop"
-    assert req["termination"] == terminal.BACKSTOP_TIME
-    assert "RUN STOP" in notice and "time backstop" in notice
+    assert wind_down.active() is False  # the cancel ended it
     rows = [json.loads(line) for line in
             (run_dir / "debug" / "diagnostics.jsonl").read_text().splitlines()]
     kinds = [r.get("error_type") for r in rows]
-    assert kinds.count("BACKSTOP_WIND_DOWN") == 1
-    assert kinds.count("RUN_BACKSTOP") == 1
+    assert kinds.count("TIME_WIND_DOWN") == 1
+    assert sum("WIND-DOWN: the time budget" in n
+               for n in node._notifications) == 1
+    assert (run_dir / "debug" / "wind_down.json").exists()
 
 
-def test_time_backstop_checkpoint_is_quiet_before_the_multiple(tmp_path):
+def test_a_checkpoint_is_quiet_before_the_wind_down(tmp_path):
     from adda._src.nodes import Node
 
     run_dir = tmp_path / "study" / "runs" / "T"
@@ -658,15 +658,16 @@ def test_time_backstop_checkpoint_is_quiet_before_the_multiple(tmp_path):
                 outgoing=["implementer"], spec=_minimal_spec())
     node._current_notes_dir = run_dir / "debug" / "strategizer_notes"
     node._budget_seconds = 100
-    node._run_start = time.time() - 150
+    node._run_start = time.time() - 50
 
     assert node._stop_tick() == ""
     assert not (run_dir / "debug" / "stop_request.json").exists()
 
 
-def test_time_backstop_timer_fires_with_no_checkpoint(tmp_path):
+def test_the_wind_down_timer_fires_with_no_checkpoint(tmp_path):
     """No tool result and no Wait tick (a gate review in flight): the timer
-    alone writes the backstop's stop request at the deadline."""
+    alone begins the wind-down at the budget."""
+    from adda._src.infra import wind_down
     from adda._src.nodes import Node
 
     run_dir = tmp_path / "study" / "runs" / "T"
@@ -676,10 +677,12 @@ def test_time_backstop_timer_fires_with_no_checkpoint(tmp_path):
     node._current_notes_dir = run_dir / "debug" / "strategizer_notes"
     node._budget_seconds = 10
     node._run_start = time.time() - 100
-    node._start_backstop_timer()
+    node._time_rules_start()
 
-    req = run_dir / "debug" / "stop_request.json"
+    rec = run_dir / "debug" / "wind_down.json"
     deadline = time.time() + 5
-    while not req.exists() and time.time() < deadline:
+    while not rec.exists() and time.time() < deadline:
         time.sleep(0.05)
-    assert req.exists()
+    assert wind_down.active() or rec.exists()
+    node._time_rules_cancel()
+    assert rec.exists()

@@ -39,15 +39,10 @@ def test_the_delegation_contract_leaves_the_preamble_when_off():
     assert "get_evaluator" in text
 
 
-def _node(**kw):
-    return SimpleNamespace(_budget_seconds=60.0, _run_start=0.0,
-                           _budget_bands_fired=set(), **kw)
-
-
 def test_budget_notes_off_silences_warnings_and_snapshot():
     state = {"eval_budget": 1, "evals_used": 5}
     node = SimpleNamespace(_ledgered_eval_total=lambda n: n,
-                           _budget_seconds=None, _run_start=None)
+                           _time_rules_tick=lambda: None)
     settings.configure({})
     assert orchestration.OrchestrationMixin._budget_warnings(node, state)
     _off("budget_notes")

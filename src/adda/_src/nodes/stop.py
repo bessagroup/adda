@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ..infra.run_abandon import raise_if_stopped
 from ..infra.stop_request import (
     DEFAULT_GRACE_S,
     consume_stop_request,
@@ -71,9 +72,12 @@ def stop_headline(stop: dict | None) -> str:
         return ("The previous process of this run crashed or was killed"
                 + (f" ({reason})" if reason else "")
                 + "; this resume only collects what you can still report.")
-    if stop.get("by") == "watchdog" or stop.get("termination") == (
-            terminal.BACKSTOP_TIME):
-        return ("The hard time cap is being reached"
+    if stop.get("termination") == terminal.TIME_BUDGET:
+        return ("The time budget is spent"
+                + (f" ({reason})" if reason else "")
+                + "; the run wound down and did not finish on time.")
+    if stop.get("by") == "watchdog":
+        return ("The hard time cap is reached"
                 + (f" ({reason})" if reason else "")
                 + "; the run did not finish on time.")
     return "The run is being stopped" + (f": {reason}." if reason else ".")
@@ -102,7 +106,8 @@ class StopMixin:
         Only the node that runs a turn (the one holding the run's start
         time) acts; a worker node's checkpoints leave the request alone.
         """
-        self._time_backstop_tick()
+        self._time_rules_tick()
+        raise_if_stopped(getattr(self, "_name", ""))
         stop = self._stop
         if stop is None:
             run_dir = self._current_run_dir
@@ -160,13 +165,15 @@ class StopMixin:
                         wind_down_notice(self._stop))
         return sorted(ids)
 
-    def _stop_cancel_stragglers(self) -> list[str]:
-        """Past the grace: detach what has not reported, and say so.
+    def _stop_cancel_stragglers(self, why: str | None = None) -> list[str]:
+        """Detach what has not reported, and say so. ``why`` replaces the
+        grace wording in the delegation record (a wind-down uses it).
 
         No placeholder retrospective is written for a straggler — it never
         gave one, and the record must say that rather than invent it.
         """
-        self._stop["cancelled"] = True
+        if self._stop is not None:
+            self._stop["cancelled"] = True
         cancelled: list[str] = []
         now = datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
         for n in self._stop_nodes():
@@ -185,7 +192,7 @@ class StopMixin:
                     to_node=e.get("target") or "",
                     task=str(e.get("task", "")),
                     hypothesis_ids=list(e.get("hypothesis_ids") or []),
-                    deliverable=(
+                    deliverable=why or (
                         "run stop: cancelled after the "
                         f"{self._stop['grace_s']:g}s grace without a "
                         "report; no retrospective was given"),
@@ -197,7 +204,7 @@ class StopMixin:
         if ids:
             self._record_intervention(
                 "RUN_STOP_CANCELLED", "(run)",
-                f"cancelled after grace, no report: {', '.join(ids)}")
+                f"cancelled, no report: {', '.join(ids)}")
         return ids
 
     def _stop_refusal(self) -> str | None:

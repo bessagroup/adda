@@ -54,7 +54,7 @@ def build_notes_closures(node) -> dict:
         # ReadNote("/") — otherwise resolves OUTSIDE the study tree, and a
         # recursive listing of "/" walks the entire filesystem and HANGS the run
         # (the tool call never returns, so the strategizer turn never ends and
-        # the time backstop, checked only between turns, never fires).
+        # the wind-down is a timer, so it still fires; but the call never returns).
         study_root = Path(study_dir).resolve()
         target = (study_root / path).resolve()
         try:

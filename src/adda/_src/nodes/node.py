@@ -60,6 +60,8 @@ from .orchestration import OrchestrationMixin
 from .recording import RecordingMixin
 from .reproduction_gate import ReproductionGateMixin
 from .stop import StopMixin
+from .time_rules import TimeRulesMixin
+from .wind_down import WindDownMixin
 
 
 class Node(
@@ -69,6 +71,8 @@ class Node(
     ReproductionGateMixin,
     OrchestrationMixin,
     StopMixin,
+    TimeRulesMixin,
+    WindDownMixin,
 ):
     """One node in the agent graph.
 
@@ -191,11 +195,6 @@ class Node(
         self._cost_observed: bool = False
         self._current_notes_dir: Path | None = None
         self._telemetry: Any = None
-        # Time-budget wrap-up ladder (nodes/_constants.py:budget_band_due):
-        # every node's OWN 10%-of-budget bands already reported, so an
-        # escalating message fires once per band whether this node
-        # orchestrates or answers — a property of any node, like recording.
-        self._budget_bands_fired: set[int] = set()
 
     def _init_capabilities(
         self,

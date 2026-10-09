@@ -196,3 +196,12 @@ def _clear_run_stop_signal():
     run_abandon.reset_stop()
     yield
     run_abandon.reset_stop()
+
+
+@pytest.fixture(autouse=True)
+def _clear_wind_down_gate():
+    """The wind-down gate is process-wide; no test may leak it."""
+    from adda._src.infra import wind_down
+    wind_down.end()
+    yield
+    wind_down.end()

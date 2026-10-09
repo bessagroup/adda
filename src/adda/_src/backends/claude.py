@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ..infra import interrupt as _interrupt
 from ..infra.run_abandon import raise_if_stopped
 from ..infra.telemetry import call_shape, normalized_usage
 from .base import DEFAULT_PROMPT, DEFAULT_TOOLS, record_stream_diagnostic
@@ -524,6 +525,7 @@ class ClaudeAdapter:
         # the last AssistantMessage carried.
         self.last_session_id: str | None = None
         self._background_watch: Any = None
+        self._session_token: str | None = None
 
     def _system_prompt_option(self):
         """What the CLI receives: the text alone (it REPLACES Claude Code's
@@ -585,7 +587,15 @@ class ClaudeAdapter:
         twin.last_session_id = None
         return twin
 
+    def interrupt(self) -> list[dict]:
+        """SIGINT the work a Bash-tool shell of this adapter's CLI session
+        runs, found by its session token; never the CLI itself nor an MCP
+        server, so the turn goes on. Safe from any thread."""
+        return _interrupt.interrupt_session(
+            self._session_token, self.extra_mcp_servers)
+
     async def ainvoke(
+
         self, messages: list[dict], *, idle_timeout: float | None = None,
         resume: str | None = None,
     ) -> str:
@@ -601,6 +611,7 @@ class ClaudeAdapter:
         replayed here). ``fork_session=False`` always, so this continues the
         SAME session rather than branching a copy of it.
         """
+        self._session_token = _interrupt.new_token()
         _require_sdk()
         from claude_agent_sdk import (
             AssistantMessage,
@@ -746,6 +757,26 @@ class ClaudeAdapter:
                 }
 
             _hooks = {"PostToolUse": [HookMatcher(hooks=[_oracle_hook])]}
+
+            # The wind-down gate for the CLI's own tools. adda's tools
+            # (mcp__*) are gated in _wrap_closure, so they are skipped here
+            # and never counted twice.
+            from ..infra import wind_down as _wd
+            _wd_key = _pn_did or "entry"
+
+            async def _wind_down_hook(input_data, tool_use_id, context):
+                name = input_data.get("tool_name", "")
+                if name.startswith("mcp__"):
+                    return {}
+                why = _wd.check(_wd_key, name, can_call_done=_pn_did is None)
+                if not why:
+                    return {}
+                return {"hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": why}}
+
+            _hooks["PreToolUse"] = [HookMatcher(hooks=[_wind_down_hook])]
         except Exception:  # noqa: BLE001 — nudge is best-effort, never fatal
             _hooks = None
 
@@ -753,6 +784,8 @@ class ClaudeAdapter:
         # (PATH etc. preserved), so bare extra keys are safe. See
         # _build_session_env for what is injected and why.
         _sess_env: dict = _build_session_env()
+        if self._session_token:
+            _sess_env[_interrupt.SESSION_TOKEN_ENV] = self._session_token
 
         from ..runtime.settings import get_float
         _max_buf_mb = get_float("llm_max_buffer_mb", 30.0)
@@ -1213,14 +1246,15 @@ class ClaudeAdapter:
             self.last_usage = {}
             self._attempt_usages = []
             try:
-                return retry_on_transient(
-                    lambda: _run_async_safe(
-                        self.ainvoke(
-                            messages, idle_timeout=idle_timeout,
-                            resume=resume)),
-                    max_attempts=retry_max,
-                    on_retry=getattr(self, "on_retry", None),
-                )
+                with _interrupt.in_flight(self):
+                    return retry_on_transient(
+                        lambda: _run_async_safe(
+                            self.ainvoke(
+                                messages, idle_timeout=idle_timeout,
+                                resume=resume)),
+                        max_attempts=retry_max,
+                        on_retry=getattr(self, "on_retry", None),
+                    )
             finally:
                 self.last_usage = _combine_attempt_usage(self._attempt_usages)
                 self._attempt_usages = None

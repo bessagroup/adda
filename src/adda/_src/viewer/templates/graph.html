@@ -1233,8 +1233,8 @@
           <b class="m" x-text="wallLabel()"></b>
           <span class="wallbar" x-show="wallBudget()" :title="wallTitle()">
             <span class="wallbar-fill" :class="wallTone()" :style="`width:${wallFrac() * 100}%`"></span>
-            <span class="wallbar-mark" style="left:50%"></span>
             <span class="wallbar-mark" style="left:75%"></span>
+            <span class="wallbar-mark" style="left:90%"></span>
           </span>
           <span class="label">wall</span>
         </div>
@@ -2884,15 +2884,15 @@
         },
         wallFrac() {
           const b = this.wallBudget();
-          return b ? Math.min(1, this.wallElapsed() / (2 * b)) : 0;
+          return b ? Math.min(1, this.wallElapsed() / b) : 0;
         },
         wallTone() {
           const r = this.wallBudget() ? this.wallElapsed() / this.wallBudget() : 0;
-          return r >= 2 ? 'over2' : r >= 1.5 ? 'over15' : r >= 1 ? 'over1' : '';
+          return r >= 1 ? 'over2' : r >= 0.9 ? 'over15' : r >= 0.75 ? 'over1' : '';
         },
         wallTitle() {
           const b = this.wallBudget();
-          return `budget ${this.humanDur(b * 1000)}; marks at 1.5× (${this.humanDur(b * 1500)}, no new delegations) and 2× (${this.humanDur(b * 2000)}, stop)`;
+          return `budget ${this.humanDur(b * 1000)}; marks at 75% (${this.humanDur(b * 750)}, budget notices), 90% (${this.humanDur(b * 900)}, no new delegations) and 100% (${this.humanDur(b * 1000)}, wind-down: nothing is killed)`;
         },
         slotsLabel() {
           if (!this.vitals || !this.vitals.max_awake_nodes) return '—';

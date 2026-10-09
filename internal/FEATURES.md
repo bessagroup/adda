@@ -230,7 +230,7 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   than hanging when every in-flight delegation is open for review (finalize with
   `SendMessage(id, …, approve=True)`) or has already died without reporting
   (read with `Wait(id, block=False)`) (a blocking call ends no turn, so the between-turn
-  check cannot run inside it; the time backstop is raised at every `Wait` tick
+  check cannot run inside it; the time rules are ticked at every `Wait` tick
   and by a timer instead). A blocked `Wait` (bare or by id)
   also RETURNS EARLY when an operator note or a science-monitor message
   arrives — delivered in-band with a "still in flight" line, nothing harvested
@@ -1397,45 +1397,79 @@ because a worker can run on another host. `infra/host_provenance.py`; test
   supervised runs (out-of-repo harness only; `adda.watchdog` has no disable
   switch). **Status:** done.
 
-### Delegate() time cutoff + escalating budget wrap-up ladder
-- **What:** two additions to the existing soft-budget/backstop ladder, both a
-  NEW HARD CAP on the time budget (a science budget — CLAUDE.md §4 — approved
-  explicitly by the maintainer for this one case; eval budgets remain soft
-  and untouched):
-  1. Past `runtime: delegate_cutoff_multiple` × the (soft) time budget (default
-     `1.5`, disabled at `<= 0`), `Delegate()` refuses to start a NEW
-     delegation — an actionable `ERROR:` string, no delegation registered.
-     Every other close-out tool (`Wait`, `Done`, deliverable
-     tools) is untouched, and an in-flight delegation started before the
-     cutoff is never cancelled or disturbed — only NEW ones are refused, so
-     the run always has a path to close. Sits one rung below
-     `run_backstop_multiple` (which force-closes the run); if the cutoff
-     multiple is misconfigured `>=` the backstop multiple, `AgenticRun`
-     warns loudly at startup (it can never fire — the run closes first).
-  2. Every node — not only an orchestrating one — gets an escalating
-     wrap-up message once per newly-crossed 10%-of-budget band at/past 100%
-     (100, 110, 120, …), instead of the strategizer's old every-turn repeat
-     past 1.0×. A worker (leaf node, or a `Delegate()`-spawned WorkerSession)
-     is told what it can actually do (finish the step, report what you have,
-     return) — never "call Done()", which only the strategizer holds. The
-     strategizer's own band message additionally says new delegations are
-     now refused once the cutoff multiple is actually passed.
-- **Where:** knobs in `nodes/_constants.py` (`delegate_cutoff_multiple`,
-  `delegate_cutoff_enabled`); the refusal in
-  `nodes/tools/routing/delegation.py::DelegationTools._check_delegate_cutoff`
-  (called in `Delegate()` after the stop and open-review refusals, before
-  target resolution); the shared ladder
-  (`budget_band_due`, `budget_wrapup_message`) in `nodes/_constants.py`,
-  called from `orchestration.py::_budget_warnings` (every node's own turn —
-  `_respond`/`leaf.py` are gone; every node now runs the same
-  `_orchestrate` loop) and `delegation.py::_budget_broadcast` (the
-  WorkerSession path a `Delegate()` worker actually runs through in the
-  built-in graph); the misconfiguration warning in
-  `runtime/agent_runtime.py::_warn_if_delegate_cutoff_unreachable`.
-  Diagnostic: `DELEGATE_CUTOFF` via the existing `_record_intervention`
-  mechanism (`diagnostics.jsonl`), the same channel `MILESTONE_BLOCK` uses.
-- **Status:** done, headless-tested (`tests/test_delegate_time_cutoff.py`,
-  `tests/test_budget_wrapup_ladder.py`).
+### Time rules: the wall-clock budget is the real limit
+- **What:** the declared `budget` (config) B is the real limit, and the run ends
+  by a wind-down, never by a kill. Thresholds are fractions of B from the run
+  start (the anchored start, so a resume keeps its original clock):
+  1. `runtime: budget_warn_from` (`0.75`) and `budget_warn_every` (`0.05`):
+     a budget notice to the entry node and to every running delegation, at
+     75, 80, 85, 95%. Only while `budget_notes` is on.
+  2. `runtime: delegation_cutoff_at` (`0.90`): `Delegate()` refuses a NEW
+     delegation (an actionable `ERROR:`; diagnostic `DELEGATE_CUTOFF`).
+     Running delegations continue; `Wait`, `Done` and the deliverable tools
+     stay open. Always enforced when a budget is declared.
+  3. `runtime: wind_down_at` (`1.0`): the wind-down. W0, the freeze: the gate
+     (`infra/wind_down.py`) refuses every tool that starts new work
+     (`Delegate`, `Bash`, `RunNotebook`, the search tools ...) with an `ERROR`
+     that names the rule, and the metered evaluator refuses new evaluations
+     (`eval_stop_epoch` in `run_config.json`). Nothing is killed. W1, the
+     drain: each node is told the three steps (let running work finish; save
+     every result not yet stored, a note naming the file and how it was
+     produced; end: a worker reports, the entry node writes the deliverable
+     and calls `Done()`). The entry node's turns are driven by code, at most
+     `wind_down_turns` (`2`) forced turns per step. Each node has
+     `wind_down_tool_calls` (`50`) tool calls; past them only its end call is
+     allowed, with an `ERROR` that names the rule. W2, the close: ONE
+     reproduction gate and ONE critic review, no rework, both recorded. The
+     review's tool calls count against the same `wind_down_tool_calls`. If the
+     gate passes and the critic returns PASS the run is `GATED` with
+     `termination: time_budget` and `overrun_s` recorded (the gate criteria
+     do not change; `time_budget` is not a halt for the terminal resolution);
+     otherwise it is `UNGATED` and halted (resumable). W3: retrospectives, as
+     in every close. Nothing is cancelled: a delegation that does not report
+     is waited for until its own call limit or the external watchdog ends it.
+     adda synthesizes nothing for a missing deliverable: `DELIVERABLES_MISSING` and `deliverables_missing`
+     (`run_status.json`) list them.
+  4. Hung work: `runtime: wind_down_interrupt_after_s` (`300`) after the
+     wind-down began, or after one forced turn of waiting, adda sends SIGINT
+     (never SIGKILL) to the work in flight. Only to processes a node owns: the
+     pids its own `_BashSession` recorded, or, on the Claude backend, the
+     processes below a Bash-tool shell that is a direct child of its CLI and
+     carry its `ADDA_SESSION_TOKEN`. Never the CLI, never an MCP server (a
+     direct child of the CLI whose command line is a configured server's, with
+     its subtree), never by pattern. Before it signals it
+     takes every registered store flush lock (bounded wait
+     `STORE_LOCK_WAIT_S`) so a flusher is never interrupted mid-write.
+  `run_status.json` records `termination: time_budget`, `overrun_s`,
+  `wind_down_turns`, `deliverables_missing`, `reproduction_gate`,
+  `critic_verdict` and `interrupted`; the full record is
+  `debug/wind_down.json`.
+  Every notice states the minutes left ("No new delegations: 3 min left before
+  the wind-down at 30 min."). Interventions `TIME_NOTICE`, `TIME_CUTOFF`,
+  `TIME_WIND_DOWN`, `WIND_DOWN_INTERRUPT`. With no `budget`, every threshold
+  is off. Settings are validated at start: `0 < budget_warn_from <
+  delegation_cutoff_at < wind_down_at`, the wind-down knobs `> 0`; the removed
+  keys (`run_backstop_multiple`, `delegate_cutoff_multiple`, `wrapup_at`,
+  `graceful_stop_at`, `hard_stop_at`, `stop_retrospective_s`) are rejected
+  with the name of their replacement.
+- **Plain Claude Code arm:** `Default` tools and `Default` prompt. It gets no
+  hook, no notices and no wind-down (`tests/test_wind_down.py`). Only the
+  external `python -m adda.watchdog` (2x B) bounds it, as the last resort for
+  a wedged process.
+- **Where:** thresholds, validation and notice text in
+  `runtime/time_rules.py`; the clock, timers, notices and cutoff refusal in
+  `nodes/time_rules.py` (`TimeRulesMixin`, one idempotent tick called from the
+  turn start, every stop checkpoint, every `Wait` tick and one daemon timer
+  per threshold); the wind-down in `nodes/wind_down.py` (`WindDownMixin`:
+  begin, route, finish) and the close in
+  `nodes/tools/routing/feedback.py::FeedbackTools._close_wound_down`; the
+  gate in `infra/wind_down.py` (checked in `_wrap_closure`, in the Claude
+  PreToolUse hook for the CLI's own tools and in `_guard_native` on the
+  OpenAI-compatible backend); SIGINT in `infra/interrupt.py`. Viewer: the
+  clock bar spans B with marks at 75/90/100%.
+- **Status:** done, headless-tested (`tests/test_time_rules.py`,
+  `tests/test_wind_down.py`, `tests/test_delegate_time_cutoff.py`,
+  `tests/test_route_aware_termination.py`).
 
 ### `python -m adda.watchdog` — the in-package run launcher (#41)
 - **What:** a launcher that runs a study as a CHILD process, in its own process
@@ -1684,7 +1718,7 @@ because a worker can run on another host. `infra/host_provenance.py`; test
     Hypotheses, Data, Deliverable, Logs, Setup; state in the URL
     (`?run=&view=&sel=`); polls only while the tab is visible and the run open.
 - **Watching (`/ui`):**
-  - Title block: elapsed vs budget (warn >1.5x, bad >2x), cost as "≥$" when
+  - Title block: elapsed vs budget (warn from 75%, bad at 100%), cost as "≥$" when
     any call recorded none, delegation count, best row. Pending operator
     question = banner with answer field (10 s undo).
   - Timeline: one column per concurrent slot from true session start/end;
@@ -1851,7 +1885,7 @@ A request stamped before the run's start is a leftover and is ignored, so a
 resumed run does not stop on arrival; the file is renamed
 `stop_request.consumed.json` once honoured.
 
-**Time accountability.** Every stop (watchdog, backstop, operator) states its
+**Time accountability.** Every stop (watchdog, time budget, backstop, operator) states its
 cause plainly to the agents; a time cap says "the hard time cap is being
 reached; the run did not finish on time". Workers' wind-down notice and the
 entry node's retrospective prompt both require a `- TIME:` bullet in the
@@ -1872,7 +1906,7 @@ avoided it), and the run closes `crashed`/`halted`, resumable. Delegations the
 log last saw RUNNING are named in `RETROSPECTIVES_MISSING` ("process lost");
 no text is ever synthesized for them. A crash that already ran past the time
 budget needs no knob for the entry node: the resumed run keeps its original
-start, so the time backstop trips on the first turn.
+start, so the hard stop trips on the first turn.
 
 **A dead LLM endpoint has its own termination.** When the exception that
 crashes the graph is a connection-class failure of the model endpoint
@@ -1888,20 +1922,14 @@ halt carries `backend_unavailable` instead of `repeated_errors`. **Where:**
 `runtime/agent_runtime.py`, `_finish_error` in `nodes/tools/routing/delegation.py`,
 the repeated-errors check in `nodes/lifecycle.py`.
 
-**Backstops go through it too.** A time, USD or repeated-errors backstop
+**Backstops go through it too.** A USD or repeated-errors backstop
 no longer jumps to END: it writes a stop request (`by="backstop"`) carrying
-its own `termination` (`backstop_time` / `backstop_usd` / `repeated_errors`),
+its own `termination` (`backstop_usd` / `repeated_errors`),
 so the run winds down, collects every retrospective and closes with that
 value (banner "HALTED", not "STOPPED"). The wind-down is bounded: past
 `grace_s` for workers plus an equal allowance for the entry node, or if the
-request cannot be written, the old hard halt fires. The time backstop does
-not wait for a turn boundary: a CLI-backend turn is one long session, so it is
-also checked at every stop checkpoint (each tool result, each `Wait` tick) and
-by one daemon timer per run set for `run_backstop_multiple` x the time budget;
-either writes the same single stop request and `BACKSTOP_WIND_DOWN` row, so a
-run is asked to wind down at 2x even with a delegation or a gate review in
-flight (`nodes/lifecycle.py`: `_time_backstop_tick`, `_start_backstop_timer`).
-A gate review already inside its own model call still finishes that call. A turn that raises during
+request cannot be written, the old hard halt fires. The time budget is not a backstop: it is the hard stop of the time rules
+(above), which ends everything at once instead of winding down. A gate review already inside its own model call still finishes that call. A turn that raises during
 the wind-down closes anyway. Whoever never gave a retrospective is logged by
 delegation id (`RETROSPECTIVES_MISSING`). After a USD cap fires the wind-down
 spends a little more; that is accepted. **Where:** `infra/stop_request.py`,

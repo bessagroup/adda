@@ -24,8 +24,9 @@ from typing import Any
 
 @dataclass(frozen=True)
 class ConstraintSnapshot:
-    """A point-in-time read of the run's soft budgets. Always advisory —
-    these numbers nudge; nothing here hard-stops a run."""
+    """A point-in-time read of the run's budgets. The eval budget is advisory.
+    The wall-clock budget is a hard limit: the run stops when it is spent
+    (``runtime/time_rules.py``); this block only reports it."""
 
     eval_budget: int | None
     evals_used: int
@@ -84,7 +85,8 @@ class ConstraintSnapshot:
             _tot = self._dur(self.wall_budget_s)
             _pct = (self.wall_elapsed_s / self.wall_budget_s) * 100
             lines.append(
-                f"Wall-clock budget: {_el}/{_tot} used ({_pct:.0f}%)"
+                f"Wall-clock budget: {_el}/{_tot} used ({_pct:.0f}%); "
+                f"the run is hard-stopped at {_tot}"
                 + (" (EXHAUSTED)" if self.wall_exhausted else "") + "."
             )
         else:

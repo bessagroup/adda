@@ -23,6 +23,7 @@ from typing import Any
 
 from ....prompts.tool_catalog import tool_examples
 from ....runtime import features, terminal
+from ... import wind_down as wd_text
 from ...parsing import _parse_verdict
 from ...stop import stop_headline, time_section
 from ._binding import with_doc
@@ -167,6 +168,8 @@ class FeedbackTools:
         prefix = self.node._drain_notifications() + self._open_hypotheses_notice()
         if self.node._stop is not None:
             return self._close_stopped(summary, prefix)
+        if self.node._wind_down_active():
+            return self._close_wound_down(summary, prefix)
         for gate in (
             self._pending_refusal,
             self._capture_retrospective,
@@ -217,6 +220,77 @@ class FeedbackTools:
             if held is not None:
                 return held
         return prefix + "Run complete."
+
+    def _close_wound_down(self, summary: str, prefix: str) -> str:
+        """Done() once the time budget is spent (nodes/wind_down.py): wait for
+        the running work, then ONE reproduction gate and ONE critic review,
+        no rework, and the retrospective round. The summary is what exists."""
+        for gate in (
+            self._capture_retrospective,
+            self._wd_pending,
+            self._wd_review,
+        ):
+            held = gate(summary, prefix)
+            if held is not None:
+                return held
+        return prefix + "Run complete."
+
+    def _wd_pending(self, summary: str, prefix: str) -> str | None:
+        node = self.node
+        pending = node._pending_delegations()
+        if not pending:
+            return None
+        return prefix + wd_text.PENDING_REFUSAL.format(
+            n=len(pending), ids=pending)
+
+    def _wd_review(self, summary: str, prefix: str) -> str | None:
+        """The one reproduction gate and the one critic review. Both are
+        recorded with the deliverable; neither can send the run back."""
+        from ....infra import wind_down
+        from ....runtime.constraint_snapshot import snapshot_for_node
+        node = self.node
+        facts: dict[str, Any] = {}
+        critic_text = ""
+        with wind_down.suspend():
+            repro = node._reproduction_gate()
+            facts["reproduction_gate"] = (
+                "PASS" if repro is None else "FAIL: " + repro[:1500])
+            verdict = "NOT_RUN"
+            if node._find_critic_name() is not None:
+                snapshot = snapshot_for_node(node)
+                started = datetime.now(
+                    tz=timezone.utc).isoformat(timespec="seconds")
+                critic_text = node._invoke_critic(
+                    wd_text.REVIEW_PREFACE
+                    + self._gate_task_msg(summary, snapshot))
+                verdict = _parse_verdict(critic_text)
+                self._log_gate(critic_text, verdict, started, snapshot)
+        facts["critic_verdict"] = verdict
+        node._wind_down_record(**facts)
+        node._wind_down_finish()
+        gated = (verdict == "PASS"
+                 and facts["reproduction_gate"] == "PASS")
+        banner = (
+            "## ⚠ TIME BUDGET SPENT — run wound down\n\n"
+            "The time budget was spent, so this run closed from what existed. "
+            + ("The reproduction gate and the one critic review both "
+               "passed: it is GATED. "
+               if gated else "It is UNGATED. ")
+            + "Reproduction gate: "
+            + facts["reproduction_gate"].split("\n")[0]
+            + f". Critic verdict (one review, no rework): {verdict}.\n\n"
+            + (("### Critic review\n" + critic_text.strip() + "\n\n")
+               if critic_text else "")
+            + "---\n\n")
+        node._terminal = {
+            "outcome": terminal.GATED if gated else terminal.UNGATED,
+            "reviewed": node._find_critic_name() is not None,
+            "termination": terminal.TIME_BUDGET,
+        }
+        node._awaiting_retro = True
+        node._final_summary = banner + summary
+        stop = {"termination": terminal.TIME_BUDGET, "by": "time_budget"}
+        return prefix + _stop_retrospective(stop, terminal.TIME_BUDGET)
 
     def _stop_pending(self, summary: str, prefix: str) -> str | None:
         """While a stop is winding workers down, Done() waits for their
@@ -278,6 +352,7 @@ class FeedbackTools:
         node._route.setdefault("termination", terminal.DONE)
         if node._stop is not None:
             node._stop_consume()
+        if node._stop is not None or node._wind_down_active():
             node._log_missing_retrospectives(
                 f"run closed {node._route['termination']} after a wind-down")
         return prefix + "Run complete."

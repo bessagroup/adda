@@ -525,6 +525,7 @@ def get_evaluator(namespace: str | None = None) -> InstrumentedDataGenerator:
         eval_budget=cfg.get("eval_budget"),
         dedup_scope=dedup_scope,
         oracle_rev=oracle_rev,
+        stop_after=cfg.get("eval_stop_epoch"),
     )
 
 

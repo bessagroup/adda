@@ -84,17 +84,32 @@ not count—only hard failures do. Read `run.log` for what was failing; this
 usually means a broken evaluator or an unreachable backend, not a science
 problem. Set it to `0` to turn it off.
 
-**Wall-clock overran the budget.** `budget` is soft—it nudges, escalating
-every 10% past 100% (100%, 110%, 120%, …) instead of repeating the same
-message every turn. Past `runtime: delegate_cutoff_multiple` (default `1.5`),
-`Delegate()` refuses to start anything NEW—an in-flight delegation is never
-touched, and `Wait`/`Done`/the deliverable tools stay open so the
-run can still close. The hard backstop is `runtime: run_backstop_multiple`
-(default `2.0`), after which the run is asked to wind down (every agent gives its retrospective, and the run closes `backstop_time`); only if the wind-down overruns its grace is it force-closed. Both checks run
-*inside* the graph, though, so they can only fire on the run's own next turn—no help if the run has genuinely wedged (a hung model call, a stuck
-simulation) and never gets there. For that, launch under the external
-watchdog instead—see
+**The run closed as `time_budget`.** `budget` is the real limit, and the run
+ends by a wind-down, not a kill. Thresholds, each a fraction of it, measured
+from the run start:
+
+- `runtime: budget_warn_from` (default `0.75`) and `runtime: budget_warn_every` (default `0.05`): a budget notice, when `budget_notes` is on. Each notice names the minutes left.
+- `runtime: delegation_cutoff_at` (default `0.90`): `Delegate()` refuses to start anything new. Running delegations continue, and `Wait`, `Done` and the deliverable tools stay open.
+- `runtime: wind_down_at` (default `1.0`): the wind-down begins. Nothing is killed. Code refuses `Delegate()`, new metered evaluations and every tool that starts new work, each with an `ERROR` that names the rule. Each node has `runtime: wind_down_tool_calls` (default `50`) tool calls. The entry node is walked through three steps: wait for running work, save every result not yet stored (a note that names the file and how it was produced), then write the deliverable and call `Done()`. At most `runtime: wind_down_turns` (default `2`) forced turns per step. The close runs the reproduction gate once and one critic review, with no rework, and records both. The run is `GATED` if the gate passes and the critic returns PASS, with `termination: time_budget` and `overrun_s` recorded; otherwise it is `UNGATED` and halted (resumable). Nothing is cancelled.
+
+Read `debug/wind_down.json` for what the wind-down did: `forced_turns`,
+`reproduction_gate`, `critic_verdict`, anything it
+`interrupted`, and `deliverables_missing` (required files that did not exist
+at the close; also a `DELIVERABLES_MISSING` row in `diagnostics.jsonl`). adda
+writes nothing in their place. `debug/run_status.json` carries `overrun_s`
+(time past the budget), `wind_down_turns` and the same facts. Work that has
+not finished `runtime: wind_down_interrupt_after_s` (default `300`) seconds
+after the wind-down began gets SIGINT, only to processes the node itself
+started. A plain Claude Code arm (`Default` tools and prompt) has no
+wind-down: it gets no notices and no gate, and only the external watchdog
+bounds it. These checks run inside the run, so they cannot help if it has
+genuinely wedged; for that, launch under the external watchdog (twice the
+budget)—see
 [Launching under a watchdog](author-a-study.md#launching-under-a-watchdog).
+The old `run_backstop_multiple`, `delegate_cutoff_multiple`, `wrapup_at`,
+`graceful_stop_at`, `hard_stop_at` and `stop_retrospective_s` keys are
+rejected at start; use `wind_down_at`, `delegation_cutoff_at` and
+`wind_down_turns`.
 
 ## When the result isn't what you wanted
 

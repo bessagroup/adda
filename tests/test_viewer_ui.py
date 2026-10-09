@@ -793,9 +793,9 @@ def test_the_store_table_is_virtual_sorts_and_remembers_its_columns(tmp_path, pa
         page.wait_for_selector('.th[data-sort="in:x"]')
 
 
-def test_the_wall_clock_fill_warns_past_one_and_a_half_and_fails_past_two(tmp_path, page):
+def test_the_wall_clock_fill_warns_past_the_cutoff_and_fails_at_the_budget(tmp_path, page):
     import time
-    for hours, tone in ((0.5, ""), (1.7, "warn"), (2.3, "bad")):
+    for hours, tone in ((0.5, ""), (0.8, "warn"), (1.1, "bad")):
         (tmp_path / str(hours)).mkdir()
         study, run_dir = _study(tmp_path / str(hours))
         (study / "config.yaml").write_text("budget: '01:00:00'\n")

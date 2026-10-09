@@ -23,7 +23,7 @@ The study directory must contain `PROBLEM_STATEMENT.md`. The run writes to
 |---|---|
 | `study-dir` | The study directory. |
 | `--model MODEL` | The model identifier. Default: the `model:` key in `config.yaml`, else `claude-haiku-4-5-20251001`. |
-| `--budget DURATION` | A soft wall-clock budget, in seconds or as `HH:MM:SS`. Default: unlimited. |
+| `--budget DURATION` | A wall-clock budget (the wind-down begins at 100%), in seconds or as `HH:MM:SS`. Default: unlimited. |
 | `--set KEY=VALUE` | Overrides one `runtime:` knob for this run. You can repeat it. It outranks `config.yaml`. An unknown knob is an error. |
 
 `python -m adda` always builds the built-in default graph. A study whose

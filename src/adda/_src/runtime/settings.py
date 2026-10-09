@@ -50,7 +50,7 @@ KNOWN_KEYS: frozenset[str] = frozenset({
     "context_policy",
     "context_window",
     "debug",
-    "delegate_cutoff_multiple",
+    "delegation_cutoff_at",
     "doe_playbook",
     "f3dasm_api",
     "followup_wait_s",
@@ -61,6 +61,12 @@ KNOWN_KEYS: frozenset[str] = frozenset({
     "allow_arm_drift",
     "bash_timeout_s",
     "budget_notes",
+    "budget_warn_from",
+    "budget_warn_every",
+    "wind_down_at",
+    "wind_down_tool_calls",
+    "wind_down_turns",
+    "wind_down_interrupt_after_s",
     "delegation_contract",
     "model_verification",
     "reprompt_unfinished",
@@ -81,7 +87,6 @@ KNOWN_KEYS: frozenset[str] = frozenset({
     "reproduction_gate",
     "resume_close_with_retrospectives",
     "retrieval_mode",
-    "run_backstop_multiple",
     "science_monitor",
     "stop_grace_s",
     "thinking_display",
@@ -141,6 +146,8 @@ def configure(config: dict | None, explicit: dict | None = None) -> None:
     leaked = sorted((set(cfg) | set(exp)) & set(SECRET_KEYS))
     if leaked:
         raise ValueError(" ".join(secret_key_error(k) for k in leaked))
+    from . import time_rules
+    time_rules.validate(cfg, exp)
     bad = sorted(set(exp) - KNOWN_KEYS)
     if bad:
         raise ValueError(

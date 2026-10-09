@@ -28,13 +28,6 @@ from typing import Any
 
 from ....prompts.tool_catalog import tool_examples
 from ....runtime import terminal
-from ..._constants import (
-    backstop_enabled,
-    budget_wrapup_message,
-    delegate_cutoff_enabled,
-    delegate_cutoff_multiple,
-    run_backstop_multiple,
-)
 from ...notices import wrap_notice
 from ...parsing import (
     _classify_response,
@@ -1915,40 +1908,14 @@ class DelegationTools:
         )
 
     def _check_delegate_cutoff(self) -> str | None:
-        """Refuse a NEW delegation once elapsed time passes
-        delegate_cutoff_multiple x the (soft) time budget, or None to
-        proceed.
+        """Refuse a NEW delegation once the clock passes ``delegation_cutoff_at``
+        x the time budget, or None to proceed.
 
-        Only NEW delegations are gated here — an in-flight one is untouched
-        (this fires before a target is even resolved, so it never reaches
-        anything that would register/cancel a delegation). Every other tool
-        the strategizer needs to close a run (Wait, Done,
-        WriteDeliverable, …) lives outside DelegationTools.Delegate and is
-        unaffected, so the run always has a path to close.
+        Only NEW delegations are gated here; a running one is untouched. Wait,
+        Done and the deliverable tools are outside this tool, so the run always
+        has a path to close. The rule is the same on every node.
         """
-        node = self.node
-        if not delegate_cutoff_enabled():
-            return None
-        budget, start = node._budget_seconds, node._run_start
-        if budget is None or start is None:
-            return None
-        mult = delegate_cutoff_multiple()
-        elapsed = time.time() - start
-        if elapsed <= budget * mult:
-            return None
-        node._record_intervention(
-            "DELEGATE_CUTOFF", "(refused)",
-            f"new delegation refused past {mult:g}x time budget "
-            f"({elapsed:.0f}s / {budget:.0f}s)",
-        )
-        return (
-            f"ERROR: new delegations are refused past {mult:g}x the time "
-            f"budget ({elapsed:.0f}s elapsed / {budget:.0f}s budget). This "
-            "delegation was NOT started. Wrap up instead: Wait() on any "
-            "delegation still in flight and read its report, then call "
-            "Done() with what you have. Do not cancel a progressing "
-            "delegation — its ledgered evals persist regardless."
-        )
+        return self.node._time_cutoff_refusal()
 
     def _resolve_target(self, target: str) -> str | None:
         """Resolve a requested target to an outgoing node name, or None."""
@@ -2357,7 +2324,7 @@ class DelegationTools:
             )
         hints.extend(self._poll_escalation(
             delegation_id, poll_count, elapsed, cur_stamped, progress_desc))
-        hints.extend(self._budget_broadcast(delegation_id))
+        self.node._time_rules_tick()
 
         # Status token FIRST (documented contract: callers may
         # dispatch on the leading word); hints and queued
@@ -2475,66 +2442,6 @@ class DelegationTools:
             "time may be genuinely stuck; the run watchdog will reclaim "
             "it."
         ]
-
-    def _budget_broadcast(self, delegation_id: str) -> list[str]:
-        """Broadcast a newly-crossed 10%-overbudget threshold, once.
-
-        Returned for THIS delegation (folded into the strategizer's own
-        Wait text — the strategizer polled, so it gets the
-        strategizer-shaped message, e.g. "call Done()"); queued for every
-        OTHER Working delegation, which gets the worker-shaped message
-        instead (a worker cannot call Done() — see
-        nodes/_constants.py:budget_wrapup_message). The two used to share
-        one Done()-mentioning string that a worker had no way to act on.
-        """
-        from ....runtime import features as _features
-        node = self.node
-        budget = node._budget_seconds
-        run_start = node._run_start
-        if (budget is None or run_start is None
-                or not _features.enabled("budget_notes")):
-            return []
-        elapsed = time.time() - run_start
-        pct = (elapsed / budget) * 100
-        # Thresholds: 80, 90, 100, 110, 120, …
-        threshold = int(pct // 10) * 10
-        if threshold < 80:
-            return []
-        with node._pending_worker_msgs_lock:
-            if threshold in node._budget_notified_pcts:
-                return []
-            node._budget_notified_pcts.add(threshold)
-            if threshold >= 100:
-                strategizer_msg = budget_wrapup_message(
-                    elapsed, budget, can_call_done=True)
-                worker_msg = budget_wrapup_message(
-                    elapsed, budget, can_call_done=False)
-                _backstop_mult = run_backstop_multiple()
-                if backstop_enabled() and pct >= _backstop_mult * 100:
-                    _bk = (
-                        f" BACKSTOP IMMINENT: past the "
-                        f"{int(_backstop_mult)}x cost backstop — the run "
-                        "will be force-closed."
-                    )
-                    strategizer_msg += _bk
-                    worker_msg += _bk
-            else:
-                strategizer_msg = worker_msg = (
-                    f"BUDGET: {pct:.0f}% of time budget consumed. "
-                    "Wrap up your current work and return a partial "
-                    "report as soon as possible."
-                )
-            # Queue the worker-shaped message for all OTHER currently
-            # Working delegations.
-            with node._registry_lock:
-                active = [
-                    did for did, e in node._registry.items()
-                    if e["status"] == "Working"
-                    and did != delegation_id
-                ]
-            for did in active:
-                node._pending_worker_msgs.setdefault(did, []).append(worker_msg)
-        return [strategizer_msg]
 
     @tool_examples(
         "CancelDelegation('D004')",
@@ -2760,8 +2667,8 @@ class DelegationTools:
                 )
                 # Classify what is actually still capable of finishing.
                 # A blocking tool call ends no turn, so the between-turn
-                # backstop check cannot run while we are in here (the
-                # stop tick and the timer cover the time backstop) — this
+                # time check cannot run while we are in here (the stop
+                # tick and the timers cover the time rules) — this
                 # loop must therefore never be able to wait on something that will never
                 # arrive. A thread that has died without recording a
                 # terminal status is exactly that: nothing else in the

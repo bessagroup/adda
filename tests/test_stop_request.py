@@ -248,10 +248,10 @@ def _interventions(run_dir: Path) -> list[dict]:
 
 
 def test_a_stop_request_carries_the_halts_own_termination(tmp_path):
-    write_stop_request(tmp_path, by="backstop", reason="r",
-                       termination=terminal.BACKSTOP_TIME)
+    write_stop_request(tmp_path, by="time_budget", reason="r",
+                       termination=terminal.TIME_BUDGET)
     req = read_stop_request(tmp_path)
-    assert req["termination"] == terminal.BACKSTOP_TIME
+    assert req["termination"] == terminal.TIME_BUDGET
     (tmp_path / "debug" / "stop_request.json").write_text(json.dumps({
         "requested_at": time.time(), "by": "x", "termination": "bogus"}))
     assert read_stop_request(tmp_path)["termination"] is None
@@ -260,17 +260,17 @@ def test_a_stop_request_carries_the_halts_own_termination(tmp_path):
 def test_a_backstop_wind_down_closes_with_its_own_termination(tmp_path):
     node, run_dir, tools = _node(tmp_path)
     write_stop_request(run_dir, by="backstop", reason="time backstop",
-                       grace_s=5, termination=terminal.BACKSTOP_TIME)
+                       grace_s=5, termination=terminal.BACKSTOP_USD)
 
     first = tools["Done"]("closing")
     assert "Retrospective" in first, first
     assert "HALTED" in node._final_summary
-    assert terminal.BACKSTOP_TIME in node._final_summary
+    assert terminal.BACKSTOP_USD in node._final_summary
     assert "STOPPED" not in node._final_summary
 
     out = tools["Done"](_RETRO)
     assert out.endswith("Run complete."), out
-    assert node._route["termination"] == terminal.BACKSTOP_TIME
+    assert node._route["termination"] == terminal.BACKSTOP_USD
     assert node._route["outcome"] == terminal.UNGATED
 
 
@@ -278,7 +278,7 @@ def test_a_close_names_the_retrospectives_that_never_came(tmp_path):
     node, run_dir, tools = _node(tmp_path)
     _live(node)
     write_stop_request(run_dir, by="backstop", reason="time backstop",
-                       grace_s=5, termination=terminal.BACKSTOP_TIME)
+                       grace_s=5, termination=terminal.BACKSTOP_USD)
     node._stop_tick()
     assert node._missing_retrospectives() == ["D001", "DONE"]
 
@@ -308,7 +308,7 @@ def test_a_turn_that_errors_during_a_wind_down_closes_anyway(tmp_path):
 def test_an_overrun_wind_down_falls_through_to_the_hard_halt(tmp_path):
     node, run_dir, tools = _node(tmp_path)
     write_stop_request(run_dir, by="backstop", reason="r", grace_s=0,
-                       termination=terminal.BACKSTOP_TIME)
+                       termination=terminal.BACKSTOP_USD)
     node._stop_tick()
     node._stop["deadline"] = time.time() - 10
     assert node._wind_down_overdue() is True
@@ -414,9 +414,10 @@ def test_resume_asks_a_crashed_run_only_when_configured(tmp_path):
         settings.configure({}, {})
 
 
-def test_a_resume_past_the_budget_winds_down_through_the_backstop(tmp_path):
-    """A crashed run resumed after its budget: the anchored start makes the
-    time backstop trip on the first turn, and it asks for retrospectives."""
+def test_a_resume_past_the_budget_begins_the_wind_down_on_the_first_turn(tmp_path):
+    """A crashed run resumed after its budget: the anchored start puts the
+    clock past the budget, so the first turn begins the wind-down."""
+    from adda._src.infra import wind_down
     from adda._src.runtime.agent_runtime import AgenticRun
     from tests.test_route_aware_termination import (
         StubAdapter, _make_state, _minimal_spec)
@@ -430,13 +431,16 @@ def test_a_resume_past_the_budget_winds_down_through_the_backstop(tmp_path):
         AgenticRun.__new__(AgenticRun), run_dir / "debug", run_dir)
     assert time.time() - start > 400
 
-    node = Node(StubAdapter(), name="strategizer", outgoing=["implementer"],
+    adapter = StubAdapter()
+    node = Node(adapter, name="strategizer", outgoing=["implementer"],
                 spec=_minimal_spec())
     state = _make_state(study_dir=study)
     state.update(budget_seconds=10, start_time=start, run_dir=str(run_dir))
-    node(state)
-    req = read_stop_request(run_dir)
-    assert req["by"] == "backstop" and req["termination"] == terminal.BACKSTOP_TIME
+    cmd = node(state)
+    rec = json.loads((run_dir / "debug" / "wind_down.json").read_text())
+    assert rec["elapsed_at_start"] > 400
+    assert wind_down.active()
+    assert cmd.goto == "strategizer", "the first forced turn follows"
 
 
 def test_a_wound_down_halt_stays_resumable_with_its_halted_status(tmp_path):
@@ -461,8 +465,8 @@ def test_a_wound_down_halt_stays_resumable_with_its_halted_status(tmp_path):
     )
     run._finalize_run(ctx, {
         "last_report": "x", "outcome": "UNGATED",
-        "termination": terminal.BACKSTOP_TIME, "reviewed": False,
+        "termination": terminal.TIME_BUDGET, "reviewed": False,
         "token_totals": {}})
     status = json.loads((debug_dir / "run_status.json").read_text())
     assert status["status"] == "halted" and status["resumable"] is True
-    assert status["termination"] == terminal.BACKSTOP_TIME
+    assert status["termination"] == terminal.TIME_BUDGET

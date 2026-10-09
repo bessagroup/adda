@@ -55,8 +55,9 @@ question that waits for you.
 
 The header shows the vitals of the selected run:
 
-- **Wall clock** against the budget in `config.yaml`. The bar spans twice the
-  budget, with marks at 1×, 1.5× (no new delegations) and 2× (stop).
+- **Wall clock** against the budget in `config.yaml`. The bar spans the
+  budget, with marks at 75% (first budget notice), 90% (no new delegations)
+  and 100% (the wind-down begins).
 - **Cost**, summed over metered calls. A call with no price is counted
   separately ("+3 calls without cost data"), because an unknown price is not a
   free call.

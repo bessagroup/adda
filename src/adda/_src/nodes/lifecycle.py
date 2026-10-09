@@ -1,13 +1,12 @@
-"""Run lifecycle: unrecoverable-condition detectors (USD budget, repeated errors,
-time backstop) and the resumable checkpoint-halt. A mixin on the strategizer."""
+"""Run lifecycle: unrecoverable-condition detectors (USD budget, repeated errors)
+and the resumable checkpoint-halt. A mixin on the strategizer. The wall-clock
+limit is in ``time_rules.py``."""
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ..runtime import terminal
-from ._constants import backstop_enabled, run_backstop_multiple
 
 if TYPE_CHECKING:
     from langgraph.types import Command
@@ -148,79 +147,9 @@ class LifecycleMixin:
             state, reason=reason, termination=termination,
             extra_update=tallies)
 
-    def _time_backstop_due(
-        self, budget: float | None, start: float | None,
-    ) -> tuple[dict, str] | None:
-        """``(drift, reason)`` once the run is past ``run_backstop_multiple`` x
-        its time budget, else None."""
-        if not backstop_enabled() or budget is None or start is None:
-            return None
-        mult = run_backstop_multiple()
-        elapsed = time.time() - start
-        if elapsed <= budget * mult:
-            return None
-        with self._registry_lock:
-            abandoned = [d for d, e in self._registry.items()
-                         if e["status"] == "Working"]
-        return (
-            {"error_type": "RUN_BACKSTOP", "elapsed": elapsed,
-             "budget": budget, "multiple": mult, "abandoned": abandoned},
-            f"time backstop: {int(mult)}x budget exceeded "
-            f"({elapsed:.0f}s / {budget:.0f}s)")
-
-    def _time_backstop_tick(self) -> None:
-        """Ask for the time-backstop wind-down from outside the turn loop.
-
-        A turn on a CLI backend is one long session, so the check between
-        turns never runs while a delegation, a ``Wait`` or a gate review is in
-        flight. This is called from the stop checkpoints (every tool result,
-        every ``Wait`` tick) and from a timer thread, and does what the
-        between-turn check does: one stop request, one BACKSTOP_WIND_DOWN row.
-        """
-        if self._stop is not None or self._run_start is None:
-            return
-        due = self._time_backstop_due(self._budget_seconds, self._run_start)
-        if due is None:
-            return
-        drift, reason = due
-        with self._backstop_tick_lock:
-            if self._stop is not None or self._backstop_requested:
-                return
-            self._backstop_requested = True
-        self._record_science_drift(drift)
-        if self._request_wind_down(
-                reason=reason, termination=terminal.BACKSTOP_TIME):
-            self._record_intervention(
-                "BACKSTOP_WIND_DOWN", "(run)",
-                f"{reason}; winding down for retrospectives, closing "
-                f"{terminal.BACKSTOP_TIME}")
-
-    def _start_backstop_timer(self) -> None:
-        """One daemon thread per run that fires the time backstop at its
-        deadline even when no checkpoint is reached."""
-        import threading
-
-        budget, start = self._budget_seconds, self._run_start
-        if (self._backstop_timer is not None or not backstop_enabled()
-                or budget is None or start is None):
-            return
-        delay = start + budget * run_backstop_multiple() - time.time()
-
-        def _fire() -> None:
-            try:
-                self._time_backstop_tick()
-            except Exception:  # noqa: BLE001
-                pass
-
-        t = threading.Timer(max(delay, 0.0) + 0.5, _fire)
-        t.daemon = True
-        self._backstop_timer = t
-        t.start()
-
     def _check_unrecoverable(self, state: Any, budget: float | None, start: float | None) -> Command | None:
         """Return a halt Command if an unrecoverable condition is met, else None.
-        Extracted verbatim from __call__ (USD ceiling → repeated errors → time
-        backstop)."""
+        Extracted verbatim from __call__ (USD ceiling → repeated errors)."""
 
         # (1) USD cost ceiling. Hard, resumable (raise budget_usd and resume).
         # Inactive under ollama (no cost data): warn once, never halt.
@@ -291,17 +220,5 @@ class LifecycleMixin:
                                  else terminal.REPEATED_ERRORS),
                     tallies=self._halt_tallies(state),
                 )
-
-        # (3) Time backstop: past run_backstop_multiple x the (soft) time
-        # budget, bound runaway cost. Now resumable (raise budget + resume).
-        due = self._time_backstop_due(budget, start)
-        if due is not None:
-            if self._backstop_requested and self._stop is None:
-                return None
-            drift, reason = due
-            return self._trip(
-                state, drift=drift, reason=reason,
-                termination=terminal.BACKSTOP_TIME,
-                tallies=self._halt_tallies(state))
 
         return None

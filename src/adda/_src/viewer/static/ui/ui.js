@@ -275,7 +275,7 @@ function paintTitle() {
   if (!v) { $("title").innerHTML = `<div><div class="lbl">Run</div><div class="runid mono">${esc(S.run || "—")}</div></div>`; return; }
   const status = run ? run.status : null;
   const budget = v.budget_s, el = elapsedNow();
-  const frac = budget && el != null ? Math.min(1, el / (2 * budget)) : null;
+  const frac = budget && el != null ? Math.min(1, el / budget) : null;
   const done = S.dels.filter((d) => delState(d)[0] === "ok").length;
   const running = S.dels.filter((d) => delState(d)[0] === "live").length;
   const fom = S.fom && S.fom.declared && S.fom.n_counted ? S.fom : null;
@@ -286,8 +286,8 @@ function paintTitle() {
     `<div class="who" title="Study and model, from the study's config.yaml">${esc(who)}</div></div>` +
     `<div><div class="lbl">Wall clock</div><div class="vital" id="elapsed">${fmtH(el)}` +
     (budget ? `<small>/ ${fmtH(budget)}</small>` : `<small title="The study's config.yaml declares no parseable budget">no budget</small>`) + `</div>` +
-    (frac != null ? `<div class="clock" title="Track spans 2× the budget: 1× is the budget, 1.5× no new delegations, 2× stop"><b class="${clockTone(el, budget)}" style="width:${(frac * 100).toFixed(1)}%"></b>` +
-      [["1×", 50], ["1.5×", 75], ["2×", 100]].map((t) => `<u style="left:${t[1]}%"></u><em style="left:${t[1]}%">${t[0]}</em>`).join("") + `</div>` : "") + `</div>` +
+    (frac != null ? `<div class="clock" title="Track spans the budget: from 75% budget notices, 90% no new delegations, 100% wind-down (nothing is killed)"><b class="${clockTone(el, budget)}" style="width:${(frac * 100).toFixed(1)}%"></b>` +
+      [["50%", 50], ["75%", 75], ["90%", 90], ["100%", 100]].map((t) => `<u style="left:${t[1]}%"></u><em style="left:${t[1]}%">${t[0]}</em>`).join("") + `</div>` : "") + `</div>` +
     `<div><div class="lbl">Cost</div><div class="vital" title="Summed over metered calls; calls with no price are counted separately">${fmtCost(v.cost_usd)}${unknown}</div></div>` +
     `<div><div class="lbl">Delegations</div><div class="vital">${S.dels.filter((d) => !isGate(d) && !isFB(d)).length}` +
     `<small>${running ? done + " done · " + running + " running" : "all done"}</small></div></div>` +
@@ -296,7 +296,7 @@ function paintTitle() {
       : `<div class="vital">${dash(!S.fom || !S.fom.declared ? "No objective declared for this study" : S.oracle && S.oracle.registered === false ? "No oracle registered for this run" : "No counted rows in the store yet")}</div>`) + `</div>` +
     `<div>${actionsHtml(v.closed)}</div>`;
 }
-function clockTone(el, budget) { return el > 2 * budget ? "bad" : el > 1.5 * budget ? "warn" : ""; }
+function clockTone(el, budget) { return el >= budget ? "bad" : el >= 0.75 * budget ? "warn" : ""; }
 function actionsHtml(closed) {
   return closed
     ? `<button class="btn primary" id="openstart" title="Run the pre-flight checks and start a new run of this study">Re-run study</button>`
@@ -1821,7 +1821,7 @@ setInterval(() => {
   const e = $("elapsed"); if (!e || !liveNow()) return;
   e.firstChild.nodeValue = fmtH(elapsedNow());
   const b = document.querySelector(".clock b"), bud = S.vitals && S.vitals.budget_s;
-  if (b && bud) { b.className = clockTone(elapsedNow(), bud); b.style.width = (Math.min(1, elapsedNow() / (2 * bud)) * 100).toFixed(1) + "%"; }
+  if (b && bud) { b.className = clockTone(elapsedNow(), bud); b.style.width = (Math.min(1, elapsedNow() / bud) * 100).toFixed(1) + "%"; }
 }, 1000);
 
 /* ── boot ────────────────────────────────────────────────────────────────── */

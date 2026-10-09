@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import os
 import threading
 import time
 import uuid
@@ -23,12 +24,6 @@ from ..infra.delegation_log import DelegationLog
 from ..infra.stop_request import write_stop_request
 from ..infra.telemetry import NORMALIZED_FIELDS
 from ..infra.workspace_vcs import init_workspace_repo
-from ..nodes._constants import (
-    backstop_enabled,
-    delegate_cutoff_enabled,
-    delegate_cutoff_multiple,
-    run_backstop_multiple,
-)
 from ..prompts.agent_prompts import (
     RUN_PATHS_PREAMBLE_TEMPLATE,
     TEAM_ROSTER_TEMPLATE,
@@ -88,26 +83,6 @@ _EXTERNAL_STOP_SIGNATURES = {
     "org_spend_limit": "org's monthly spend limit",
 }
 
-
-
-def _warn_if_delegate_cutoff_unreachable() -> None:
-    """Startup guard: delegate_cutoff_multiple must sit strictly below
-    run_backstop_multiple or it can never fire — the run closes at the
-    backstop first. Not fatal (a stale/typo'd knob shouldn't make a study
-    unstartable, matching settings.configure's own leniency for unknown
-    keys); just tells the operator loudly, once, at the top of the run."""
-    if not delegate_cutoff_enabled() or not backstop_enabled():
-        return
-    _cutoff, _backstop = delegate_cutoff_multiple(), run_backstop_multiple()
-    if _cutoff >= _backstop:
-        logging.getLogger("adda").warning(
-            "runtime: delegate_cutoff_multiple (%.2gx) >= "
-            "run_backstop_multiple (%.2gx) — the run-level backstop closes "
-            "the run before the delegate cutoff can ever refuse a "
-            "delegation. Set delegate_cutoff_multiple below "
-            "run_backstop_multiple for it to take effect.",
-            _cutoff, _backstop,
-        )
 
 
 def resolve_node_identity(
@@ -501,7 +476,6 @@ class AgenticRun:
         # process-global, so building two AgenticRun objects before running
         # either would leave both executing under the second one's config.
         settings.configure(self._study_runtime, self._runtime_override)
-        _warn_if_delegate_cutoff_unreachable()
         ctx = self._prepare_run()
         result = self._invoke_graph(ctx)
         return self._finalize_run(ctx, result)
@@ -558,6 +532,7 @@ class AgenticRun:
             log.log(level, msg)
 
         start_time = self._anchor_start_time(debug_dir, resume)
+        self._publish_eval_deadline(debug_dir, start_time)
 
         # Create graph-wide delegation log for episodic memory.
         delegation_log = DelegationLog(debug_dir / "delegation_log.jsonl")
@@ -763,6 +738,23 @@ class AgenticRun:
         log.addHandler(handler)
         log.info(f"Run starting: model={self._model}, study={self.study_dir}")
         return log, handler
+
+    def _publish_eval_deadline(self, debug_dir: Path, start_time: float) -> None:
+        """Tell the metered evaluator when the wind-down begins, so a
+        campaign process (which has no run clock) refuses new evaluations."""
+        budget = getattr(self, "_budget", None)
+        if not budget:
+            return
+        path = debug_dir / "run_config.json"
+        try:
+            cfg = json.loads(path.read_text(encoding="utf-8"))
+            cfg["eval_stop_epoch"] = start_time + budget * settings.get_float(
+                "wind_down_at", 1.0)
+            tmp = path.with_suffix(f".{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+            tmp.replace(path)
+        except (OSError, ValueError):
+            pass
 
     def _anchor_start_time(self, debug_dir: Path, resume: Path | None) -> float:
         """The run's wall-clock anchor, persisted in its OWN file.
@@ -1181,6 +1173,12 @@ class AgenticRun:
 
         now_ts = datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
         elapsed = time.time() - ctx.start_time
+        wind_down = self._read_wind_down(ctx) if (
+            termination == terminal.TIME_BUDGET) else {}
+        if wind_down.get("closed_at"):
+            elapsed = wind_down["closed_at"] - ctx.start_time
+        for _n in (getattr(self, "_live_nodes", None) or {}).values():
+            _n._time_rules_cancel()
         cost = tokens.get("total_cost_usd")
         cost_str = f"${cost:.4f}" if cost is not None else "n/a"
 
@@ -1215,9 +1213,11 @@ class AgenticRun:
         # a verdict either: it keeps the "halted" status it had before it went
         # through the wind-down, and stays resumable.
         _halted = termination in (
-            terminal.BACKSTOP_TIME, terminal.BACKSTOP_USD,
+            terminal.BACKSTOP_USD,
             terminal.REPEATED_ERRORS, terminal.CRASHED,
-            terminal.BACKEND_UNAVAILABLE)
+            terminal.BACKEND_UNAVAILABLE) or (
+            termination == terminal.TIME_BUDGET
+            and gate_outcome != terminal.GATED)
         self._write_run_status(
             ctx.debug_dir,
             status=("STOPPED" if _stopped else "halted" if _halted
@@ -1237,6 +1237,15 @@ class AgenticRun:
             # reads first; without it every consumer re-derives the duration
             # from file mtimes and gets a different answer.
             wall_s=round(elapsed, 1),
+            **({"overrun_s": round(max(0.0, elapsed - self._budget), 1)}
+               if getattr(self, "_budget", None) else {}),
+            **({"wind_down_turns": wind_down.get("forced_turns", 0),
+                "deliverables_missing": wind_down.get(
+                    "deliverables_missing", []),
+                "reproduction_gate": wind_down.get("reproduction_gate"),
+                "critic_verdict": wind_down.get("critic_verdict"),
+                "interrupted": wind_down.get("interrupted", [])}
+               if wind_down else {}),
         )
         self._append_kpi_ledger(ctx)
 
@@ -1251,6 +1260,15 @@ class AgenticRun:
         log.removeHandler(ctx.log_handler)
         ctx.log_handler.close()
         return report
+
+    @staticmethod
+    def _read_wind_down(ctx: _RunContext) -> dict:
+        try:
+            return json.loads(
+                (ctx.debug_dir / "wind_down.json").read_text(
+                    encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
 
     def _fallback_retrospective(
         self, run_dir: Path, reason: str | None = None

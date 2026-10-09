@@ -47,6 +47,16 @@ def test_a_halted_run_cannot_be_gated():
         assert outcome == terminal.UNGATED, term
 
 
+def test_a_reviewed_time_budget_wind_down_can_be_gated():
+    """The wind-down ends with one gate and one review, so it can earn GATED."""
+    assert terminal.TIME_BUDGET not in terminal.HALT_TERMINATIONS
+    assert terminal.resolve(terminal.GATED, terminal.TIME_BUDGET, True) == (
+        terminal.GATED, terminal.TIME_BUDGET, True)
+    outcome, _, _ = terminal.resolve(
+        terminal.GATED, terminal.TIME_BUDGET, False)
+    assert outcome == terminal.UNGATED
+
+
 def test_an_unreviewed_run_cannot_be_gated():
     """GATED means a critic gate passed it. No critic, no gate, no GATED."""
     outcome, _, _ = terminal.resolve(

@@ -22,6 +22,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from ..infra import interrupt as _interrupt
+from ..infra import wind_down as _wind_down
 from ..infra.run_abandon import raise_if_stopped
 from ..infra.telemetry import call_shape, normalized_usage
 from . import context_budget, context_compaction
@@ -207,6 +209,34 @@ class _BashSession:
         self._bg: dict[str, dict] = {}   # bash_id -> {proc, spool, handle, cursor}
         self._n = 0
         self._lock = threading.Lock()
+        # Every shell this session started: pid -> process start time. The
+        # wind-down interrupts exactly these (the start time guards against a recycled pid).
+        self._started: dict[int, float | None] = {}
+
+    def track(self, pid: int) -> None:
+        try:
+            import psutil
+            started = psutil.Process(pid).create_time()
+        except Exception:  # noqa: BLE001
+            started = None
+        with self._lock:
+            self._started[pid] = started
+
+    def untrack(self, pid: int) -> None:
+        with self._lock:
+            self._started.pop(pid, None)
+
+    def interrupt(self) -> list[dict]:
+        """SIGINT the shells this session started (and what they started).
+        The start time guards against a recycled pid."""
+        from ..infra.resource_backend import get_resource_backend
+        be = get_resource_backend()
+        with self._lock:
+            started = dict(self._started)
+        ours = [pid for pid, t in started.items()
+                if t is None or (be.proc_start_time(pid) is not None
+                                 and abs(be.proc_start_time(pid) - t) < 1e-3)]
+        return _interrupt.interrupt_pids(ours)
 
     def add_background(self, proc, spool: str, handle) -> str:
         with self._lock:
@@ -355,6 +385,7 @@ def _make_bash_tool(cwd: Path | None, nudge: Any = None,
             command, shell=True, cwd=sess.cwd, env=_shell_env(delegation_id() if delegation_id else None,
                            run_config() if run_config else None),
             stdout=handle, stderr=subprocess.STDOUT)
+        sess.track(proc.pid)
 
         def _nudge_msg():
             return nudge("Bash", {"command": command}) if nudge else None
@@ -367,6 +398,7 @@ def _make_bash_tool(cwd: Path | None, nudge: Any = None,
                            nudge_msg=_nudge_msg())
         try:
             proc.wait(timeout=timeout_s)
+            sess.untrack(proc.pid)
             handle.close()
             out, _ = _read_spill(spool_path, 0)
             os.unlink(spool_path) if len(out) <= _BASH_INLINE_CAP else None
@@ -477,7 +509,8 @@ def _make_write_tool(cwd: Path | None, nudge: Any = None) -> Any:
     return StructuredTool.from_function(write_file, name="Write")
 
 
-def _guard_native(tool: Any, on_error: Any = None) -> Any:
+def _guard_native(tool: Any, on_error: Any = None,
+                  delegation_id: Any = None) -> Any:
     """Make a tool's failure a result the model reads, never a crash.
 
     An exception that leaves a tool propagates through LangGraph and ends the
@@ -496,6 +529,16 @@ def _guard_native(tool: Any, on_error: Any = None) -> Any:
     @functools.wraps(inner)
     def guarded(*args, **kwargs):
         raise_if_stopped(tool.name)
+        did = delegation_id() if callable(delegation_id) else None
+        refusal = _wind_down.check(
+            did or "entry", tool.name, can_call_done=not did)
+        if refusal:
+            if on_error is not None:
+                try:
+                    on_error(tool.name, refusal, {})
+                except Exception:  # noqa: BLE001
+                    pass
+            return refusal
         try:
             result = inner(*args, **kwargs)
         except Exception as exc:  # noqa: BLE001
@@ -516,10 +559,11 @@ def _guard_native(tool: Any, on_error: Any = None) -> Any:
 def _native_tool_map(cwd: Path | None, nudge: Any = None,
                      on_error: Any = None,
                      delegation_id: Any = None,
-                     run_config: Any = None) -> dict[str, Any]:
+                     run_config: Any = None,
+                     session: _BashSession | None = None) -> dict[str, Any]:
     # One BashSession shared by Bash/BashOutput/KillShell so background shells
     # launched by Bash are visible to the companion tools.
-    session = _BashSession(cwd)
+    session = session if session is not None else _BashSession(cwd)
     tools = {
         "Bash":  _make_bash_tool(cwd, nudge, session=session,
                                  delegation_id=delegation_id,
@@ -532,7 +576,8 @@ def _native_tool_map(cwd: Path | None, nudge: Any = None,
         "Glob":  _make_glob_tool(cwd),
         "Grep":  _make_grep_tool(),
     }
-    return {name: _guard_native(t, on_error) for name, t in tools.items()}
+    return {name: _guard_native(t, on_error, delegation_id)
+            for name, t in tools.items()}
 
 
 def _build_arxiv_closures() -> dict:
@@ -845,6 +890,7 @@ class OpenAICompatibleAdapter:
         # invoke().  Reset to None whenever native_tools or closure_tools change
         # so the next invoke() picks up the updated tool set.
         self._agent: Any = None
+        self._bash_session: Any = None
         # route_watcher is set by an orchestrating node; unused by these adapters
         # (create_react_agent runs the full tool loop to completion) but must
         # be present so Node's orchestration setup doesn't raise AttributeError.
@@ -877,11 +923,17 @@ class OpenAICompatibleAdapter:
         twin._lock = threading.Lock()
         twin._summary_cache = {}
         twin._agent = None
+        twin._bash_session = None
         twin._oracle_nudge = OracleNudgeBudget()
         twin._notice_ctx = (None, None)
         twin.last_usage = {}
         twin.last_session_id = None
         return twin
+
+    def interrupt(self) -> list[dict]:
+        """SIGINT the shells this adapter started; the turn goes on."""
+        session = getattr(self, "_bash_session", None)
+        return session.interrupt() if session is not None else []
 
     def _post_tool_context(self, tool_name: str, tool_input: dict) -> str | None:
         """Raw-oracle nudge plus queued campaign notices, same text the Claude
@@ -911,8 +963,10 @@ class OpenAICompatibleAdapter:
         from langchain_core.tools import StructuredTool
 
         from ..prompts.tool_catalog import tool_summary
+        self._bash_session = _BashSession(self.study_dir)
         native_map = _native_tool_map(
             self.study_dir, self._post_tool_context, self._record_native_error,
+            session=self._bash_session,
             # A callable, not thread-local state: LangGraph runs tools on its
             # own threads. _notice_ctx is set per invoke, on the invoking thread.
             delegation_id=lambda: self._notice_ctx[1],
@@ -950,7 +1004,9 @@ class OpenAICompatibleAdapter:
         if self.extra_allowed_tools:
             lit_tools = _make_literature_tools()
             allowed = set(self.extra_allowed_tools)
-            tools += [_guard_native(t, self._record_native_error) for t in lit_tools
+            tools += [_guard_native(t, self._record_native_error,
+                                    lambda: self._notice_ctx[1])
+                      for t in lit_tools
                       if t.name in allowed]
         return tools
 
@@ -1214,9 +1270,11 @@ class OpenAICompatibleAdapter:
             self.last_session_id = None
             self.last_usage = {}
             try:
-                return retry_on_transient(
-                    lambda: self._invoke_once(messages), max_attempts=retry_max,
-                    on_retry=getattr(self, "on_retry", None))
+                with _interrupt.in_flight(self):
+                    return retry_on_transient(
+                        lambda: self._invoke_once(messages),
+                        max_attempts=retry_max,
+                        on_retry=getattr(self, "on_retry", None))
             finally:
                 if background_watch is not None:
                     background_watch.end(min_depth=1)

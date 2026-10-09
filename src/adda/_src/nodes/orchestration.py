@@ -21,8 +21,8 @@ if TYPE_CHECKING:
 
 from ..epistemics.hypothesis_ledger import HypothesisLedger
 from ..epistemics.science_monitor import ScienceMonitor
+from ..infra import wind_down as _wind_down
 from ..infra.delegation_log import DelegationLog
-from ._constants import budget_band_due, budget_wrapup_message
 from .notices import insert_notice, wrap_notice
 from .parsing import _to_adapter_messages
 
@@ -97,9 +97,19 @@ class OrchestrationMixin:
         # Budget state — set at the start of each __call__ from AgenticState
         self._budget_seconds: float | None = None
         self._run_start: float | None = None
-        self._backstop_timer: Any = None
-        self._backstop_requested = False
-        self._backstop_tick_lock = threading.Lock()
+        # Wall-clock rules (nodes/time_rules.py). Only the entry node, which
+        # holds the run clock, ever sets ``_time_rules``.
+        self._time_rules: Any = None
+        self._time_fired: set[str] = set()
+        self._time_lock = threading.Lock()
+        self._time_timers: list[threading.Timer] = []
+        self._time_closed = False
+        self._time_armed = False
+        # Wind-down state (nodes/wind_down.py); set on the entry node only.
+        self._wd_started_at: float | None = None
+        self._wd_turns = 0
+        self._wd_step_turns = {"wait": 0, "done": 0}
+        self._wd_save_asked = False
         self._stop: dict | None = None
         # Hard USD cost ceiling (None = inactive). Set each __call__ from state.
         self._budget_usd: float | None = None
@@ -117,9 +127,6 @@ class OrchestrationMixin:
         # worker tool results.  Keyed by delegation_id; drained on next call.
         self._pending_worker_msgs: dict[str, list[str]] = {}
         self._pending_worker_msgs_lock = threading.Lock()
-        # Tracks which budget % thresholds (80, 90, 100, 110 …) have already
-        # been broadcast to workers so each is sent exactly once.
-        self._budget_notified_pcts: set[int] = set()
         # Whether THIS node owns the run's epistemic ledgers. Decided once,
         # here, from what graph_builder passed: it hands the real notes_dir
         # to every orchestrating node (any node with outgoing edges), not
@@ -703,7 +710,12 @@ class OrchestrationMixin:
                 pass  # signature mismatch: let fn raise its own error
 
             try:
-                result = fn(*args, **kwargs)
+                from ..backends.base import get_delegation_id as _gdid
+                _did = _gdid()
+                result = _wind_down.check(
+                    _did or "entry", tool_name, can_call_done=not _did)
+                if result is None:
+                    result = fn(*args, **kwargs)
                 if (
                     isinstance(result, str)
                     and result.lstrip().startswith("ERROR:")
@@ -843,7 +855,7 @@ class OrchestrationMixin:
         # Store on node so the status poll can compute delegation timeout
         self._budget_seconds = state.get("budget_seconds")
         self._run_start = state.get("start_time")
-        self._start_backstop_timer()
+        self._time_rules_start()
         self._budget_usd = state.get("budget_usd")
 
         # Capture total_delegations so Delegate() can seed the counter.
@@ -882,44 +894,15 @@ class OrchestrationMixin:
     def _budget_warnings(self, state: AgenticState) -> list[dict]:
         """Advisory budget messages for this turn.
 
-        The time budget is a SOFT constraint — warnings only; the run is never
-        force-terminated for exceeding it. A separate run-level backstop
-        (RUN_BACKSTOP_MULTIPLE x budget) bounds runaway cost.
+        The eval budget is SOFT: a warning only. The time rules (notices at
+        ``budget_warn_from``, the cutoff, the wind-down) are in
+        ``nodes/time_rules.py`` and ``nodes/wind_down.py`` and reach the model as notifications.
         """
-        import time
-
         from ..runtime import features
         warnings: list[dict] = []
+        self._time_rules_tick()
         if not features.enabled("budget_notes"):
             return warnings
-        budget, start = self._budget_seconds, self._run_start
-        if budget is not None and start is not None:
-            elapsed = time.time() - start
-            pct = elapsed / budget
-            if pct >= 1.0:
-                # Escalating ladder, once per newly-crossed 10% band (100,
-                # 110, 120, …) — not every turn, which a model learns to
-                # skip. Shared with leaf.py/delegation.py so a worker gets
-                # the same signal (nodes/_constants.py).
-                if budget_band_due(elapsed, budget, self._budget_bands_fired):
-                    warnings.append({
-                        "role": "user",
-                        "content": budget_wrapup_message(
-                            elapsed, budget, can_call_done=True),
-                    })
-            elif pct >= 0.95:
-                warnings.append({
-                    "role": "user",
-                    "content": (
-                        f"Warning: time budget at {pct*100:.0f}% "
-                        f"({elapsed:.0f}s / {budget:.0f}s). "
-                        "Begin wrapping up — call Done() soon. Don't cancel a "
-                        "progressing delegation under time pressure; its evals "
-                        "are already ledgered and cancelling only loses its "
-                        "report (Wait(id, block=False) shows whether it's "
-                        "progressing)."
-                    ),
-                })
 
         eval_budget = state.get("eval_budget")
         evals_used = self._ledgered_eval_total(state.get("evals_used", 0))
@@ -1127,6 +1110,9 @@ class OrchestrationMixin:
         no separate post-accept repro check here; this handles only deliverable
         presence and un-accepted termination.
         """
+        held = self._wind_down_route(state, ai_msg)
+        if held is not None:
+            return held
         accepted = self._route.get("kind") == "done"
         missing = self._missing_deliverables(state)
         for router in (self._reprompt_while_working,
@@ -1146,9 +1132,9 @@ class OrchestrationMixin:
         report. Spending a bounded finish-attempt on it means a slow-but-healthy
         delegation (run-4: D004 at ~2.5 evals/s, ~100s from done, with wall
         budget to spare) burns 3 "finish attempts" across turns and force-
-        terminates the run UNGATED. The run's time backstop
-        (run_backstop_multiple x budget, checked each turn) bounds a delegation
-        that truly hangs.
+        terminates the run UNGATED. At the time budget the wind-down
+        (nodes/wind_down.py) takes over and handles a delegation that
+        truly hangs.
         """
         from langchain_core.messages import HumanMessage
         from langgraph.types import Command
@@ -1163,8 +1149,8 @@ class OrchestrationMixin:
             " progressing — collect them with Wait and call Done() only"
             " once they report (then write any remaining deliverables"
             " from their results). Do NOT close early. This wait does"
-            " NOT count against your finish attempts; the run's time"
-            " budget is the backstop."
+            " NOT count against your finish attempts; the wind-down at"
+            " the time budget ends the run."
         )
         if missing:
             msg += "\n\nStill to write AFTER they finish: " + ", ".join(missing)
