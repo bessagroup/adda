@@ -1,6 +1,8 @@
 """Tests for durable checkpoint + resume in AgenticRun."""
 from pathlib import Path
 
+import pytest
+
 from adda._src.runtime import terminal
 from adda._src.runtime.agent_runtime import AgenticRun
 
@@ -134,6 +136,58 @@ def test_invoke_crash_writes_resumable_status(tmp_path):
     assert status["status"] == "crashed"
     assert status["resumable"] is True
     assert status["thread_id"]
+
+
+def test_unreachable_backend_is_recorded_as_its_own_termination(tmp_path):
+    """A dead LLM endpoint (APIConnectionError) is infra, not an adda failure:
+    run_status says so, in the termination and the reason, and stays resumable."""
+    import json
+
+
+    class APIConnectionError(Exception):
+        pass
+
+    study = _make_study(tmp_path)
+    run = AgenticRun(study_dir=study, interactive=False)
+
+    class _Boom:
+        def invoke(self, state, config=None):
+            try:
+                raise ConnectionRefusedError("[Errno 61] Connection refused")
+            except ConnectionRefusedError as inner:
+                raise APIConnectionError("Connection error.") from inner
+
+    run._graph = _Boom()
+    with pytest.raises(APIConnectionError):
+        run.execute()
+
+    run_dir = next((study / "runs").iterdir())
+    status = json.loads((run_dir / "debug" / "run_status.json").read_text())
+    assert status["termination"] == terminal.BACKEND_UNAVAILABLE
+    assert status["reason"].startswith("backend endpoint unavailable")
+    assert status["resumable"] is True
+
+
+def test_backend_unreachable_classifier():
+
+    class APITimeoutError(Exception):
+        pass
+
+    class Sub(APITimeoutError):
+        pass
+
+    assert terminal.is_backend_unreachable(Sub("t"))
+    assert terminal.is_backend_unreachable(
+        RuntimeError("wrapped"), ) is False
+    try:
+        try:
+            raise APITimeoutError("t")
+        except APITimeoutError as inner:
+            raise RuntimeError("outer") from inner
+    except RuntimeError as outer:
+        assert terminal.is_backend_unreachable(outer)
+    assert not terminal.is_backend_unreachable(RuntimeError("kaboom"))
+    assert not terminal.is_backend_unreachable(None)
 
 
 # ---------------------------------------------------------------------------

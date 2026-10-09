@@ -1870,6 +1870,16 @@ no text is ever synthesized for them. A crash that already ran past the time
 budget needs no knob for the entry node: the resumed run keeps its original
 start, so the time backstop trips on the first turn.
 
+**A dead LLM endpoint has its own termination.** When the exception that
+crashes the graph is a connection-class failure of the model endpoint
+(`APIConnectionError`, `APITimeoutError`, `ConnectError`, `ConnectTimeout`, in
+the exception or its cause chain), `run_status.json` records
+`termination: "backend_unavailable"` and a `reason` that starts "backend
+endpoint unavailable", instead of the generic `crashed`; `status` stays
+`crashed` and the run stays resumable. Reports can then tell infrastructure
+loss from an adda failure. **Where:** `runtime/terminal.py`
+(`is_backend_unreachable`), the crash handler in `runtime/agent_runtime.py`.
+
 **Backstops go through it too.** A time, USD or repeated-errors backstop
 no longer jumps to END: it writes a stop request (`by="backstop"`) carrying
 its own `termination` (`backstop_time` / `backstop_usd` / `repeated_errors`),

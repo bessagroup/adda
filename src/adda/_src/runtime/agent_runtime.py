@@ -893,12 +893,17 @@ class AgenticRun:
                     # KeyboardInterrupt, OOM, …): record a resumable status so
                     # resume_from is always an option after a break, then
                     # re-raise (we do not swallow).
+                    _unreachable = terminal.is_backend_unreachable(_exc)
                     self._write_run_status(
                         ctx.debug_dir, status="crashed",
-                        reason=f"{type(_exc).__name__}: {_exc}"[:500],
+                        reason=(
+                            "backend endpoint unavailable: " if _unreachable
+                            else "") + f"{type(_exc).__name__}: {_exc}"[:500],
                         resumable=True, thread_id=ctx.thread_id,
                         outcome=terminal.UNGATED,
-                        termination=terminal.CRASHED, reviewed=False,
+                        termination=(
+                            terminal.BACKEND_UNAVAILABLE if _unreachable
+                            else terminal.CRASHED), reviewed=False,
                         # A crashed run's duration is exactly what the next
                         # resume needs to charge, so record it here too.
                         wall_s=round(time.time() - ctx.start_time, 1),

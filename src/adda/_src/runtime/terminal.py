@@ -38,6 +38,7 @@ __all__ = [
     "REPEATED_ERRORS",
     "RECURSION_LIMIT",
     "CRASHED",
+    "BACKEND_UNAVAILABLE",
     "KILLED",
     "STOPPED",
     "TERMINATIONS",
@@ -63,12 +64,14 @@ BACKSTOP_USD = "backstop_usd"        # hard USD ceiling
 REPEATED_ERRORS = "repeated_errors"  # max_consecutive_errors to one target
 RECURSION_LIMIT = "recursion_limit"  # LangGraph step ceiling
 CRASHED = "crashed"                  # unhandled exception
+BACKEND_UNAVAILABLE = "backend_unavailable"  # the LLM endpoint stayed unreachable
 KILLED = "killed"                    # external supervisor (wall-clock watchdog)
 STOPPED = "stopped"                  # operator/watchdog stop request, wound down
 
 TERMINATIONS = (
     DONE, NO_CLOSE, BACKSTOP_TIME, BACKSTOP_USD,
     REPEATED_ERRORS, RECURSION_LIMIT, CRASHED, KILLED, STOPPED,
+    BACKEND_UNAVAILABLE,
 )
 
 # Terminations that mean the run was stopped rather than finished. None of
@@ -77,8 +80,26 @@ TERMINATIONS = (
 # a killed run may have been minutes from a PASS (see internal/AUDIT-20260623).
 HALT_TERMINATIONS = (
     BACKSTOP_TIME, BACKSTOP_USD, REPEATED_ERRORS,
-    RECURSION_LIMIT, CRASHED, KILLED, STOPPED,
+    RECURSION_LIMIT, CRASHED, KILLED, STOPPED, BACKEND_UNAVAILABLE,
 )
+
+
+_UNREACHABLE_NAMES = frozenset({
+    "APIConnectionError", "APITimeoutError", "ConnectError", "ConnectTimeout"})
+
+
+def is_backend_unreachable(exc: BaseException | None) -> bool:
+    """True when ``exc`` (or anything in its cause/context chain) is a
+    connection-class failure of the LLM endpoint: it could not be reached, as
+    opposed to answering with an error. By the time one escapes a backend the
+    adapter's own retries are spent."""
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if any(c.__name__ in _UNREACHABLE_NAMES for c in type(exc).__mro__):
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
 
 
 def ungated_banner(flags: list[str]) -> str:
