@@ -214,11 +214,8 @@ class _BashSession:
         self._started: dict[int, float | None] = {}
 
     def track(self, pid: int) -> None:
-        try:
-            import psutil
-            started = psutil.Process(pid).create_time()
-        except Exception:  # noqa: BLE001
-            started = None
+        from ..infra.resource_backend import get_resource_backend
+        started = get_resource_backend().proc_start_time(pid)
         with self._lock:
             self._started[pid] = started
 

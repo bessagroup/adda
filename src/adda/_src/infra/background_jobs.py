@@ -87,11 +87,16 @@ def _scan(delegation_id: str, min_depth: int, ignore: tuple[str, ...]):
             except Exception:  # noqa: BLE001
                 attributed = False
             found[proc.pid] = (
-                BackgroundJob(proc.pid, proc.create_time(), cmd, attributed),
+                BackgroundJob(proc.pid, _start_time(proc.pid), cmd, attributed),
                 proc.ppid())
         except Exception:  # noqa: BLE001
             continue
     return found
+
+
+def _start_time(pid: int) -> float | None:
+    from .resource_backend import get_resource_backend
+    return get_resource_backend().proc_start_time(pid)
 
 
 def _roots(found: dict[int, tuple[BackgroundJob, int]]) -> list[BackgroundJob]:
@@ -112,7 +117,8 @@ def job_state(job: BackgroundJob) -> str:
         return "dead"
     try:
         proc = psutil.Process(job.pid)
-        if abs(proc.create_time() - job.start_time) > 1e-3:
+        now = _start_time(job.pid)
+        if now is None or job.start_time is None or abs(now - job.start_time) > 1e-3:
             return "dead"
         if proc.status() == psutil.STATUS_ZOMBIE:
             return "dead"

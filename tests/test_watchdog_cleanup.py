@@ -10,6 +10,7 @@ import time
 
 import psutil
 
+from adda._src.infra.resource_backend import get_resource_backend
 from adda._src.infra.watchdog_cleanup import (
     check_memory_and_kill,
     delegation_rss,
@@ -137,7 +138,7 @@ def test_memory_cap_actually_kills_a_real_over_cap_process(tmp_path):
         "x=bytearray(300*1024*1024); import time; time.sleep(120)",
     ])
     try:
-        start = psutil.Process(child.pid).create_time()  # the TRUE ownership token
+        start = get_resource_backend().proc_start_time(child.pid)  # the ownership token
         debug = tmp_path / "debug"; debug.mkdir(parents=True)
         (debug / "governor_pids.jsonl").write_text(json.dumps(
             {"delegation_id": "D001", "pid": child.pid, "start_time": start}) + "\n")

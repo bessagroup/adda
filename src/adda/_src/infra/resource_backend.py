@@ -55,7 +55,7 @@ class ResourceBackend(abc.ABC):
 
     @abc.abstractmethod
     def proc_start_time(self, pid: int) -> float | None:
-        """Process creation time (epoch seconds) for ownership verification —
+        """Process creation time (an opaque, comparable number) for ownership verification —
         the watcher compares this against the value recorded at registration so a
         RECYCLED pid (a different program that inherited the number) is never
         killed. None if the process is gone or the start time is unreadable."""
@@ -75,7 +75,15 @@ class PsutilBackend(ResourceBackend):
 
     def proc_start_time(self, pid: int) -> float | None:
         try:
-            return self._psutil.Process(pid).create_time()
+            proc = self._psutil.Process(pid)
+            try:
+                # Seconds since boot: stable across wall-clock steps. The
+                # epoch value adds boot_time(), which Linux re-derives from
+                # the wall clock on every call, so one process can read two
+                # values a second apart.
+                return proc.create_time(monotonic=True)
+            except TypeError:
+                return proc.create_time()
         except self._psutil.Error:
             return None
 

@@ -245,6 +245,31 @@ def test_interrupt_signals_only_recorded_pids():
             p.wait()
 
 
+def test_a_wall_clock_step_does_not_disarm_the_wind_down_interrupt(monkeypatch):
+    """psutil's epoch create_time adds boot_time(), which Linux re-reads from
+    the wall clock on every call. A one-second clock step (a CI VM syncing)
+    made the ownership check call a live shell a recycled pid, and the
+    SIGINT went to nobody."""
+    import psutil
+
+    from adda._src.backends.openai_compatible import _BashSession
+    sess = _BashSession(None)
+    mine = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        sess.track(mine.pid)
+        real = psutil.boot_time
+        monkeypatch.setattr(psutil, "boot_time", lambda: real() + 1.0)
+        if hasattr(psutil, "_pslinux"):
+            monkeypatch.setattr(psutil._pslinux, "boot_time",
+                                lambda: real() + 1.0)
+        sess.interrupt()
+        mine.wait(timeout=30)
+    finally:
+        if mine.poll() is None:
+            mine.kill()
+        mine.wait()
+
+
 def test_a_bash_session_interrupts_only_its_own_shells():
     from adda._src.backends.openai_compatible import _BashSession
     sess = _BashSession(None)
