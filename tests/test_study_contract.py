@@ -27,6 +27,7 @@ EXAMPLE = _REPO / "studies" / "example_study"
 DOCUMENTED_TOP_KEYS = {
     "model", "backend", "budget", "budget_usd", "eval_budget",
     "required_deliverables", "evaluator", "runtime", "objective",
+    "budget_clock", "token_budget", "watchdog_wall_s",
 }
 DOCUMENTED_EVALUATOR_KEYS = {
     "entrypoint", "output_names", "lookup", "fidelity_column", "name",

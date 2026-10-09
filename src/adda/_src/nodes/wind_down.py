@@ -1,4 +1,4 @@
-"""The wind-down: how a run ends when the time budget ``B`` is spent.
+"""The wind-down: how a run ends when the budget ``B`` (wall time or output tokens) is spent.
 
 ``B`` is the real limit and nothing is killed. At ``wind_down_at`` x ``B`` the
 entry node (which holds the run clock) begins the wind-down:
@@ -45,7 +45,7 @@ from .stop import _LIVE
 RECORD_FILE = "wind_down.json"
 
 HUB_NOTICE = (
-    "WIND-DOWN: the time budget of {budget} is spent. Nothing is killed. New "
+    "WIND-DOWN: the {budget} is spent. Nothing is killed. New "
     "delegations and new evaluations are refused, and Bash and the search "
     "tools are closed. Do now, in this order: (1) Wait() for the running "
     "delegations; (2) save every result not yet stored: write a note naming "
@@ -56,7 +56,7 @@ HUB_NOTICE = (
     "once. There is no rework.")
 
 WORKER_NOTICE = (
-    "WIND-DOWN: the time budget of {budget} is spent. Nothing is killed. "
+    "WIND-DOWN: the {budget} is spent. Nothing is killed. "
     "Start nothing new: Bash and the search tools are closed. Do now, in "
     "this order: (1) let the work that runs finish; (2) save every result "
     "not yet stored: write a file or note that names each file and how it "
@@ -82,7 +82,7 @@ PENDING_REFUSAL = (
     "WIND-DOWN: {n} delegation(s) still run: {ids}. Call Wait() for them, "
     "then call Done() again.")
 REVIEW_PREFACE = (
-    "[WIND-DOWN REVIEW — the time budget is spent. This is the only review "
+    "[WIND-DOWN REVIEW — the budget is spent. This is the only review "
     "this run gets. There is no rework: judge what exists.]\n\n")
 
 
@@ -130,7 +130,10 @@ class WindDownMixin:
         rules = self._time_rules
         limit = int(settings.get_float("wind_down_tool_calls", 50))
         wind_down.begin(limit)
-        fields = {"budget": rules.budget_min(), "limit": limit}
+        if rules.tokens and self._current_run_dir is not None:
+            wind_down.publish_eval_stop(
+                Path(self._current_run_dir) / "debug", self._wd_started_at)
+        fields = {"budget": rules.budget_phrase(), "limit": limit}
         with self._notifications_lock:
             self._notifications.append(
                 "[" + HUB_NOTICE.format(**fields) + "]")
@@ -153,7 +156,9 @@ class WindDownMixin:
         t.start()
         self._wind_down_record(
             started_at=self._wd_started_at, elapsed_at_start=round(elapsed, 1),
-            budget_s=rules.budget, tool_call_limit=limit,
+            budget=rules.budget, budget_unit=("output_tokens" if rules.tokens
+                                           else "s"),
+            tool_call_limit=limit,
             running_at_start=sorted(live), forced_turns=0, interrupted=[])
 
     # ── W1: drain ────────────────────────────────────────────────────────────

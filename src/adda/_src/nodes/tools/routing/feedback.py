@@ -271,8 +271,8 @@ class FeedbackTools:
         gated = (verdict == "PASS"
                  and facts["reproduction_gate"] == "PASS")
         banner = (
-            "## ⚠ TIME BUDGET SPENT — run wound down\n\n"
-            "The time budget was spent, so this run closed from what existed. "
+            "## ⚠ BUDGET SPENT — run wound down\n\n"
+            "The budget was spent, so this run closed from what existed. "
             + ("The reproduction gate and the one critic review both "
                "passed: it is GATED. "
                if gated else "It is UNGATED. ")

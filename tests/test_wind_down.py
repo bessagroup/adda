@@ -207,7 +207,7 @@ def test_the_close_runs_one_reproduction_gate_and_no_rework(tmp_path):
     rec = json.loads((run_dir / "debug" / "wind_down.json").read_text())
     assert rec["reproduction_gate"].startswith("FAIL")
     assert cmd.update["outcome"] == terminal.UNGATED
-    assert "TIME BUDGET SPENT" in cmd.update["last_report"]
+    assert "BUDGET SPENT" in cmd.update["last_report"]
 
 
 def test_a_running_delegation_is_waited_for_and_never_cancelled(tmp_path):

@@ -1128,7 +1128,15 @@ class OpenAICompatibleAdapter:
             model=self.model, base_url=self._base_url, api_key=self._api_key,
             max_tokens=self._resolve_max_output_tokens(),
         )
-        return str(llm.invoke([HumanMessage(content=prompt)]).content or "")
+        reply = llm.invoke([HumanMessage(content=prompt)])
+        from ..infra import token_clock
+        if token_clock.enabled():
+            token_clock.record(
+                f"summary:{id(reply)}",
+                (getattr(reply, "usage_metadata", None) or {}).get(
+                    "output_tokens"),
+                "the model server's summary response")
+        return str(reply.content or "")
 
     def _context_hook(self, system_prompt: str):
         """A ``pre_model_hook`` that keeps one turn inside the served window.
@@ -1352,6 +1360,7 @@ class OpenAICompatibleAdapter:
         _debug = debug_enabled()
         result = None
         seen = 0
+        _turn_uid = uuid.uuid4().hex
 
         def _flush(state) -> None:
             """Append whatever messages are new since the last flush."""
@@ -1378,6 +1387,7 @@ class OpenAICompatibleAdapter:
                 {"messages": lc_msgs}, config=cfg, stream_mode="values",
             ):
                 result = state
+                self._count_output_tokens(state, len(lc_msgs), _turn_uid)
                 if _debug:
                     _flush(state)
                 raise_if_stopped("model call")
@@ -1395,6 +1405,21 @@ class OpenAICompatibleAdapter:
         self._capture_usage(lc_msgs, result)
 
         return str(last.content)
+
+    @staticmethod
+    def _count_output_tokens(state: dict, n_input: int, uid: str) -> None:
+        """Count each model call's output tokens on the run's token clock the
+        moment its AI message appears. A call that carries no count raises:
+        under that clock usage is never estimated."""
+        from ..infra import token_clock
+        if not token_clock.enabled():
+            return
+        for i, m in enumerate((state or {}).get("messages") or []):
+            if i < n_input or getattr(m, "type", None) != "ai":
+                continue
+            meta = getattr(m, "usage_metadata", None) or {}
+            token_clock.record(f"{uid}:{i}", meta.get("output_tokens"),
+                               "the model server's response")
 
     def _capture_usage(self, lc_msgs: list, result: dict | None) -> None:
         """Set ``last_usage`` from every model call this turn produced.

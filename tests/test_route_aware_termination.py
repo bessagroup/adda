@@ -239,7 +239,7 @@ def test_the_wind_down_closes_ungated_at_the_budget(tmp_path):
     assert cmd.update["termination"] == terminal.TIME_BUDGET
     assert cmd.update["outcome"] == terminal.UNGATED
     report = cmd.update.get("last_report", "")
-    assert "TIME BUDGET SPENT" in report and "CONCLUSION X" in report
+    assert "BUDGET SPENT" in report and "CONCLUSION X" in report
     rec = json.loads((run_dir / "debug" / "wind_down.json").read_text())
     assert rec["forced_turns"] >= 1 and "reproduction_gate" in rec
     assert rec["deliverables_missing"] is not None

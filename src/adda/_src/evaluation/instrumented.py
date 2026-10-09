@@ -22,6 +22,7 @@ from __future__ import annotations
 # ==========================================================================
 import inspect
 import time
+from collections.abc import Callable
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -151,11 +152,13 @@ class InstrumentedDataGenerator(DataGenerator):
         eval_budget: Optional[int] = None,
         dedup_scope: str = "delegation",
         oracle_rev: Optional[str] = None,
-        stop_after: Optional[float] = None,
+        stop_after: Optional[float | Callable[[], Optional[float]]] = None,
     ) -> None:
         self.inner = inner
         # Epoch seconds from which a live evaluation is refused (the run's
-        # graceful stop). A validation replay (dedup_scope="all") is exempt.
+        # wind-down), or a callable that returns it fresh: on the token clock
+        # the wind-down starts at an unforeseen moment. A validation replay
+        # (dedup_scope="all") is exempt.
         self.stop_after = stop_after
         self.oracle_rev = oracle_rev
         self.store_dir = Path(store_dir)
@@ -266,11 +269,13 @@ class InstrumentedDataGenerator(DataGenerator):
         # solver-config kwarg into experiment_sample._input_data as a side
         # effect must not make that column part of this design's identity
         # (see _coord_key's own docstring; real bug, run 20260927T012131).
-        if (self.stop_after is not None and self.dedup_scope == "delegation"
-                and time.time() >= self.stop_after):
+        stop_at = (self.stop_after() if callable(self.stop_after)
+                   and self.dedup_scope == "delegation" else self.stop_after)
+        if (stop_at is not None and self.dedup_scope == "delegation"
+                and time.time() >= stop_at):
             raise RuntimeError(
-                "ERROR: no new evaluations: the time budget is spent and the "
-                "run is in its graceful stop. Write up what you have; the "
+                "ERROR: no new evaluations: the budget is spent and the "
+                "run is in its wind-down. Write up what you have; the "
                 "ledger already holds every finished evaluation.")
         _submitted_key = self._coord_key(experiment_sample._input_data)
         _t0 = time.perf_counter()

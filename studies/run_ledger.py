@@ -42,6 +42,10 @@ COLUMNS = [
     "tokens_fresh_input", "tokens_cache_read", "tokens_cache_write",
     "tokens_output", "tokens_total", "tokens_schema",
     "cost_usd", "time_used", "wall_s",
+    # The output-token budget clock (budget_clock: output_tokens): the count
+    # the run's budget was measured against, and that budget. Blank on a
+    # wall-clock run.
+    "output_tokens_used", "token_budget",
     "milestones_done", "milestones_skipped",
     "milestones_pending", "diagnostics",
     # Computed from exact tokens x model_prices.yaml, alongside (never merged
@@ -310,7 +314,11 @@ def extract(run_dir: Path) -> dict:
     # final write.
     if status_f.exists():
         try:
-            row["wall_s"] = json.loads(status_f.read_text()).get("wall_s", "")
+            _st = json.loads(status_f.read_text())
+            row["wall_s"] = _st.get("wall_s", "")
+            if _st.get("token_budget"):
+                row["output_tokens_used"] = _st.get("output_tokens_used", "")
+                row["token_budget"] = _st["token_budget"]
         except Exception:
             pass
 

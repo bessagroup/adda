@@ -525,7 +525,7 @@ def get_evaluator(namespace: str | None = None) -> InstrumentedDataGenerator:
         eval_budget=cfg.get("eval_budget"),
         dedup_scope=dedup_scope,
         oracle_rev=oracle_rev,
-        stop_after=cfg.get("eval_stop_epoch"),
+        stop_after=lambda: _fresh_stop_epoch(cfg),
     )
 
 
@@ -559,6 +559,16 @@ def _resolve_delegation_id() -> str:
         "`export F3DASM_DELEGATION_ID=D000` — the id is only used to stamp "
         "provenance, so no directory needs to exist (no mkdir/cd required)."
     )
+
+
+def _fresh_stop_epoch(cfg: dict) -> float | None:
+    """``eval_stop_epoch`` as run_config.json holds it NOW. The run writes it
+    when the wind-down starts if the clock could not say so in advance (the
+    output-token clock); the construction-time value is the fallback."""
+    try:
+        return _load_run_config().get("eval_stop_epoch")
+    except (OSError, ValueError):
+        return cfg.get("eval_stop_epoch")
 
 
 def _load_run_config() -> dict:

@@ -5,7 +5,6 @@ from __future__ import annotations
 import inspect
 import json
 import logging
-import os
 import threading
 import time
 import uuid
@@ -19,10 +18,12 @@ from langchain_core.messages import HumanMessage
 from ..agents import ImplementerAgent, StrategizerAgent, _default_graph
 from ..backends.base import DEFAULT_PROMPT, Agent, Graph
 from ..infra import run_abandon as abandon
+from ..infra import token_clock
+from ..infra import wind_down as wind_down_gate
 from ..infra.container_runner import ContainerRunner
 from ..infra.delegation_log import DelegationLog
 from ..infra.stop_request import write_stop_request
-from ..infra.telemetry import NORMALIZED_FIELDS
+from ..infra.telemetry import NORMALIZED_FIELDS, Telemetry
 from ..infra.workspace_vcs import init_workspace_repo
 from ..prompts.agent_prompts import (
     RUN_PATHS_PREAMBLE_TEMPLATE,
@@ -280,8 +281,17 @@ class AgenticRun:
         self._mem_cap_bytes = resolve_mem_cap_bytes(cfg.get("mem_cap"))
         self._required_deliverables = cfg.get("required_deliverables") or []
 
+        # The budget clock: wall seconds (default) or generated output tokens.
+        try:
+            self._token_budget = token_clock.parse(
+                {**cfg, **({"budget": budget} if budget is not None else {})})
+        except ValueError as exc:
+            raise ValueError(f"config.yaml is invalid: {exc}") from exc
+
         # budget from config is HH:MM:SS string or seconds float
-        if budget is not None:
+        if self._token_budget is not None:
+            self._budget = None
+        elif budget is not None:
             self._budget = budget
         elif "budget" in cfg:
             self._budget = _parse_budget_str(cfg["budget"])
@@ -532,6 +542,11 @@ class AgenticRun:
             log.log(level, msg)
 
         start_time = self._anchor_start_time(debug_dir, resume)
+        _tok = getattr(self, "_token_budget", None)
+        token_clock.configure(
+            _tok,
+            seed=(Telemetry.merge(debug_dir)["totals"]["output_tokens"]
+                  if resume is not None and _tok else 0))
         self._publish_eval_deadline(debug_dir, start_time)
 
         # Create graph-wide delegation log for episodic memory.
@@ -745,16 +760,9 @@ class AgenticRun:
         budget = getattr(self, "_budget", None)
         if not budget:
             return
-        path = debug_dir / "run_config.json"
-        try:
-            cfg = json.loads(path.read_text(encoding="utf-8"))
-            cfg["eval_stop_epoch"] = start_time + budget * settings.get_float(
-                "wind_down_at", 1.0)
-            tmp = path.with_suffix(f".{os.getpid()}.tmp")
-            tmp.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-            tmp.replace(path)
-        except (OSError, ValueError):
-            pass
+        wind_down_gate.publish_eval_stop(
+            debug_dir,
+            start_time + budget * settings.get_float("wind_down_at", 1.0))
 
     def _anchor_start_time(self, debug_dir: Path, resume: Path | None) -> float:
         """The run's wall-clock anchor, persisted in its OWN file.
@@ -1150,7 +1158,6 @@ class AgenticRun:
         # Merge per-call telemetry into an analysis-ready summary.json (additive,
         # off the decision path — a failure here must not fail the run).
         try:
-            from ..infra.telemetry import Telemetry
             Telemetry.merge(ctx.debug_dir)
         except Exception:  # noqa: BLE001
             log.warning("telemetry merge failed", exc_info=True)
@@ -1179,6 +1186,10 @@ class AgenticRun:
             elapsed = wind_down["closed_at"] - ctx.start_time
         for _n in (getattr(self, "_live_nodes", None) or {}).values():
             _n._time_rules_cancel()
+        output_tokens_used = token_clock.used() if token_clock.enabled() else (
+            tokens.get("output_tokens"))
+        token_budget = token_clock.budget()
+        token_clock.configure(None)
         cost = tokens.get("total_cost_usd")
         cost_str = f"${cost:.4f}" if cost is not None else "n/a"
 
@@ -1237,6 +1248,7 @@ class AgenticRun:
             # reads first; without it every consumer re-derives the duration
             # from file mtimes and gets a different answer.
             wall_s=round(elapsed, 1),
+            output_tokens_used=output_tokens_used, token_budget=token_budget,
             **({"overrun_s": round(max(0.0, elapsed - self._budget), 1)}
                if getattr(self, "_budget", None) else {}),
             **({"wind_down_turns": wind_down.get("forced_turns", 0),

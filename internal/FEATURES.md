@@ -1471,6 +1471,44 @@ because a worker can run on another host. `infra/host_provenance.py`; test
   `tests/test_wind_down.py`, `tests/test_delegate_time_cutoff.py`,
   `tests/test_route_aware_termination.py`).
 
+### Output-token budget clock (`budget_clock: output_tokens`)
+- **What:** the run budget B counted in generated output tokens instead of
+  wall seconds, so two models get the same budget independent of GPU speed
+  and queue. `config.yaml`: `budget_clock: wall | output_tokens` (default
+  `wall`, unchanged) and `token_budget: <int>`. B is the output tokens summed
+  over EVERY node (entry, specialists, critic, validators); input tokens do not
+  count. The schedule is the wall clock's (notices from 75% every 5%, cutoff
+  at 0.90, wind-down at 1.0, 50-call limit) and the notice text says tokens
+  left. `budget` next to the token clock, `token_budget` on the wall clock,
+  and a bad value are rejected at start.
+- **Counting:** one process-wide counter (`infra/token_clock.py`), fed per
+  model call and idempotent per call key. Claude: the final `output_tokens` of
+  each API message, as its `message_delta` arrives
+  (`backends/claude.py::_count_output_tokens`), plus the residual of the
+  attempt's result usage. OpenAI-compatible (vLLM, ollama, openrouter): the
+  `usage_metadata` of each AI message and of each summary call
+  (`openai_compatible.py::_count_output_tokens`). A call that reports no count
+  raises `TokenUsageMissing` at that call: never estimated. A message counts
+  when it ends, so one very long message crosses a threshold late.
+- **No timers:** a listener on the counter fires the same idempotent tick on
+  its own thread when a threshold is crossed. At the wind-down the entry node
+  writes `eval_stop_epoch` into `debug/run_config.json`, which the metered
+  evaluator in a campaign process reads fresh at each call.
+- **Record:** `run_status.json` and the ledger carry `output_tokens_used` and
+  `token_budget`; `wall_s` is still recorded. `wind_down.json` carries
+  `budget` and `budget_unit`. A resume seeds the counter from the telemetry
+  sum.
+- **Watchdog:** stays on wall time (host safety). With no wall budget there is
+  no multiple: `watchdog_wall_s` is the absolute deadline, required by
+  `python -m adda.watchdog` on this clock; `--budget` is refused there.
+- **Plain Claude Code arm:** counted by the same stream accounting and
+  recorded, not enforced: no hook, no notices, no wind-down. The CLI has no
+  token cap (only `--max-budget-usd`, in dollars); it is not wired in.
+- **Where:** `infra/token_clock.py`; `runtime/time_rules.py` (`tokens`);
+  `nodes/time_rules.py`; `runtime/agent_runtime.py`;
+  `infra/watchdog_launcher.py`; `studies/run_ledger.py`.
+- **Status:** done, headless-tested (`tests/test_token_clock.py`).
+
 ### `python -m adda.watchdog` — the in-package run launcher (#41)
 - **What:** a launcher that runs a study as a CHILD process, in its own process
   group, and owns the wall-clock deadline from the PARENT — the maintainer's

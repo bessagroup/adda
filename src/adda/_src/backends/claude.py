@@ -8,10 +8,12 @@ import inspect as _inspect
 import re
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 from ..infra import interrupt as _interrupt
+from ..infra import token_clock
 from ..infra.run_abandon import raise_if_stopped
 from ..infra.telemetry import call_shape, normalized_usage
 from .base import DEFAULT_PROMPT, DEFAULT_TOOLS, record_stream_diagnostic
@@ -221,6 +223,17 @@ def _track_message_usage(
             by_id[cur[0]] = dict(m.get("usage") or {})
     elif et == "message_delta" and cur[0]:
         by_id.setdefault(cur[0], {}).update(event.get("usage") or {})
+
+
+def _count_output_tokens(event: Any, cur: list[str | None]) -> int:
+    """Count one API call's final output tokens on the run's token clock, as
+    its ``message_delta`` arrives. Returns the tokens newly counted."""
+    if not isinstance(event, dict) or event.get("type") != "message_delta" \
+            or not cur[0]:
+        return 0
+    return token_clock.record(
+        cur[0], (event.get("usage") or {}).get("output_tokens"),
+        "the Claude CLI stream")
 
 
 def _usage_fields(event: Any) -> dict:
@@ -849,6 +862,7 @@ class ClaudeAdapter:
         _deliberate_break = False
         _msg_usage: dict[str, dict] = {}
         _cur_msg_id: list[str | None] = [None]
+        _counted = [0]
         raise_if_stopped("model call")
         gen = query(prompt=prompt_str, options=options)
         # Idle-stream timeout — turns a silent stream into a retryable
@@ -996,6 +1010,8 @@ class ClaudeAdapter:
                 if isinstance(msg, StreamEvent):
                     _track_message_usage(
                         getattr(msg, "event", None), _msg_usage, _cur_msg_id)
+                    _counted[0] += _count_output_tokens(
+                        getattr(msg, "event", None), _cur_msg_id)
                 elif isinstance(msg, AssistantMessage) \
                         and getattr(msg, "usage", None) \
                         and getattr(msg, "message_id", None):
@@ -1073,7 +1089,8 @@ class ClaudeAdapter:
         finally:
             if _capture:
                 _flush_partial()  # disclose a stuck/torn-down turn's tail
-            self._settle_usage(last_result, _msg_usage, last_assistant)
+            self._settle_usage(last_result, _msg_usage, last_assistant,
+                               counted=_counted[0])
             _watch = getattr(self, "_background_watch", None)
             if _watch is not None:
                 # Depth 2: the CLI itself (depth 1) is not a background job.
@@ -1130,7 +1147,7 @@ class ClaudeAdapter:
         return text
 
     def _settle_usage(self, last_result: Any, _msg_usage: dict,
-                      last_assistant: Any) -> None:
+                      last_assistant: Any, counted: int = 0) -> None:
         """Record this attempt's usage and session id. Runs from ainvoke's
         ``finally`` so a stream that RAISES (idle TimeoutError, API error)
         still reports the usage it had streamed; ``invoke`` sums the
@@ -1181,6 +1198,19 @@ class ClaudeAdapter:
                 + (m.get("cache_read_input_tokens") or 0)
                 + (m.get("cache_creation_input_tokens") or 0)
                 for m in _msg_usage.values()]))
+
+        if token_clock.enabled():
+            # The stream counted each call as it ended; a call whose stream
+            # events never arrived is counted here from the usage the CLI
+            # reported for the whole attempt. A finished attempt with no
+            # reported count raises; a failed one keeps its real error.
+            out = self.last_usage.get("output_tokens")
+            if out is None and last_result is not None:
+                token_clock.record(uuid.uuid4().hex, None,
+                                   "the Claude CLI result")
+            if out and out > counted:
+                token_clock.record(uuid.uuid4().hex, out - counted,
+                                   "the Claude CLI result")
 
         self.last_session_id = (
             getattr(last_result, "session_id", None)

@@ -53,7 +53,7 @@ and every process it started. For the reasoning, see
 |---|---|
 | `study-dir` | The study directory. |
 | `--model MODEL` | Passed to `python -m adda` unchanged. |
-| `--budget DURATION` | The run's wall-clock budget. Required here, or as `budget:` in `config.yaml`. The deadline comes from it. |
+| `--budget DURATION` | The run's wall-clock budget. Required here, or as `budget:` in `config.yaml`. The deadline comes from it. With `budget_clock: output_tokens` there is no wall budget: drop this option and set `watchdog_wall_s:` in `config.yaml`, which is then the deadline itself. |
 | `--watchdog-multiple X` | The deadline is `X` times the budget. The default and the floor are both `2.0`. You can raise it but not lower it. |
 | `--entrypoint SCRIPT` | Runs the study's own script, for example `run.py`, in place of `python -m adda`. Use it when the script declares a custom graph. It cannot combine with `--model` or `--budget`, so the deadline comes from `config.yaml`. |
 | `--set KEY=VALUE` | The same as for `python -m adda`. |

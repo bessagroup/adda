@@ -32,6 +32,8 @@ class ConstraintSnapshot:
     evals_used: int
     wall_budget_s: float | None
     wall_elapsed_s: float | None
+    token_budget: int | None = None
+    tokens_used: int = 0
 
     @property
     def evals_remaining(self) -> int | None:
@@ -80,7 +82,16 @@ class ConstraintSnapshot:
                 f"Evaluation budget: unspecified "
                 f"({self.evals_used} evals used so far)."
             )
-        if self.wall_budget_s is not None and self.wall_elapsed_s is not None:
+        if self.token_budget is not None:
+            _pct = self.tokens_used / self.token_budget * 100
+            lines.append(
+                f"Output-token budget: {self.tokens_used:,}/"
+                f"{self.token_budget:,} generated tokens used ({_pct:.0f}%), "
+                "counted over every agent; the run winds down at "
+                f"{self.token_budget:,}"
+                + (" (EXHAUSTED)" if self.tokens_used >= self.token_budget
+                   else "") + ".")
+        elif self.wall_budget_s is not None and self.wall_elapsed_s is not None:
             _el = self._dur(self.wall_elapsed_s)
             _tot = self._dur(self.wall_budget_s)
             _pct = (self.wall_elapsed_s / self.wall_budget_s) * 100
@@ -104,6 +115,8 @@ class ConstraintSnapshot:
             "wall_budget_s": self.wall_budget_s,
             "wall_elapsed_s": self.wall_elapsed_s,
             "wall_remaining_s": self.wall_remaining_s,
+            "token_budget": self.token_budget,
+            "tokens_used": self.tokens_used,
         }
 
 
@@ -154,7 +167,10 @@ def compute_constraint_snapshot(
         time.time() - run_start if run_start is not None else None
     )
     evals_used = _evals_used(experiment_data_dir, delegation_log)
+    from ..infra import token_clock
     return ConstraintSnapshot(
+        token_budget=token_clock.budget(),
+        tokens_used=token_clock.used(),
         eval_budget=eval_budget,
         evals_used=evals_used,
         wall_budget_s=budget_seconds,

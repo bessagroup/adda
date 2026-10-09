@@ -199,6 +199,15 @@ def _clear_run_stop_signal():
 
 
 @pytest.fixture(autouse=True)
+def _clear_token_clock():
+    """The output-token counter is process-wide; no test may leak it."""
+    from adda._src.infra import token_clock
+    token_clock.configure(None)
+    yield
+    token_clock.configure(None)
+
+
+@pytest.fixture(autouse=True)
 def _clear_wind_down_gate():
     """The wind-down gate is process-wide; no test may leak it."""
     from adda._src.infra import wind_down

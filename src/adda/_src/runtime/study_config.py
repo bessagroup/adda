@@ -13,7 +13,8 @@ from typing import Any
 #: Top-level keys adda reads.
 TOP_KEYS = frozenset({
     "backend", "model", "base_url", "budget", "budget_usd", "eval_budget",
-    "mem_cap", "required_deliverables", "review_statement", "runtime", "nodes",
+    "mem_cap", "budget_clock", "token_budget", "watchdog_wall_s",
+    "required_deliverables", "review_statement", "runtime", "nodes",
     "evaluator", "objective", "funnel", "training_data", "llm_slurm",
 })
 

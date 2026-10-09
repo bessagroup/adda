@@ -73,7 +73,7 @@ def stop_headline(stop: dict | None) -> str:
                 + (f" ({reason})" if reason else "")
                 + "; this resume only collects what you can still report.")
     if stop.get("termination") == terminal.TIME_BUDGET:
-        return ("The time budget is spent"
+        return ("The budget is spent"
                 + (f" ({reason})" if reason else "")
                 + "; the run wound down and did not finish on time.")
     if stop.get("by") == "watchdog":

@@ -1150,7 +1150,7 @@ class OrchestrationMixin:
             " once they report (then write any remaining deliverables"
             " from their results). Do NOT close early. This wait does"
             " NOT count against your finish attempts; the wind-down at"
-            " the time budget ends the run."
+            " the budget ends the run."
         )
         if missing:
             msg += "\n\nStill to write AFTER they finish: " + ", ".join(missing)

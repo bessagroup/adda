@@ -1,4 +1,4 @@
-"""The wind-down gate: what a node may do after the time budget is spent.
+"""The wind-down gate: what a node may do after the budget is spent.
 
 One process-wide state, set by the entry node when the clock reaches
 ``wind_down_at`` (``nodes/wind_down.py``) and read at the one place every
@@ -16,9 +16,12 @@ Two refusals:
 """
 from __future__ import annotations
 
+import json
+import os
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 
 # Tools that read, wait, or write up what exists. Everything else is closed.
 ALLOWED: frozenset[str] = frozenset({
@@ -30,7 +33,7 @@ ALLOWED: frozenset[str] = frozenset({
 })
 
 CLOSED_TEXT = (
-    "ERROR: wind-down rule: the time budget is spent, so {tool} is closed. "
+    "ERROR: wind-down rule: the budget is spent, so {tool} is closed. "
     "Start nothing new. Allowed now: Wait, Read, Write, Edit, WriteNote, the "
     "store and notebook write-up tools, and {end}. Save what exists, then "
     "{end_action}.")
@@ -45,6 +48,20 @@ _suspended = 0
 _limit = 50
 _calls: dict[str, int] = {}
 REVIEW_KEY = "close-out review"
+
+
+def publish_eval_stop(debug_dir: Path, epoch: float) -> None:
+    """Tell the metered evaluator, which may run in a campaign process with no
+    run clock, the epoch after which it refuses new evaluations."""
+    path = Path(debug_dir) / "run_config.json"
+    try:
+        cfg = json.loads(path.read_text(encoding="utf-8"))
+        cfg["eval_stop_epoch"] = epoch
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        tmp.replace(path)
+    except (OSError, ValueError):
+        pass
 
 
 def begin(limit: int) -> None:

@@ -97,7 +97,9 @@ Read `debug/wind_down.json` for what the wind-down did: `forced_turns`,
 `interrupted`, and `deliverables_missing` (required files that did not exist
 at the close; also a `DELIVERABLES_MISSING` row in `diagnostics.jsonl`). adda
 writes nothing in their place. `debug/run_status.json` carries `overrun_s`
-(time past the budget), `wind_down_turns` and the same facts. Work that has
+(time past the budget), `wind_down_turns` and the same facts. On
+`budget_clock: output_tokens` it also carries `output_tokens_used` and
+`token_budget`. Work that has
 not finished `runtime: wind_down_interrupt_after_s` (default `300`) seconds
 after the wind-down began gets SIGINT, only to processes the node itself
 started. A plain Claude Code arm (`Default` tools and prompt) has no

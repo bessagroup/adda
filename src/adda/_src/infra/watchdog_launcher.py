@@ -387,25 +387,48 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     cfg = _load_study_config(study_dir)
-    budget_raw = args.budget if args.budget is not None else cfg.get("budget")
-    try:
-        budget_s = _parse_budget_str(budget_raw)
-    except (TypeError, ValueError):
+    token_run = cfg.get("budget_clock") == "output_tokens"
+    if token_run:
+        # No wall budget to take a multiple of: the host-safety deadline is
+        # its own explicit, absolute number.
+        if args.budget is not None:
+            print("Error: budget_clock: output_tokens has no wall budget; "
+                  "drop --budget. The deadline is `watchdog_wall_s:` in "
+                  f"{study_dir / 'config.yaml'}.", file=sys.stderr)
+            return 2
+        try:
+            deadline_s = float(_parse_budget_str(cfg.get("watchdog_wall_s")))
+            if deadline_s <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            print("Error: budget_clock: output_tokens needs `watchdog_wall_s:` "
+                  "(seconds or HH:MM:SS, > 0) in "
+                  f"{study_dir / 'config.yaml'}: the wall-clock limit after "
+                  "which the watchdog kills the run. There is no wall budget "
+                  "to derive it from.", file=sys.stderr)
+            return 2
         budget_s = None
-    if budget_s is None:
-        print(
-            "Error: adda.watchdog needs a wall-clock budget to derive its "
-            "deadline from — pass --budget or set `budget:` in "
-            f"{study_dir / 'config.yaml'}.",
-            file=sys.stderr,
-        )
-        return 2
-
-    try:
-        deadline_s = resolve_deadline_seconds(budget_s, args.watchdog_multiple)
-    except ValueError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 2
+    else:
+        budget_raw = args.budget if args.budget is not None else cfg.get(
+            "budget")
+        try:
+            budget_s = _parse_budget_str(budget_raw)
+        except (TypeError, ValueError):
+            budget_s = None
+        if budget_s is None:
+            print(
+                "Error: adda.watchdog needs a wall-clock budget to derive its "
+                "deadline from — pass --budget or set `budget:` in "
+                f"{study_dir / 'config.yaml'}.",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            deadline_s = resolve_deadline_seconds(
+                budget_s, args.watchdog_multiple)
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
 
     try:
         overrides = as_runtime(args.overrides)
@@ -437,15 +460,20 @@ def main(argv: list[str] | None = None) -> int:
     if entry_path is not None:
         cmd = [sys.executable, str(entry_path)]
     else:
-        cmd = [sys.executable, "-m", "adda", str(study_dir), "--budget", str(budget_s)]
+        cmd = [sys.executable, "-m", "adda", str(study_dir)]
+        if budget_s is not None:
+            cmd += ["--budget", str(budget_s)]
         if args.model:
             cmd += ["--model", args.model]
         cmd += format_set(args.overrides)
 
     print(
         f"adda.watchdog: launching {' '.join(cmd)} under a "
-        f"{deadline_s:.0f}s deadline ({args.watchdog_multiple}x the "
-        f"{budget_s:.0f}s run budget)",
+        f"{deadline_s:.0f}s deadline ("
+        + ("watchdog_wall_s, output-token budget"
+           if budget_s is None else
+           f"{args.watchdog_multiple}x the {budget_s:.0f}s run budget")
+        + ")",
         file=sys.stderr,
     )
 

@@ -3,7 +3,8 @@
 Thresholds, each a fraction of ``B`` measured from the run start:
 
 * ``budget_warn_from`` (0.75), then every ``budget_warn_every`` (0.05): a
-  one-line notice with the minutes left, to the entry node and to running
+  one-line notice with the minutes left (output tokens left on the token
+  clock, ``infra/token_clock.py``), to the entry node and to running
   delegations.
 * ``delegation_cutoff_at`` (0.90): no new delegations; running ones continue.
 * ``wind_down_at`` (1.0): the wind-down begins (``nodes/wind_down.py``).
@@ -97,12 +98,15 @@ class TimeRules:
     warn_every: float
     cutoff_at: float
     wind_down_at: float
+    tokens: bool = False
 
     @classmethod
-    def from_settings(cls, budget: float | None) -> TimeRules | None:
+    def from_settings(cls, budget: float | None,
+                      tokens: bool = False) -> TimeRules | None:
         if not budget or budget <= 0:
             return None
         return cls(
+            tokens=tokens,
             budget=float(budget),
             warn_from=settings.get_float("budget_warn_from", 0.75),
             warn_every=settings.get_float("budget_warn_every", 0.05),
@@ -136,18 +140,32 @@ class TimeRules:
     def due(self, elapsed: float) -> list[str]:
         return [n for n, f in self.schedule() if elapsed >= self.budget * f]
 
-    # -- text, always in minutes --------------------------------------
+    # -- text: minutes on the wall clock, output tokens on the token clock --
 
-    def budget_min(self) -> str:
-        return _mins(self.at(WIND_DOWN))
+    def amount(self, value: float) -> str:
+        return f"{int(value):,} output tokens" if self.tokens else _mins(value)
+
+    def budget_text(self) -> str:
+        return self.amount(self.at(WIND_DOWN))
+
+    def budget_phrase(self) -> str:
+        return (f"token budget of {self.budget_text()}" if self.tokens
+                else f"time budget of {self.budget_text()}")
+
+    def _left_text(self, value: float) -> str:
+        if self.tokens:
+            return f"{int(max(value, 0.0)):,} output tokens"
+        return _left(value)
 
     def _clock(self, elapsed: float) -> str:
         end = self.at(WIND_DOWN)
         if elapsed < end:
-            return (f"{_left(end - elapsed)} left before the wind-down at "
-                    f"{self.budget_min()}.")
-        return (f"the wind-down began at {self.budget_min()}; "
-                f"{_left(elapsed - end, over=True)} ago.")
+            return (f"{self._left_text(end - elapsed)} left before the "
+                    f"wind-down at {self.budget_text()}.")
+        began = f"the wind-down began at {self.budget_text()}; "
+        if self.tokens:
+            return began + f"{self._left_text(elapsed - end)} over."
+        return began + f"{_left(elapsed - end, over=True)} ago."
 
     def cutoff_refusal(self, elapsed: float) -> str:
         return (
@@ -166,7 +184,8 @@ class TimeRules:
                    if can_call_done else
                    "Finish the step you are on and report."))
         pct = _pct(elapsed / self.budget)
-        return f"Time: {pct}% of the budget used; {clock} Plan so you can {end}."
+        what = "Output tokens" if self.tokens else "Time"
+        return f"{what}: {pct}% of the budget used; {clock} Plan so you can {end}."
 
 
 def _pct(frac: float) -> str:
