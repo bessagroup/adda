@@ -637,6 +637,10 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
 - **Where:** `nodes/tools/routing/delegation.py` (`build_sandboxed_write`,
   `_sandbox_worker_writes`); `nodes/node.py` (`_setup_sandboxed_write`);
   `prompts/agent_prompts.py`; `prompts/deliverable_format.py`.
+- **Required deliverables:** a node's sandboxed `Write` also maps a BARE name that
+  equals a configured `required_deliverables` basename to the study dir, where the
+  reproduction gate looks for it (`deliverable_dir`, `deliverable_names`). Other bare
+  names stay in the delegation root. A Default node keeps the native Write.
 - **Status:** done. Bash remains trusted and unsandboxed by design — not
   addressed here; see the (deferred) Bash-boundary discussion this same
   finding raised.

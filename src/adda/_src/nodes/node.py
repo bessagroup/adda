@@ -307,7 +307,11 @@ class Node(
             if self._study_dir is not None else None
         )
         Write = build_sandboxed_write(
-            self._workspace_dir, study_workspace=_study_ws)
+            self._workspace_dir, study_workspace=_study_ws,
+            deliverable_dir=(
+                Path(self._study_dir) if self._study_dir is not None else None),
+            deliverable_names=lambda: getattr(
+                self, "_required_deliverables", None) or [])
         self.adapter.closure_tools["Write"] = Write
 
     def _build_eval_closures(self) -> dict:

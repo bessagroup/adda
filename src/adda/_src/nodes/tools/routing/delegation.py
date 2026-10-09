@@ -177,6 +177,8 @@ def build_sandboxed_write(
     strip_prefix: str | None = None,
     scope_label: str | None = None,
     study_workspace: Path | None = None,
+    deliverable_dir: Path | None = None,
+    deliverable_names: Any = None,
 ) -> Any:
     """Build a ``Write`` closure hard-sandboxed to ``root``, PLUS the
     study's own ``workspace/`` when ``study_workspace`` is given.
@@ -202,6 +204,12 @@ def build_sandboxed_write(
     absolute path that already resolves under the study's workspace/ is
     accepted as-is either way.
 
+    ``deliverable_dir`` plus ``deliverable_names`` (a callable returning
+    the config's ``required_deliverables``) add a third rule: a BARE name
+    (no separator) equal to a required deliverable's basename is written
+    to ``deliverable_dir``, the place the gate looks for it, rather than
+    the delegation root.
+
     Both permitted roots reject, via ``Path.resolve()`` + ``relative_to``,
     any path that escapes them — collapsing '..' and symlinks so traversal
     is blocked at the tool level, not just the prompt. Nothing else changes:
@@ -211,6 +219,7 @@ def build_sandboxed_write(
     _root = root.resolve()
     _label = scope_label or f"the workspace ({_root})"
     _study_ws = study_workspace.resolve() if study_workspace is not None else None
+    _deliv = deliverable_dir.resolve() if deliverable_dir is not None else None
 
     def _within(candidate: Path, base: Path) -> bool:
         try:
@@ -239,11 +248,21 @@ def build_sandboxed_write(
             and (_norm == "workspace" or _norm.startswith("workspace/"))
         ):
             _base = _study_ws.parent
+        elif (
+            _deliv is not None
+            and _norm
+            and "/" not in _norm
+            and _norm in {Path(x).name for x in (
+                deliverable_names() if deliverable_names else [])}
+        ):
+            _base = _deliv
         try:
             candidate = (_base / _norm).resolve()
         except Exception as exc:  # noqa: BLE001
             return f"ERROR: invalid path {path!r}: {exc}"
         _allowed = [_root] + ([_study_ws] if _study_ws is not None else [])
+        if _base == _deliv and _deliv is not None:
+            _allowed.append(candidate)
         if not any(_within(candidate, r) for r in _allowed):
             _targets = _label if _study_ws is None else (
                 f"{_label}, or the study's workspace/ ({_study_ws})"

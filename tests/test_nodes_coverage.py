@@ -1146,3 +1146,40 @@ def test_to_adapter_messages_handles_list_content():
     assert len(result) == 1
     assert "Hello" in result[0]["content"]
     assert "World" in result[0]["content"]
+
+
+# build_sandboxed_write: a bare required-deliverable name lands where the gate
+# looks for it (BACKLOG #60, solo design.json misplacement 2026-10-08).
+
+def _build_write_with_deliverables(tmp_path, names):
+    from adda._src.nodes.tools.routing.delegation import build_sandboxed_write
+
+    study_dir = tmp_path / "study"
+    root = study_dir / "runs" / "T1" / "debug" / "delegations"
+    root.mkdir(parents=True)
+    return build_sandboxed_write(
+        root, deliverable_dir=study_dir,
+        deliverable_names=lambda: names), study_dir, root
+
+
+def test_write_routes_a_bare_required_deliverable_to_the_study_dir(tmp_path):
+    Write, study_dir, root = _build_write_with_deliverables(
+        tmp_path, ["design.json"])
+    assert "ERROR" not in Write("design.json", "{}")
+    assert (study_dir / "design.json").read_text() == "{}"
+    assert not (root / "design.json").exists()
+
+
+def test_write_routes_by_basename_of_a_configured_path(tmp_path):
+    Write, study_dir, _root = _build_write_with_deliverables(
+        tmp_path, ["workspace/replicate.py"])
+    Write("replicate.py", "x = 1")
+    assert (study_dir / "replicate.py").exists()
+
+
+def test_write_keeps_other_bare_names_in_the_delegation_root(tmp_path):
+    Write, study_dir, root = _build_write_with_deliverables(
+        tmp_path, ["design.json"])
+    Write("notes.txt", "n")
+    assert (root / "notes.txt").exists()
+    assert not (study_dir / "notes.txt").exists()
