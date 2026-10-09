@@ -1050,7 +1050,7 @@ class OrchestrationMixin:
         from langchain_core.messages import AIMessage
 
         # DEBUG: stream this turn's full reasoning + tool-calls to
-        # debug/transcripts/strategizer/turn_NNN.jsonl.
+        # debug/transcripts/<node name>/turn_NNN.jsonl.
         from ..backends.base import (
             bind_run_context as _bind_rc,
         )
@@ -1064,7 +1064,7 @@ class OrchestrationMixin:
         if _dbg() and self._current_notes_dir is not None:
             _set_sink(str(
                 self._current_notes_dir.parent / "transcripts"
-                / "strategizer" / f"turn_{self._turn_count:03d}.jsonl"))
+                / self._name / f"turn_{self._turn_count:03d}.jsonl"))
         _notes = self._current_notes_dir
         _rc_path = (
             str(_notes.parent / "run_config.json") if _notes is not None else None
@@ -1076,7 +1076,7 @@ class OrchestrationMixin:
             getattr(self.adapter, "last_usage", {}) or {},
             role=self._role_of(self._name),
             model=getattr(self.adapter, "model", None),
-            phase="strategizer_turn",
+            phase=f"{self._name}_turn",
             delegation_id=None,
         )
         return AIMessage(content=text)
