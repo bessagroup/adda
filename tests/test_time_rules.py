@@ -251,17 +251,16 @@ def test_a_wall_clock_step_does_not_disarm_the_wind_down_interrupt(monkeypatch):
     made the ownership check call a live shell a recycled pid, and the
     SIGINT went to nobody."""
     import psutil
-    if not hasattr(psutil, "_pslinux"):
-        pytest.skip("only Linux derives the start time from the wall clock")
 
     from adda._src.backends.openai_compatible import _BashSession
     sess = _BashSession(None)
     mine = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
         sess.track(mine.pid)
-        real = psutil._pslinux.boot_time
-        monkeypatch.setattr(psutil._pslinux, "boot_time",
-                            lambda: real() + 1.0)
+        if hasattr(psutil, "_pslinux"):  # only Linux reads the wall clock
+            real = psutil._pslinux.boot_time
+            monkeypatch.setattr(psutil._pslinux, "boot_time",
+                                lambda: real() + 1.0)
         sess.interrupt()
         mine.wait(timeout=30)
     finally:
