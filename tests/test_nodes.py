@@ -676,6 +676,39 @@ def test_errored_status_contains_traceback():
     assert "pool.csv" in msg
 
 
+def test_worker_that_cannot_reach_the_endpoint_flags_its_target():
+    """A worker raising a connection-class error marks the target unreachable."""
+    import time
+    from adda._src.nodes import Node
+
+    class APIConnectionError(Exception):
+        pass
+
+    class DeadWorker(StubAdapter):
+        def invoke(self, messages):
+            raise APIConnectionError("Connection error.")
+
+    class Driver(StubAdapter):
+        def invoke(self, messages):
+            import re as _re
+            r = self.closure_tools["Delegate"](
+                target="implementer", intent="task", expected_report="")
+            tid = _re.search(r"D[0-9]{3}", r).group()
+            for _ in range(100):
+                if not self.closure_tools["Wait"](tid, block=False).startswith("Working"):
+                    break
+                time.sleep(0.02)
+            self.closure_tools["Done"](summary="done")
+            return "Done."
+
+    node = Node(
+        Driver(), name="strategizer", outgoing=["implementer"],
+        spec=_minimal_spec(), worker_adapters={"implementer": DeadWorker()},
+    )
+    node(make_state())
+    assert node._unreachable_targets == {"implementer"}
+
+
 def test_delegation_still_working_returns_working_status():
     """GetStatus returns 'Working' for a running delegation regardless of elapsed time."""
     import time

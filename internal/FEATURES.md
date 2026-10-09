@@ -1881,8 +1881,12 @@ the exception or its cause chain), `run_status.json` records
 `termination: "backend_unavailable"` and a `reason` that starts "backend
 endpoint unavailable", instead of the generic `crashed`; `status` stays
 `crashed` and the run stays resumable. Reports can then tell infrastructure
-loss from an adda failure. **Where:** `runtime/terminal.py`
-(`is_backend_unreachable`), the crash handler in `runtime/agent_runtime.py`.
+loss from an adda failure. A delegation worker that hits the same failure is
+flagged on its target; when that target reaches `max_consecutive_errors` the
+halt carries `backend_unavailable` instead of `repeated_errors`. **Where:**
+`runtime/terminal.py` (`is_backend_unreachable`), the crash handler in
+`runtime/agent_runtime.py`, `_finish_error` in `nodes/tools/routing/delegation.py`,
+the repeated-errors check in `nodes/lifecycle.py`.
 
 **Backstops go through it too.** A time, USD or repeated-errors backstop
 no longer jumps to END: it writes a stop request (`by="backstop"`) carrying

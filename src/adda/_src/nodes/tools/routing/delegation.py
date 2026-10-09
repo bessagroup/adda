@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from ....prompts.tool_catalog import tool_examples
+from ....runtime import terminal
 from ..._constants import (
     backstop_enabled,
     budget_wrapup_message,
@@ -462,8 +463,8 @@ class WorkerSession:
                 self._open_for_review(text, evals, usage, off_ledger, stamped)
             else:
                 self._finish_ok(text, evals, usage, off_ledger, stamped)
-        except Exception:  # noqa: BLE001
-            self._finish_error(traceback.format_exc())
+        except Exception as exc:  # noqa: BLE001
+            self._finish_error(traceback.format_exc(), exc)
 
     def _cancelled_while_queued(self) -> bool:
         node = self.node
@@ -1058,8 +1059,8 @@ class WorkerSession:
                 reply=None if _is_report(
                     text, getattr(self.guard_agent, "report_sections", None))
                 else text)
-        except Exception:  # noqa: BLE001
-            self._finish_error(traceback.format_exc())
+        except Exception as exc:  # noqa: BLE001
+            self._finish_error(traceback.format_exc(), exc)
 
     def _try_resume(
         self, wrapped_message: str, session_id: str | None,
@@ -1170,6 +1171,7 @@ class WorkerSession:
                 # error streak (the repeated-errors halt is for a
                 # target stuck failing, not one that recovers).
                 node._consecutive_errors[target] = 0
+                node._unreachable_targets.discard(target)
             # SendMessage (spec 12): wake a delegator blocked in
             # SendMessage(wait_for_reply=True) on THIS delegation -- once
             # Done/Cancelled, nothing will ever notify its `to_delegator`
@@ -1410,7 +1412,7 @@ class WorkerSession:
                 + f"\n\n[... {len(tb) - limit} chars omitted; full text: "
                 f"{where} ...]\n\n" + tb[-self._TB_TAIL:])
 
-    def _finish_error(self, tb: str) -> None:
+    def _finish_error(self, tb: str, exc: BaseException | None = None) -> None:
         """Record a delegation whose worker raised: registry + FAILED log row."""
         node, delegation_id, target = self.node, self.delegation_id, self.target
         usage = self._record_usage_once()
@@ -1456,6 +1458,10 @@ class WorkerSession:
             node._consecutive_errors[target] = (
                 node._consecutive_errors.get(target, 0) + 1
             )
+            if terminal.is_backend_unreachable(exc):
+                node._unreachable_targets.add(target)
+            else:
+                node._unreachable_targets.discard(target)
             # SendMessage (spec 12): see the matching comment in _finish_ok
             # -- a delegator blocked on this now-Errored delegation must
             # wake rather than sit out the full timeout.

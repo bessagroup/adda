@@ -273,17 +273,22 @@ class LifecycleMixin:
                 ]
             if _stuck:
                 _t, _n = _stuck[0]
+                _down = _t in self._unreachable_targets
                 return self._trip(
                     state,
                     drift={
-                        "error_type": "REPEATED_ERRORS",
+                        "error_type": ("BACKEND_UNAVAILABLE" if _down
+                                       else "REPEATED_ERRORS"),
                         "target": _t,
                         "consecutive": _n,
                     },
                     reason=(
+                        f"backend endpoint unavailable: {_t} failed {_n}x "
+                        "consecutively" if _down else
                         f"repeated errors: {_t} failed {_n}x consecutively"
                     ),
-                    termination=terminal.REPEATED_ERRORS,
+                    termination=(terminal.BACKEND_UNAVAILABLE if _down
+                                 else terminal.REPEATED_ERRORS),
                     tallies=self._halt_tallies(state),
                 )
 

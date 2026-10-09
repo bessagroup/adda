@@ -110,6 +110,9 @@ class OrchestrationMixin:
         # Consecutive Errored delegations per target (reset on that target's
         # next success). Drives the repeated-errors resumable halt.
         self._consecutive_errors: dict[str, int] = {}
+        # Targets whose latest Errored delegation could not reach the LLM
+        # endpoint: the halt then names that cause, not a generic error loop.
+        self._unreachable_targets: set[str] = set()
         # Per-delegation pending messages (budget warnings) to prepend to
         # worker tool results.  Keyed by delegation_id; drained on next call.
         self._pending_worker_msgs: dict[str, list[str]] = {}

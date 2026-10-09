@@ -1216,7 +1216,8 @@ class AgenticRun:
         # through the wind-down, and stays resumable.
         _halted = termination in (
             terminal.BACKSTOP_TIME, terminal.BACKSTOP_USD,
-            terminal.REPEATED_ERRORS, terminal.CRASHED)
+            terminal.REPEATED_ERRORS, terminal.CRASHED,
+            terminal.BACKEND_UNAVAILABLE)
         self._write_run_status(
             ctx.debug_dir,
             status=("STOPPED" if _stopped else "halted" if _halted

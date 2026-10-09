@@ -338,6 +338,35 @@ def test_repeated_errors_halt_resumable(tmp_path, monkeypatch):
     assert "repeated errors: implementer" in cmd.update.get("last_report", "")
 
 
+def test_repeated_errors_from_an_unreachable_endpoint_halt_as_backend_unavailable(
+        tmp_path):
+    from adda._src.nodes import Node
+
+    settings.configure({"max_consecutive_errors": 3})
+    study_dir = tmp_path / "study"
+    study_dir.mkdir()
+    (study_dir / "pipeline.ipynb").write_text("# test\n")
+    run_dir = study_dir / "runs" / "T"
+    (run_dir / "debug").mkdir(parents=True)
+    (run_dir / "debug" / "thread_id").write_text("tid-down")
+
+    node = Node(
+        StubAdapter(response="Should not be called."), name="strategizer",
+        outgoing=["implementer"], spec=_minimal_spec(),
+    )
+    node._consecutive_errors["implementer"] = 3
+    node._unreachable_targets.add("implementer")
+
+    state = _make_state(study_dir=study_dir)
+    state["start_time"] = time.time()
+    state["run_dir"] = str(run_dir)
+
+    _first, req, cmd = _halt_after_wind_down(node, state, run_dir)
+    assert req["termination"] == terminal.BACKEND_UNAVAILABLE
+    assert "backend endpoint unavailable: implementer" in cmd.update.get(
+        "last_report", "")
+
+
 def test_soft_budget_does_not_terminate_below_backstop():
     """Time budget is SOFT: past 100% but below the backstop, the run
     CONTINUES (adapter.invoke is called) — warning only, no force-end."""
