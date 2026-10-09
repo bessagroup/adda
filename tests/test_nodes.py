@@ -709,10 +709,17 @@ def test_worker_that_cannot_reach_the_endpoint_flags_its_target():
     assert node._unreachable_targets == {"implementer"}
 
 
-def test_delegation_still_working_returns_working_status():
+def test_delegation_still_working_returns_working_status(monkeypatch):
     """GetStatus returns 'Working' for a running delegation regardless of elapsed time."""
     import time
     from adda._src.nodes import Node
+    from adda._src.runtime import time_rules
+
+    # A fake clock the test steps: the delegation starts inside the budget
+    # (a real clock on a slow runner crossed the 90% cutoff first) and the
+    # poll comes after the budget has passed.
+    now = [time.time()]
+    monkeypatch.setattr(time_rules, "now", lambda: now[0])
 
     status_seen: list[str] = []
     worker_started = threading.Event()
@@ -737,6 +744,7 @@ def test_delegation_still_working_returns_working_status():
             task_id = m.group() if m else None
             assert task_id, f"No D### ID in: {result!r}"
             worker_started.wait(timeout=2)
+            now[0] += 10.0
             # Poll while worker is still held — must return Working, not Timeout
             status = self.closure_tools["Wait"](task_id, block=False)
             status_seen.append(status)
@@ -756,8 +764,8 @@ def test_delegation_still_working_returns_working_status():
     )
     # Even with a tiny budget, GetStatus must return Working (not Timeout)
     state = make_state()
-    state["budget_seconds"] = 0.013
-    state["start_time"] = time.time()  # realistic — just over budget by a hair
+    state["budget_seconds"] = 5.0
+    state["start_time"] = now[0]
 
     cmd = node(state)
     assert cmd.goto == END
