@@ -245,6 +245,39 @@ def test_interrupt_signals_only_recorded_pids():
             p.wait()
 
 
+def _shell_in_sleep():
+    """A child that has finished starting up and is sleeping. A SIGINT that
+    lands during interpreter start-up (site, .pth hooks) is not the case the
+    wind-down interrupts: it targets work already running."""
+    proc = subprocess.Popen(
+        [sys.executable, "-c",
+         "import time; print('up', flush=True); time.sleep(60)"],
+        stdout=subprocess.PIPE, text=True)
+    assert proc.stdout.readline().strip() == "up"
+    return proc
+
+
+def _wait_after_interrupt(sess, proc, timeout):
+    """SIGINT the session's shells, then wait for ``proc``. A hang reports what
+    the session recorded and what the kernel shows for the process, so a
+    failure on a runner we cannot reach names its own cause."""
+    from adda._src.infra.resource_backend import get_resource_backend
+    hit = sess.interrupt()
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            sig = [ln for ln in open(f"/proc/{proc.pid}/status")
+                   if ln.startswith(("Sig", "State"))]
+        except OSError:
+            sig = ["(no /proc)"]
+        raise AssertionError(
+            f"SIGINT did not end pid {proc.pid}: interrupt() signalled {hit}; "
+            f"recorded start {sess._started.get(proc.pid)}, now "
+            f"{get_resource_backend().proc_start_time(proc.pid)}; "
+            f"{''.join(sig)}") from None
+
+
 def test_a_wall_clock_step_does_not_disarm_the_wind_down_interrupt(monkeypatch):
     """psutil's epoch create_time adds boot_time(), which Linux re-reads from
     the wall clock on every call. A one-second clock step (a CI VM syncing)
@@ -254,15 +287,14 @@ def test_a_wall_clock_step_does_not_disarm_the_wind_down_interrupt(monkeypatch):
 
     from adda._src.backends.openai_compatible import _BashSession
     sess = _BashSession(None)
-    mine = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    mine = _shell_in_sleep()
     try:
         sess.track(mine.pid)
         if hasattr(psutil, "_pslinux"):  # only Linux reads the wall clock
             real = psutil._pslinux.boot_time
             monkeypatch.setattr(psutil._pslinux, "boot_time",
                                 lambda: real() + 1.0)
-        sess.interrupt()
-        mine.wait(timeout=30)
+        _wait_after_interrupt(sess, mine, 30)
     finally:
         if mine.poll() is None:
             mine.kill()
@@ -272,12 +304,11 @@ def test_a_wall_clock_step_does_not_disarm_the_wind_down_interrupt(monkeypatch):
 def test_a_bash_session_interrupts_only_its_own_shells():
     from adda._src.backends.openai_compatible import _BashSession
     sess = _BashSession(None)
-    mine = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    mine = _shell_in_sleep()
     bystander = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
         sess.track(mine.pid)
-        sess.interrupt()
-        mine.wait(timeout=10)
+        _wait_after_interrupt(sess, mine, 10)
         assert bystander.poll() is None
     finally:
         for p in (mine, bystander):
