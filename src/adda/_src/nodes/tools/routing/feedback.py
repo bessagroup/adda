@@ -285,12 +285,12 @@ class FeedbackTools:
         node._terminal = {
             "outcome": terminal.GATED if gated else terminal.UNGATED,
             "reviewed": node._find_critic_name() is not None,
-            "termination": terminal.TIME_BUDGET,
+            "termination": terminal.BUDGET_WIND_DOWN,
         }
         node._awaiting_retro = True
         node._final_summary = banner + summary
-        stop = {"termination": terminal.TIME_BUDGET, "by": "time_budget"}
-        return prefix + _stop_retrospective(stop, terminal.TIME_BUDGET)
+        stop = {"termination": terminal.BUDGET_WIND_DOWN, "by": "budget_wind_down"}
+        return prefix + _stop_retrospective(stop, terminal.BUDGET_WIND_DOWN)
 
     def _stop_pending(self, summary: str, prefix: str) -> str | None:
         """While a stop is winding workers down, Done() waits for their

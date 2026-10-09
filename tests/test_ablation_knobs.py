@@ -44,7 +44,6 @@ def test_budget_notes_off_silences_warnings_and_snapshot():
     node = SimpleNamespace(_ledgered_eval_total=lambda n: n,
                            _time_rules_tick=lambda: None)
     settings.configure({})
-    assert orchestration.OrchestrationMixin._budget_warnings(node, state)
     _off("budget_notes")
     assert orchestration.OrchestrationMixin._budget_warnings(node, state) == []
     assert orchestration.OrchestrationMixin._constraint_refresh(node) == []

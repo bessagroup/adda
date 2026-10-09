@@ -34,6 +34,8 @@ __all__ = [
     "DONE",
     "NO_CLOSE",
     "TIME_BUDGET",
+    "BUDGET_WIND_DOWN",
+    "BUDGET_STOP",
     "BACKSTOP_USD",
     "REPEATED_ERRORS",
     "RECURSION_LIMIT",
@@ -57,10 +59,11 @@ OUTCOMES = (GATED, UNGATED, FAILED)
 
 # --- termination: how the run stopped --------------------------------------
 # Orthogonal to outcome. A run can terminate `done` and still be UNGATED (no
-# critic), or terminate `time_budget` with real conclusions on record.
+# critic), or terminate `budget_wind_down` with real conclusions on record.
 DONE = "done"                        # the agent closed deliberately
 NO_CLOSE = "no_close"                # ended without an accepted Done()
-TIME_BUDGET = "time_budget"          # the wind-down at the wall budget
+BUDGET_WIND_DOWN = "budget_wind_down"  # the wind-down at a budget (wall, tokens or evals)
+TIME_BUDGET = "time_budget"          # legacy name of BUDGET_WIND_DOWN, kept for old records
 BACKSTOP_USD = "backstop_usd"        # hard USD ceiling
 REPEATED_ERRORS = "repeated_errors"  # max_consecutive_errors to one target
 RECURSION_LIMIT = "recursion_limit"  # LangGraph step ceiling
@@ -68,25 +71,26 @@ CRASHED = "crashed"                  # unhandled exception
 BACKEND_UNAVAILABLE = "backend_unavailable"  # the LLM endpoint stayed unreachable
 KILLED = "killed"                    # external supervisor (wall-clock watchdog)
 STOPPED = "stopped"                  # operator/watchdog stop request, wound down
-TOKEN_BUDGET = "token_budget"        # plain Claude Code stopped at the token cap
+BUDGET_STOP = "budget_stop"          # plain Claude Code stopped at a budget (wall or tokens)
+TOKEN_BUDGET = "token_budget"        # legacy name of BUDGET_STOP, kept for old records
 
 TERMINATIONS = (
-    DONE, NO_CLOSE, TIME_BUDGET, BACKSTOP_USD,
+    DONE, NO_CLOSE, BUDGET_WIND_DOWN, TIME_BUDGET, BACKSTOP_USD,
     REPEATED_ERRORS, RECURSION_LIMIT, CRASHED, KILLED, STOPPED,
-    BACKEND_UNAVAILABLE, TOKEN_BUDGET,
+    BACKEND_UNAVAILABLE, BUDGET_STOP, TOKEN_BUDGET,
 )
 
 # Terminations that mean the run was stopped rather than finished. None of
 # these can be GATED: nothing reviewed the conclusions, because the run never
 # reached its gate. Analysis MUST treat these as censored, not as failures —
 # a killed run may have been minutes from a PASS (see internal/AUDIT-20260623).
-# ``TIME_BUDGET`` is not here: the wind-down at the budget ends with the one
-# reproduction gate and the one critic review, so it can earn GATED. The
+# ``BUDGET_WIND_DOWN`` (and its legacy name ``TIME_BUDGET``) is not here: the
+# wind-down at a budget ends with the one reproduction gate and the one critic review, so it can earn GATED. The
 # quality stamp is about the review, not about whether the run went over time.
 HALT_TERMINATIONS = (
     BACKSTOP_USD, REPEATED_ERRORS,
     RECURSION_LIMIT, CRASHED, KILLED, STOPPED, BACKEND_UNAVAILABLE,
-    TOKEN_BUDGET,
+    BUDGET_STOP, TOKEN_BUDGET,
 )
 
 

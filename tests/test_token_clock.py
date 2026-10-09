@@ -2,6 +2,7 @@
 
 No live model: usage events are fed by hand. The thresholds themselves are the
 wall clock's (``test_time_rules.py``); here the unit changes, not the rules.
+Every budget a config sets is enforced at once (approved by Elvis 2026-10-09).
 """
 from __future__ import annotations
 
@@ -22,27 +23,25 @@ BUDGET = 10_000
 
 # -- parse ------------------------------------------------------------------
 
-def test_the_wall_clock_is_the_default():
+def test_no_token_budget_is_the_default():
     assert token_clock.parse({}) is None
     assert token_clock.parse({"budget": "01:00:00"}) is None
 
 
-def test_the_token_clock_returns_its_budget():
-    assert token_clock.parse(
-        {"budget_clock": "output_tokens", "token_budget": 5000}) == 5000
+def test_a_token_budget_is_returned_and_may_sit_beside_a_wall_budget():
+    assert token_clock.parse({"token_budget": 5000}) == 5000
+    assert token_clock.parse({"token_budget": 5000, "budget": 60}) == 5000
 
 
 @pytest.mark.parametrize("cfg, words", [
-    ({"budget_clock": "cpu"}, "budget_clock must be one of"),
-    ({"budget_clock": "output_tokens"}, "needs token_budget"),
-    ({"budget_clock": "output_tokens", "token_budget": 0}, "positive integer"),
-    ({"budget_clock": "output_tokens", "token_budget": 1.5}, "positive integer"),
-    ({"budget_clock": "output_tokens", "token_budget": True}, "positive integer"),
-    ({"token_budget": 100}, "budget_clock is 'wall'"),
-    ({"budget_clock": "output_tokens", "token_budget": 100, "budget": 60},
-     "two limits"),
+    ({"budget_clock": "output_tokens", "token_budget": 5000},
+     "budget_clock was removed"),
+    ({"budget_clock": "wall"}, "budget_clock was removed"),
+    ({"token_budget": 0}, "positive integer"),
+    ({"token_budget": 1.5}, "positive integer"),
+    ({"token_budget": True}, "positive integer"),
 ])
-def test_a_bad_clock_config_is_rejected_by_name(cfg, words):
+def test_a_bad_budget_config_is_rejected_by_name(cfg, words):
     with pytest.raises(ValueError, match=words):
         token_clock.parse(cfg)
 
@@ -93,14 +92,15 @@ def test_a_listener_hears_each_new_count_and_can_be_removed():
 # -- the text ---------------------------------------------------------------
 
 def test_the_notices_state_output_tokens_left():
-    r = rules.TimeRules.from_settings(BUDGET, tokens=True)
-    text = r.notice("notice:0.75", 7500, can_call_done=True)
+    r = rules.TimeRules.from_settings(None, tokens=BUDGET)
+    text = r.notice("notice:0.75", r.progress(0, 7500), can_call_done=True)
     assert text == (
-        "Output tokens: 75% of the budget used; 2,500 output tokens left "
-        "before the wind-down at 10,000 output tokens. Plan so you can call "
+        "Budget: Tokens 75% (2,500 output tokens left). The wind-down begins "
+        "at token budget of 10,000 output tokens. Plan so you can call "
         "Done().")
     assert "token budget of 10,000 output tokens" == r.budget_phrase()
-    assert "500 output tokens over" in r.cutoff_refusal(10_500)
+    assert "500 output tokens over" in r.cutoff_refusal(
+        r.progress(0, 10_500))
 
 
 # -- the node clock follows the counter -------------------------------------
@@ -161,7 +161,7 @@ def test_thresholds_fire_on_tokens_not_on_seconds(entry):
     entry._time_rules_tick()
     entry._time_rules_tick()
     assert _diag(entry) == ["TIME_NOTICE"]
-    assert entry._time_elapsed() == 7500
+    assert entry._time_elapsed().tokens == 0.75
     token_clock.record("b", 1500)
     assert entry._time_cutoff_refusal().startswith("ERROR: No new delegations")
 
@@ -176,7 +176,8 @@ def test_the_wind_down_begins_at_the_budget_and_publishes_the_stop_epoch(entry):
     assert cfg["eval_stop_epoch"] == pytest.approx(entry._wd_started_at)
     rec = json.loads(
         (entry._current_run_dir / "debug" / "wind_down.json").read_text())
-    assert (rec["budget"], rec["budget_unit"]) == (BUDGET, "output_tokens")
+    assert rec["budget_trigger"] == "tokens"
+    assert rec["token_budget"] == BUDGET and rec["budget_s"] is None
     entry._time_rules_cancel()
 
 
@@ -282,9 +283,7 @@ def _study(tmp_path, cfg: str):
 def test_the_watchdog_deadline_is_the_explicit_watchdog_wall_s(
         tmp_path, monkeypatch):
     import adda._src.infra.watchdog_launcher as wl
-    d = _study(tmp_path,
-               "budget_clock: output_tokens\ntoken_budget: 5000\n"
-               "watchdog_wall_s: 7200\n")
+    d = _study(tmp_path, "token_budget: 5000\nwatchdog_wall_s: 7200\n")
     seen = {}
 
     def fake(cmd, *, deadline_s, **kw):
@@ -297,20 +296,34 @@ def test_the_watchdog_deadline_is_the_explicit_watchdog_wall_s(
     assert "--budget" not in seen["cmd"]
 
 
-def test_the_watchdog_refuses_a_token_run_with_no_wall_limit(tmp_path, capsys):
+def test_the_watchdog_refuses_a_run_with_no_wall_limit(tmp_path, capsys):
     import adda._src.infra.watchdog_launcher as wl
-    d = _study(tmp_path, "budget_clock: output_tokens\ntoken_budget: 5000\n")
+    d = _study(tmp_path, "token_budget: 5000\n")
     assert wl.main([str(d)]) == 2
     assert "watchdog_wall_s" in capsys.readouterr().err
 
 
-def test_the_watchdog_refuses_budget_next_to_the_token_clock(tmp_path, capsys):
+def test_the_watchdog_takes_a_multiple_of_a_wall_budget_beside_a_token_budget(
+        tmp_path, monkeypatch):
     import adda._src.infra.watchdog_launcher as wl
-    d = _study(tmp_path,
-               "budget_clock: output_tokens\ntoken_budget: 5000\n"
-               "watchdog_wall_s: 60\n")
+    d = _study(tmp_path, "token_budget: 5000\nbudget: 600\n")
+    seen = {}
+
+    def fake(cmd, *, deadline_s, **kw):
+        seen.update(cmd=cmd, deadline_s=deadline_s)
+        return wl.WatchdogResult(timed_out=False, returncode=0, pgid=1)
+
+    monkeypatch.setattr(wl, "run_under_watchdog", fake)
+    assert wl.main([str(d)]) == 0
+    assert seen["deadline_s"] == 600.0 * 2
+    assert "--budget" in seen["cmd"]
+
+
+def test_the_watchdog_refuses_two_deadlines(tmp_path, capsys):
+    import adda._src.infra.watchdog_launcher as wl
+    d = _study(tmp_path, "token_budget: 5000\nwatchdog_wall_s: 60\n")
     assert wl.main([str(d), "--budget", "60"]) == 2
-    assert "drop --budget" in capsys.readouterr().err
+    assert "both set" in capsys.readouterr().err
 
 
 def test_a_summary_call_counts_on_the_clock(monkeypatch):
@@ -349,14 +362,21 @@ def test_the_evaluator_refuses_once_the_stop_epoch_appears_mid_run(tmp_path):
         gen.execute(_make_sample(0.2))
 
 
-def test_a_wall_budget_next_to_the_token_clock_stops_the_run_at_construction(
-        tmp_path):
+def test_the_removed_budget_clock_key_stops_the_run_at_construction(tmp_path):
     from adda._src.runtime.agent_runtime import AgenticRun
     (tmp_path / "PROBLEM_STATEMENT.md").write_text("x")
     (tmp_path / "config.yaml").write_text(
         "budget_clock: output_tokens\ntoken_budget: 5000\n")
-    with pytest.raises(ValueError, match="two limits"):
-        AgenticRun(tmp_path, budget=60)
+    with pytest.raises(ValueError, match="budget_clock is not a known"):
+        AgenticRun(tmp_path)
+
+
+def test_a_wall_and_a_token_budget_are_both_kept_at_construction(tmp_path):
+    from adda._src.runtime.agent_runtime import AgenticRun
+    (tmp_path / "PROBLEM_STATEMENT.md").write_text("x")
+    (tmp_path / "config.yaml").write_text("token_budget: 5000\n")
+    run = AgenticRun(tmp_path, budget=60)
+    assert run._budget == 60 and run._token_budget == 5000
 
 
 # -- plain Claude Code: the operator ends the session at the cap --------------
@@ -425,9 +445,21 @@ def test_a_plain_stop_ends_the_run_with_no_notice_and_records_it(tmp_path):
                 outgoing=["implementer"], spec=_minimal_spec())
     cmd = node(_make_state(study_dir=study))
     assert cmd.update["done"] and cmd.update["termination"] == (
-        terminal.TOKEN_BUDGET)
+        terminal.BUDGET_STOP)
     assert cmd.update["outcome"] == terminal.UNGATED
     assert [m for m in cmd.update["messages"] if m.type == "human"] == []
     stop = token_clock.stop_info()
     assert stop["deliverables_present"] == ["pipeline.ipynb"]
     assert stop["deliverables_missing"] == []
+
+
+def test_the_plain_arm_is_stopped_at_the_wall_deadline_on_any_message():
+    import time
+    token_clock.configure(None, wall=(time.time() - 100, 60))
+    assert token_clock.trigger() == "wall"
+    consumed: list[int] = []
+    q = _plain_stream(consumed)
+    a = _plain_adapter(q)
+    a.invoke([{"role": "user", "content": "go"}])
+    assert consumed == [0], "the stream is cut at the first message"
+    assert token_clock.stop_info()["budget_trigger"] == "wall"

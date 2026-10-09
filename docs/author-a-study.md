@@ -47,7 +47,7 @@ default. The keys you set most often are:
 
 ```yaml
 model: claude-haiku-4-5-20251001   # which language model to use
-eval_budget: 200                   # soft cap on real evaluations
+eval_budget: 200                   # real evaluations; the run winds down at this count
 budget: "01:00:00"                 # wall-clock limit; the run hard-stops at 100%
 ```
 
@@ -168,7 +168,7 @@ actually expects).
 ```yaml
 model: claude-haiku-4-5-20251001
 backend: claude
-eval_budget: 200  # soft cap on real calls to evaluate(), not a hard stop
+eval_budget: 200  # real calls to evaluate(); the run winds down at this count
 evaluator:
   entrypoint: "workspace/evaluator.py:evaluate"  # module:function, relative to the study
   output_names: [y]  # names the one value evaluate() returns

@@ -895,27 +895,12 @@ class OrchestrationMixin:
     def _budget_warnings(self, state: AgenticState) -> list[dict]:
         """Advisory budget messages for this turn.
 
-        The eval budget is SOFT: a warning only. The time rules (notices at
-        ``budget_warn_from``, the cutoff, the wind-down) are in
+        The budget rules (notices at ``budget_warn_from``, the cutoff, the
+        wind-down; wall, tokens and evaluations alike) are in
         ``nodes/time_rules.py`` and ``nodes/wind_down.py`` and reach the model as notifications.
         """
-        from ..runtime import features
         warnings: list[dict] = []
         self._time_rules_tick()
-        if not features.enabled("budget_notes"):
-            return warnings
-
-        eval_budget = state.get("eval_budget")
-        evals_used = self._ledgered_eval_total(state.get("evals_used", 0))
-        if eval_budget is not None and evals_used >= eval_budget:
-            warnings.append({
-                "role": "user",
-                "content": (
-                    f"Warning: eval budget exceeded"
-                    f" ({evals_used} used / {eval_budget} budget)."
-                    f" Do not run further evaluations."
-                ),
-            })
         return warnings
 
     def _reset_for_turn(self) -> list[str]:
@@ -1122,7 +1107,7 @@ class OrchestrationMixin:
                 deliverables_present=present, deliverables_missing=missing)
             return self._terminate_run(
                 state, ai_msg, False, missing,
-                termination=terminal.TOKEN_BUDGET)
+                termination=terminal.BUDGET_STOP)
         for router in (self._reprompt_while_working,
                        self._reprompt_unfinished):
             held = router(ai_msg, accepted, missing)
@@ -1296,8 +1281,12 @@ class OrchestrationMixin:
                 "reprompt_unfinished"):
             return summary
         flags = []
-        if stopped == terminal.TOKEN_BUDGET:
-            flags.append("the session was stopped at the output-token budget")
+        if stopped == terminal.BUDGET_STOP:
+            from ..infra import token_clock
+            trig = (token_clock.stop_info() or {}).get("budget_trigger")
+            flags.append("the session was stopped at the "
+                         + {"wall": "wall-clock"}.get(trig, "output-token")
+                         + " budget")
         elif not accepted:
             flags.append(
                 "the run terminated WITHOUT an accepted Done() —"

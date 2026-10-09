@@ -1008,6 +1008,14 @@ class ClaudeAdapter:
             _last_evt = [time.monotonic()]
             async for msg in _stream:
                 raise_if_stopped("model call")
+                if (_plain and not isinstance(msg, StreamEvent)
+                        and token_clock.exhausted()):
+                    # The wall deadline passes while a tool runs; only a
+                    # message (the tool result) wakes this loop, so check on
+                    # every one, not only on stream events.
+                    token_clock.note_stop()
+                    _cap_stop = True
+                    break
                 if isinstance(msg, StreamEvent):
                     _track_message_usage(
                         getattr(msg, "event", None), _msg_usage, _cur_msg_id)

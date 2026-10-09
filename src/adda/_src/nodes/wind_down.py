@@ -1,7 +1,8 @@
-"""The wind-down: how a run ends when the budget ``B`` (wall time or output tokens) is spent.
+"""The wind-down: how a run ends when the first budget it sets (wall time, output
+tokens or evaluations) is spent.
 
-``B`` is the real limit and nothing is killed. At ``wind_down_at`` x ``B`` the
-entry node (which holds the run clock) begins the wind-down:
+The budgets are the real limit and nothing is killed. At ``wind_down_at`` x
+the first budget to reach it, the entry node (which holds the run clock) begins the wind-down:
 
 * W0, the freeze. The gate in ``infra/wind_down.py`` refuses every tool that
   would start new work (``Delegate``, ``Bash``, ``RunNotebook`` ...) with an
@@ -121,7 +122,7 @@ class WindDownMixin:
 
     # ── W0: begin ────────────────────────────────────────────────────────────
 
-    def _wind_down_begin(self, elapsed: float) -> None:
+    def _wind_down_begin(self, prog: _rules.Progress) -> None:
         """Entry node, once: freeze, tell every node, arm the interrupt."""
         with self._time_lock:
             if self._wd_started_at is not None:
@@ -130,7 +131,7 @@ class WindDownMixin:
         rules = self._time_rules
         limit = int(settings.get_float("wind_down_tool_calls", 50))
         wind_down.begin(limit)
-        if rules.tokens and self._current_run_dir is not None:
+        if self._current_run_dir is not None:
             wind_down.publish_eval_stop(
                 Path(self._current_run_dir) / "debug", self._wd_started_at)
         fields = {"budget": rules.budget_phrase(), "limit": limit}
@@ -155,9 +156,11 @@ class WindDownMixin:
         self._time_timers.append(t)
         t.start()
         self._wind_down_record(
-            started_at=self._wd_started_at, elapsed_at_start=round(elapsed, 1),
-            budget=rules.budget, budget_unit=("output_tokens" if rules.tokens
-                                           else "s"),
+            started_at=self._wd_started_at,
+            elapsed_at_start=round(_rules.now() - self._run_start, 1),
+            budget_trigger=prog.driver, budget_s=rules.wall,
+            token_budget=rules.tokens, eval_budget=rules.evals,
+            progress=prog.by_kind(),
             tool_call_limit=limit,
             running_at_start=sorted(live), forced_turns=0, interrupted=[])
 

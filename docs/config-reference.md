@@ -15,11 +15,19 @@ reads.
 |---|---|---|
 | `model` | The language model to use. | The backend's default. |
 | `backend` | `claude`, `ollama`, `openrouter`, or `vllm`. | `claude` |
-| `budget` | Wall-clock limit, as `"HH:MM:SS"` or seconds. It is the real limit: new delegations stop at 75%, every node is told to wrap up at 90%, and the run is hard-stopped at 100% (`runtime:` keys in the [runtime reference](runtime-reference.md)). | none |
-| `budget_clock` | What `budget` is counted in: `wall` (seconds, the default) or `output_tokens`. On `output_tokens`, the budget is `token_budget`, and the same schedule applies (notices from 75%, cutoff at 90%, wind-down at 100%). Use it to give two models the same budget regardless of GPU speed or queue time. Wall time is still recorded in `run_status.json`. | `wall` |
-| `token_budget` | The budget when `budget_clock: output_tokens`: a positive integer of generated tokens, summed over every agent, the critic and the verdict checks among them. Input tokens do not count. A backend that reports no output tokens stops the run with an error; adda never estimates. Setting `budget` as well is an error. | none |
-| `watchdog_wall_s` | The wall-clock limit for `python -m adda.watchdog`, as `"HH:MM:SS"` or seconds. Required there when `budget_clock: output_tokens`, because there is no wall budget to take a multiple of. | none |
-| `eval_budget` | Soft cap on how many real evaluations the run may spend. | none |
+| `budget` | Wall-clock limit, as `"HH:MM:SS"` or seconds. | none |
+| `token_budget` | A positive integer of generated tokens, summed over every agent, the critic and the verdict checks among them. Input tokens do not count. A backend that reports no output tokens stops the run with an error; adda never estimates. Use it to give two models the same budget regardless of GPU speed or queue time. | none |
+| `eval_budget` | How many real evaluations the run may spend, counted as the rows in the canonical store. | none |
+| `watchdog_wall_s` | The wall-clock limit for `python -m adda.watchdog`, as `"HH:MM:SS"` or seconds. Use it when the run has no `budget`, because there is then no wall budget to take a multiple of. Setting it next to a `budget` is an error. | none |
+
+Every budget you set is enforced at once (`budget`, `token_budget` and
+`eval_budget`; the evaluation budget joined them on 2026-10-09, approved by
+Elvis). Each has a progress fraction, and the schedule follows the one that is
+furthest along: notices from 75%, no new delegations at 90%, and the wind-down
+at 100%, when the first budget reaches it (`runtime:` keys in the
+[runtime reference](runtime-reference.md)). `run_status.json` records which
+budget set the stop in `budget_trigger` (`wall`, `tokens` or `evals`). The old
+`budget_clock` key was removed; a config that has it is rejected.
 | `budget_usd` | **Hard** cost ceiling. The run halts when spend reaches it, and you can raise it and resume. Inactive on a backend with no per-call cost data, such as Ollama. | none |
 | `required_deliverables` | Extra files that must exist before the run can finish. | none |
 | `evaluator` | How a design gets scored. See [How designs get evaluated](author-a-study.md#how-designs-get-evaluated-the-evaluator). | Honor system. |

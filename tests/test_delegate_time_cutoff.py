@@ -97,7 +97,7 @@ def test_past_cutoff_refuses_and_fires_no_delegation():
     out = _delegate(n)
     assert out.startswith("ERROR"), out
     assert "No new delegations" in out
-    assert "under 1 min left before the wind-down at 1.7 min" in out
+    assert "Time 92% (under 1 min left)" in out and "wind-down begins at time budget of 1.7 min" in out
     assert n._registry == before, "no new delegation should be registered"
 
 

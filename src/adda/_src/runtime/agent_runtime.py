@@ -67,6 +67,8 @@ __all__ = [
 ]
 
 DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+_WIND_DOWN_TERMS = (terminal.BUDGET_WIND_DOWN, terminal.TIME_BUDGET)
+_STOP_TERMS = (terminal.BUDGET_STOP, terminal.TOKEN_BUDGET)
 DEFAULT_OLLAMA_MODEL = "qwen2.5:1.5b"
 
 # Text the Claude Code CLI backend returns as an ORDINARY assistant message
@@ -281,7 +283,8 @@ class AgenticRun:
         self._mem_cap_bytes = resolve_mem_cap_bytes(cfg.get("mem_cap"))
         self._required_deliverables = cfg.get("required_deliverables") or []
 
-        # The budget clock: wall seconds (default) or generated output tokens.
+        # Every budget the config sets is enforced at once: wall seconds,
+        # generated output tokens, evaluations (approved by Elvis 2026-10-09).
         try:
             self._token_budget = token_clock.parse(
                 {**cfg, **({"budget": budget} if budget is not None else {})})
@@ -289,9 +292,7 @@ class AgenticRun:
             raise ValueError(f"config.yaml is invalid: {exc}") from exc
 
         # budget from config is HH:MM:SS string or seconds float
-        if self._token_budget is not None:
-            self._budget = None
-        elif budget is not None:
+        if budget is not None:
             self._budget = budget
         elif "budget" in cfg:
             self._budget = _parse_budget_str(cfg["budget"])
@@ -546,7 +547,8 @@ class AgenticRun:
         token_clock.configure(
             _tok,
             seed=(Telemetry.merge(debug_dir)["totals"]["output_tokens"]
-                  if resume is not None and _tok else 0))
+                  if resume is not None and _tok else 0),
+            wall=((start_time, self._budget) if self._budget else None))
         self._publish_eval_deadline(debug_dir, start_time)
 
         # Create graph-wide delegation log for episodic memory.
@@ -1181,7 +1183,7 @@ class AgenticRun:
         now_ts = datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
         elapsed = time.time() - ctx.start_time
         wind_down = self._read_wind_down(ctx) if (
-            termination == terminal.TIME_BUDGET) else {}
+            termination in _WIND_DOWN_TERMS) else {}
         if wind_down.get("closed_at"):
             elapsed = wind_down["closed_at"] - ctx.start_time
         for _n in (getattr(self, "_live_nodes", None) or {}).values():
@@ -1230,7 +1232,7 @@ class AgenticRun:
             terminal.BACKSTOP_USD,
             terminal.REPEATED_ERRORS, terminal.CRASHED,
             terminal.BACKEND_UNAVAILABLE) or (
-            termination == terminal.TIME_BUDGET
+            termination in _WIND_DOWN_TERMS
             and gate_outcome != terminal.GATED)
         self._write_run_status(
             ctx.debug_dir,
@@ -1257,7 +1259,10 @@ class AgenticRun:
                     "deliverables_present", []),
                 "deliverables_missing": cap_stop.get(
                     "deliverables_missing", [])}
-               if termination == terminal.TOKEN_BUDGET else {}),
+               if termination in _STOP_TERMS else {}),
+            **({"budget_trigger": wind_down.get("budget_trigger")
+                or cap_stop.get("budget_trigger")}
+               if (wind_down or cap_stop) else {}),
             **({"overrun_s": round(max(0.0, elapsed - self._budget), 1)}
                if getattr(self, "_budget", None) else {}),
             **({"wind_down_turns": wind_down.get("forced_turns", 0),

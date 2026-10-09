@@ -522,7 +522,6 @@ def get_evaluator(namespace: str | None = None) -> InstrumentedDataGenerator:
         fidelity_column=fidelity_column,
         lock_path=lock_path,
         extra_provenance=extra_provenance,
-        eval_budget=cfg.get("eval_budget"),
         dedup_scope=dedup_scope,
         oracle_rev=oracle_rev,
         stop_after=lambda: _fresh_stop_epoch(cfg),

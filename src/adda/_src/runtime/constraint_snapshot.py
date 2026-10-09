@@ -24,9 +24,9 @@ from typing import Any
 
 @dataclass(frozen=True)
 class ConstraintSnapshot:
-    """A point-in-time read of the run's budgets. The eval budget is advisory.
-    The wall-clock budget is a hard limit: the run stops when it is spent
-    (``runtime/time_rules.py``); this block only reports it."""
+    """A point-in-time read of the run's budgets. Every budget set (wall,
+    tokens, evaluations) starts the wind-down when reached
+    (``runtime/time_rules.py``); this block only reports them."""
 
     eval_budget: int | None
     evals_used: int
@@ -91,16 +91,16 @@ class ConstraintSnapshot:
                 f"{self.token_budget:,}"
                 + (" (EXHAUSTED)" if self.tokens_used >= self.token_budget
                    else "") + ".")
-        elif self.wall_budget_s is not None and self.wall_elapsed_s is not None:
+        if self.wall_budget_s is not None and self.wall_elapsed_s is not None:
             _el = self._dur(self.wall_elapsed_s)
             _tot = self._dur(self.wall_budget_s)
             _pct = (self.wall_elapsed_s / self.wall_budget_s) * 100
             lines.append(
                 f"Wall-clock budget: {_el}/{_tot} used ({_pct:.0f}%); "
-                f"the run is hard-stopped at {_tot}"
+                f"the run winds down at {_tot}"
                 + (" (EXHAUSTED)" if self.wall_exhausted else "") + "."
             )
-        else:
+        elif self.token_budget is None:
             lines.append("Wall-clock budget: unspecified.")
         lines.append("</constraints>")
         return "\n".join(lines)
@@ -176,6 +176,18 @@ def compute_constraint_snapshot(
         wall_budget_s=budget_seconds,
         wall_elapsed_s=wall_elapsed,
     )
+
+
+def evals_for_node(node: Any) -> int:
+    """The canonical evaluation count read from a node's own run: the same
+    number the ledger reports (``_evals_used``)."""
+    notes_dir = getattr(node, "_current_notes_dir", None)
+    experiment_data_dir = (
+        notes_dir.parent.parent / "experiment_data"
+        if notes_dir is not None else None
+    )
+    return _evals_used(experiment_data_dir,
+                       getattr(node, "_delegation_log", None))
 
 
 def snapshot_for_node(node: Any) -> ConstraintSnapshot:

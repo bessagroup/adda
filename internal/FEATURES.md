@@ -1123,16 +1123,19 @@ adda has not reviewed), `DEFAULT_TOOLS_EXPANDED` (non-Claude backend).
 
 ## D. Resource governance
 
-### Soft eval-budget nudge
-- **What:** when the shared ledger crosses 80/100/150% of the eval budget, the
-  *offender* (the running campaign) is nudged via its own output — capped at one per
-  band. **Soft: never stops the campaign** (the eval budget is the agent's call).
-- **Where:** `evaluation/instrumented.py` `_maybe_nudge_budget` (from `_flush`;
-  bands `_NUDGE_BANDS` = 0.8/1.0/1.5); `eval_budget` reaches it via
-  run_config.json (`run_setup`) → `oracle_resolution`. Audit row: `BUDGET_WARN`
-  in diagnostics.jsonl.
-- **Config:** `eval_budget` (config.yaml or `AgenticRun(eval_budget=)`; no env
-  var). **Status:** done.
+### Eval budget joins the budget schedule (replaces the soft nudge)
+- **What:** `eval_budget` is no longer a nudge. It is one budget of the schedule
+  (see "Output-token budget" below): notices from 75%, cutoff at 90%, wind-down
+  at 100%, keyed on the budget furthest along. **Approved by Elvis on
+  2026-10-09** (CLAUDE.md §4 had kept budgets soft; this supersedes it for
+  evals). The count is the canonical store rows
+  (`runtime/constraint_snapshot.py::evals_for_node`); the old nudge also
+  counted dedup-skipped evaluations, the schedule does not.
+- **Where:** `nodes/time_rules.py` (an `EVAL_POLL_S` = 5 s poll timer, since
+  rows land in campaign subprocesses, plus the checkpoint ticks). The
+  `InstrumentedDataGenerator` no longer takes `eval_budget`; it only refuses a
+  live evaluation after the wind-down begins (`stop_after`).
+- **Status:** done (`tests/test_time_rules.py`).
 
 ### Hard memory cap (host safety)
 - **What:** a 5-second watchman sums each delegation's process-tree **resident (RSS)**
@@ -1423,8 +1426,8 @@ because a worker can run on another host. `infra/host_provenance.py`; test
      reproduction gate and ONE critic review, no rework, both recorded. The
      review's tool calls count against the same `wind_down_tool_calls`. If the
      gate passes and the critic returns PASS the run is `GATED` with
-     `termination: time_budget` and `overrun_s` recorded (the gate criteria
-     do not change; `time_budget` is not a halt for the terminal resolution);
+     `termination: budget_wind_down`, `budget_trigger` and `overrun_s` recorded (the gate criteria
+     do not change; `budget_wind_down` is not a halt for the terminal resolution);
      otherwise it is `UNGATED` and halted (resumable). W3: retrospectives, as
      in every close. Nothing is cancelled: a delegation that does not report
      is waited for until its own call limit or the external watchdog ends it.
@@ -1440,7 +1443,7 @@ because a worker can run on another host. `infra/host_provenance.py`; test
      its subtree), never by pattern. Before it signals it
      takes every registered store flush lock (bounded wait
      `STORE_LOCK_WAIT_S`) so a flusher is never interrupted mid-write.
-  `run_status.json` records `termination: time_budget`, `overrun_s`,
+  `run_status.json` records `termination: budget_wind_down`, `overrun_s`,
   `wind_down_turns`, `deliverables_missing`, `reproduction_gate`,
   `critic_verdict` and `interrupted`; the full record is
   `debug/wind_down.json`.
@@ -1471,48 +1474,49 @@ because a worker can run on another host. `infra/host_provenance.py`; test
   `tests/test_wind_down.py`, `tests/test_delegate_time_cutoff.py`,
   `tests/test_route_aware_termination.py`).
 
-### Output-token budget clock (`budget_clock: output_tokens`)
-- **What:** the run budget B counted in generated output tokens instead of
-  wall seconds, so two models get the same budget independent of GPU speed
-  and queue. `config.yaml`: `budget_clock: wall | output_tokens` (default
-  `wall`, unchanged) and `token_budget: <int>`. B is the output tokens summed
-  over EVERY node (entry, specialists, critic, validators); input tokens do not
-  count. The schedule is the wall clock's (notices from 75% every 5%, cutoff
-  at 0.90, wind-down at 1.0, 50-call limit) and the notice text says tokens
-  left. `budget` next to the token clock, `token_budget` on the wall clock,
-  and a bad value are rejected at start.
+### Budgets enforced together (`budget`, `token_budget`, `eval_budget`)
+- **What:** every budget a config sets is enforced at once; the first to reach
+  the wind-down threshold decides. `budget_clock` was removed (a config with it
+  is rejected). `Progress(wall, tokens, evals)` holds each budget's fraction;
+  the schedule keys on the largest (`driver`: wall wins a tie, then tokens).
+  Notices state every budget's share and what is left, each in its own unit
+  (minutes, output tokens, evaluations). `token_budget` is the output tokens
+  summed over EVERY node (entry, specialists, critic, validators); input
+  tokens do not count. Approved by Elvis 2026-10-09 (the eval budget joining).
+- **Terminations:** the wind-down closes `budget_wind_down` (non-halt; can be
+  GATED; legacy `time_budget` still read). The plain arm's stop is
+  `budget_stop` (halt; legacy `token_budget`). `budget_trigger` (`wall`,
+  `tokens`, `evals`) is in `wind_down.json` and `run_status.json`.
 - **Counting:** one process-wide counter (`infra/token_clock.py`), fed per
   model call and idempotent per call key. Claude: the final `output_tokens` of
   each API message, as its `message_delta` arrives
   (`backends/claude.py::_count_output_tokens`), plus the residual of the
   attempt's result usage. OpenAI-compatible (vLLM, ollama, openrouter): the
-  `usage_metadata` of each AI message and of each summary call
-  (`openai_compatible.py::_count_output_tokens`). A call that reports no count
-  raises `TokenUsageMissing` at that call: never estimated. A message counts
-  when it ends, so one very long message crosses a threshold late.
-- **No timers:** a listener on the counter fires the same idempotent tick on
-  its own thread when a threshold is crossed. At the wind-down the entry node
-  writes `eval_stop_epoch` into `debug/run_config.json`, which the metered
-  evaluator in a campaign process reads fresh at each call.
+  `usage_metadata` of each AI message and of each summary call. A call that
+  reports no count raises `TokenUsageMissing`: never estimated.
+- **Triggers:** wall time: one timer per threshold. Tokens: a listener on the
+  counter fires the tick on its own thread. Evals: the 5 s poll. At the
+  wind-down begin the entry node always writes `eval_stop_epoch` into
+  `debug/run_config.json`, which the metered evaluator reads at each call.
 - **Record:** `run_status.json` and the ledger carry `output_tokens_used` and
-  `token_budget`; `wall_s` is still recorded. `wind_down.json` carries
-  `budget` and `budget_unit`. A resume seeds the counter from the telemetry
-  sum.
-- **Watchdog:** stays on wall time (host safety). With no wall budget there is
-  no multiple: `watchdog_wall_s` is the absolute deadline, required by
-  `python -m adda.watchdog` on this clock; `--budget` is refused there.
-- **Plain Claude Code arm:** counted by the same stream accounting (per
-  message end). When the count reaches `token_budget`, adda ends the session
-  as an operator would with Esc: the stream loop breaks and the generator is
-  closed (`query()` has no interrupt handle). No hook, no notice, no
-  wind-down, no gate, no re-prompt. `run_status.json` records termination
-  `token_budget`, `output_tokens_used`, `tokens_over` (overshoot past the cap)
-  and `deliverables_present` / `deliverables_missing`. The CLI's own
-  `--max-budget-usd` (dollars) is not wired in.
-- **Where:** `infra/token_clock.py`; `runtime/time_rules.py` (`tokens`);
-  `nodes/time_rules.py`; `runtime/agent_runtime.py`;
+  `token_budget`; `wall_s` always. `wind_down.json` carries `budget_trigger`,
+  `budget_s`, `token_budget`, `eval_budget`, `progress`. A resume seeds the
+  token counter from the telemetry sum.
+- **Watchdog:** stays on wall time (host safety). With a wall budget the
+  deadline is the multiple; with none, `watchdog_wall_s` is the absolute
+  deadline. Both set is refused.
+- **Plain Claude Code arm:** no hook, no notice, no wind-down, no gate, and no
+  metered evaluator (so evals cannot trigger there). The stream loop breaks
+  when the token count reaches `token_budget` or the wall deadline passes,
+  checked on every stream message (`query()` has no interrupt handle). The
+  record holds `output_tokens_used`, `tokens_over`, `budget_trigger` and
+  `deliverables_present` / `deliverables_missing`. A long tool call can delay
+  the wall check until its result arrives.
+- **Where:** `infra/token_clock.py`; `runtime/time_rules.py`;
+  `nodes/time_rules.py`; `nodes/wind_down.py`; `runtime/agent_runtime.py`;
   `infra/watchdog_launcher.py`; `studies/run_ledger.py`.
-- **Status:** done, headless-tested (`tests/test_token_clock.py`).
+- **Status:** done, headless-tested (`tests/test_token_clock.py`,
+  `tests/test_time_rules.py`).
 
 ### `python -m adda.watchdog` — the in-package run launcher (#41)
 - **What:** a launcher that runs a study as a CHILD process, in its own process

@@ -1,25 +1,32 @@
-"""The wall-clock rules: the declared budget ``B`` is the real limit.
+"""The budget rules: every budget a config sets is enforced at once.
 
-Thresholds, each a fraction of ``B`` measured from the run start:
+A config may set ``budget`` (wall clock), ``token_budget`` (output tokens
+summed over every node) and ``eval_budget`` (evaluations in the canonical
+store). Each budget has a progress fraction; the schedule keys on the one
+furthest along (``Progress``). Elvis approved on 2026-10-09 that the evaluation
+budget joins this schedule; before, it was a soft nudge only.
+
+Thresholds, each a fraction of a budget:
 
 * ``budget_warn_from`` (0.75), then every ``budget_warn_every`` (0.05): a
-  one-line notice with the minutes left (output tokens left on the token
-  clock, ``infra/token_clock.py``), to the entry node and to running
-  delegations.
+  one-line notice with every budget's share used and what is left, to the entry
+  node and to running delegations.
 * ``delegation_cutoff_at`` (0.90): no new delegations; running ones continue.
 * ``wind_down_at`` (1.0): the wind-down begins (``nodes/wind_down.py``).
   Nothing is killed. Code refuses new delegations and new metered evaluations,
   each node saves what it has, the entry node writes the deliverable, and the
-  run closes after one reproduction gate and one critic review.
+  run closes after one reproduction gate and one critic review. Evaluations
+  already running finish and are stored.
 
 Three more knobs bound the wind-down by counts, never by time:
 ``wind_down_tool_calls`` (50 tool calls per node), ``wind_down_turns`` (forced
 turns per step, 2), ``wind_down_interrupt_after_s`` (300 s before work that has
 not finished gets SIGINT).
 
-With no ``budget`` configured every threshold is off. The knobs live in the
-study's ``runtime:`` block (``settings.py``); this module holds their defaults,
-their validation, the text of each notice, and the clock the tests replace.
+With none of the three configured every threshold is off. The knobs live in
+the study's ``runtime:`` block (``settings.py``); this module holds their
+defaults, their validation, the text of each notice, and the clock the tests
+replace.
 """
 from __future__ import annotations
 
@@ -51,6 +58,7 @@ REMOVED: dict[str, str] = {
 }
 
 NOTICE, CUTOFF, WIND_DOWN = "notice", "cutoff", "wind_down"
+WALL, TOKENS, EVALS = "wall", "tokens", "evals"
 
 
 def now() -> float:
@@ -92,27 +100,64 @@ def validate(cfg: dict, explicit: dict) -> None:
 
 
 @dataclass(frozen=True)
+class Progress:
+    """How far each budget that is set has run, as a fraction of that budget.
+
+    The schedule keys on the budget that is furthest along: ``fraction`` is the
+    larger of the two and ``driver`` names it (``"wall"`` or ``"tokens"``).
+    """
+    wall: float | None = None
+    tokens: float | None = None
+    evals: float | None = None
+
+    def by_kind(self) -> dict[str, float]:
+        return {k: f for k, f in ((WALL, self.wall), (TOKENS, self.tokens),
+                                  (EVALS, self.evals)) if f is not None}
+
+    @property
+    def fraction(self) -> float:
+        return max(self.by_kind().values())
+
+    @property
+    def driver(self) -> str:
+        """The budget furthest along (wall wins a tie, then tokens)."""
+        kinds = self.by_kind()
+        return max(kinds, key=lambda k: kinds[k])
+
+
+@dataclass(frozen=True)
 class TimeRules:
-    budget: float
+    wall: float | None
+    tokens: int | None
+    evals: int | None
     warn_from: float
     warn_every: float
     cutoff_at: float
     wind_down_at: float
-    tokens: bool = False
 
     @classmethod
-    def from_settings(cls, budget: float | None,
-                      tokens: bool = False) -> TimeRules | None:
-        if not budget or budget <= 0:
+    def from_settings(cls, wall: float | None, tokens: int | None = None,
+                      evals: int | None = None) -> TimeRules | None:
+        """The rules for the budgets that are set; ``None`` when none is."""
+        wall = float(wall) if wall and wall > 0 else None
+        tokens = int(tokens) if tokens and tokens > 0 else None
+        evals = int(evals) if evals and evals > 0 else None
+        if wall is None and tokens is None and evals is None:
             return None
         return cls(
-            tokens=tokens,
-            budget=float(budget),
+            wall=wall, tokens=tokens, evals=evals,
             warn_from=settings.get_float("budget_warn_from", 0.75),
             warn_every=settings.get_float("budget_warn_every", 0.05),
             cutoff_at=settings.get_float("delegation_cutoff_at", 0.90),
             wind_down_at=settings.get_float("wind_down_at", 1.0),
         )
+
+    def progress(self, elapsed_s: float, tokens_used: float,
+                 evals_used: float = 0) -> Progress:
+        return Progress(
+            wall=None if self.wall is None else elapsed_s / self.wall,
+            tokens=None if self.tokens is None else tokens_used / self.tokens,
+            evals=None if self.evals is None else evals_used / self.evals)
 
     def schedule(self) -> list[tuple[str, float]]:
         """Every threshold as ``(name, fraction)``, in time order. A notice
@@ -130,62 +175,95 @@ class TimeRules:
         out.append((WIND_DOWN, self.wind_down_at))
         return sorted(out, key=lambda x: x[1])
 
-    def at(self, phase: str) -> float:
-        """Seconds after the run start at which ``phase`` begins."""
+    def fraction_of(self, phase: str) -> float:
         for name, frac in self.schedule():
             if name == phase:
-                return self.budget * frac
+                return frac
         raise KeyError(phase)
 
-    def due(self, elapsed: float) -> list[str]:
-        return [n for n, f in self.schedule() if elapsed >= self.budget * f]
+    def wall_at(self, phase: str) -> float:
+        """Seconds after the run start at which ``phase`` begins on the wall
+        budget."""
+        return self.wall * self.fraction_of(phase)
 
-    # -- text: minutes on the wall clock, output tokens on the token clock --
+    def due(self, fraction: float) -> list[str]:
+        return [n for n, f in self.schedule() if fraction >= f]
 
-    def amount(self, value: float) -> str:
-        return f"{int(value):,} output tokens" if self.tokens else _mins(value)
+    # -- text: every budget that is set, each in its own unit ---------------
 
-    def budget_text(self) -> str:
-        return self.amount(self.at(WIND_DOWN))
+    def _parts(self) -> list[tuple[str, str, float]]:
+        """``(name, kind, budget)`` for each budget set."""
+        out: list[tuple[str, str, float]] = []
+        if self.wall is not None:
+            out.append(("Time", WALL, self.wall))
+        if self.tokens is not None:
+            out.append(("Tokens", TOKENS, float(self.tokens)))
+        if self.evals is not None:
+            out.append(("Evaluations", EVALS, float(self.evals)))
+        return out
+
+    @staticmethod
+    def _amount(kind: str, value: float) -> str:
+        if kind == TOKENS:
+            return f"{int(value):,} output tokens"
+        if kind == EVALS:
+            return f"{int(value):,} evaluations"
+        return _mins(value)
+
+    def _left_text(self, kind: str, value: float) -> str:
+        return _left(value) if kind == WALL else self._amount(
+            kind, max(value, 0.0))
 
     def budget_phrase(self) -> str:
-        return (f"token budget of {self.budget_text()}" if self.tokens
-                else f"time budget of {self.budget_text()}")
+        return " and ".join(
+            f"{_NAME[k]} budget of {self._amount(k, b * self.wind_down_at)}"
+            for _n, k, b in self._parts())
 
-    def _left_text(self, value: float) -> str:
-        if self.tokens:
-            return f"{int(max(value, 0.0)):,} output tokens"
-        return _left(value)
+    def _fractions(self, p: Progress):
+        kinds = p.by_kind()
+        for n, k, b in self._parts():
+            yield n, k, b, kinds[k]
 
-    def _clock(self, elapsed: float) -> str:
-        end = self.at(WIND_DOWN)
-        if elapsed < end:
-            return (f"{self._left_text(end - elapsed)} left before the "
-                    f"wind-down at {self.budget_text()}.")
-        began = f"the wind-down began at {self.budget_text()}; "
-        if self.tokens:
-            return began + f"{self._left_text(elapsed - end)} over."
-        return began + f"{_left(elapsed - end, over=True)} ago."
+    def _clock(self, p: Progress) -> str:
+        """The budgets' state: used share and what is left, per budget set."""
+        parts = []
+        over = p.fraction >= self.wind_down_at
+        for n, k, b, f in self._fractions(p):
+            left = b * self.wind_down_at - f * b
+            if left > 0:
+                parts.append(f"{n} {_pct(f)}% ({self._left_text(k, left)} left)")
+            elif k == WALL:
+                parts.append(f"{n} {_pct(f)}% ({_left(-left, over=True)} over)")
+            else:
+                parts.append(f"{n} {_pct(f)}% ({self._left_text(k, -left)} over)")
+        text = "; ".join(parts)
+        if over:
+            return (f"the wind-down began at {self.budget_phrase()}, set by "
+                    f"the {_NAME[p.driver]} budget. {text}.")
+        first = ", when the first of them is reached" if len(
+            self._parts()) > 1 else ""
+        return f"{text}. The wind-down begins at {self.budget_phrase()}{first}."
 
-    def cutoff_refusal(self, elapsed: float) -> str:
+    def cutoff_refusal(self, p: Progress) -> str:
         return (
-            "No new delegations: " + self._clock(elapsed)
+            "No new delegations: " + self._clock(p)
             + " This delegation was NOT started. Wait() for the running "
             "ones, then write your deliverables and call Done().")
 
-    def notice(self, phase: str, elapsed: float, *, can_call_done: bool) -> str:
+    def notice(self, phase: str, p: Progress, *, can_call_done: bool) -> str:
         end = ("call Done()" if can_call_done
                else "report what you have and return")
-        clock = self._clock(elapsed)
+        clock = self._clock(p)
         if phase == CUTOFF:
             return (
                 "No new delegations: " + clock + " Running ones continue. "
                 + ("Wait() for them, then write your deliverables."
                    if can_call_done else
                    "Finish the step you are on and report."))
-        pct = _pct(elapsed / self.budget)
-        what = "Output tokens" if self.tokens else "Time"
-        return f"{what}: {pct}% of the budget used; {clock} Plan so you can {end}."
+        return f"Budget: {clock} Plan so you can {end}."
+
+
+_NAME = {WALL: "time", TOKENS: "token", EVALS: "evaluation"}
 
 
 def _pct(frac: float) -> str:

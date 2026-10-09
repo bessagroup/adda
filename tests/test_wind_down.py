@@ -193,7 +193,7 @@ def test_the_entry_node_is_walked_through_save_then_done_then_the_close(tmp_path
     assert wd_text.SAVE_TURN in sent
     assert wd_text.DONE_TURN.format(n=1, k=2) in sent
     assert wd_text.DONE_TURN.format(n=2, k=2) in sent
-    assert cmd.update["termination"] == terminal.TIME_BUDGET
+    assert cmd.update["termination"] == terminal.BUDGET_WIND_DOWN
     rec = json.loads((run_dir / "debug" / "wind_down.json").read_text())
     assert rec["forced_turns"] == 3 and "critic_verdict" in rec
 
@@ -245,7 +245,7 @@ def test_a_passing_review_and_gate_earn_gated_with_termination_time_budget(
         tmp_path):
     cmd = _gated_walk(tmp_path, verdict="PASS", repro=None)
     assert cmd.update["outcome"] == terminal.GATED
-    assert cmd.update["termination"] == terminal.TIME_BUDGET
+    assert cmd.update["termination"] == terminal.BUDGET_WIND_DOWN
     assert cmd.update["reviewed"] is True
     assert "it is GATED" in cmd.update["last_report"]
 
@@ -256,7 +256,7 @@ def test_a_failed_gate_or_a_non_pass_review_stays_ungated(
         tmp_path, verdict, repro):
     cmd = _gated_walk(tmp_path, verdict=verdict, repro=repro)
     assert cmd.update["outcome"] == terminal.UNGATED
-    assert cmd.update["termination"] == terminal.TIME_BUDGET
+    assert cmd.update["termination"] == terminal.BUDGET_WIND_DOWN
 
 
 def test_the_review_is_counted_against_the_same_call_limit():

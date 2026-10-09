@@ -72,7 +72,8 @@ def stop_headline(stop: dict | None) -> str:
         return ("The previous process of this run crashed or was killed"
                 + (f" ({reason})" if reason else "")
                 + "; this resume only collects what you can still report.")
-    if stop.get("termination") == terminal.TIME_BUDGET:
+    if stop.get("termination") in (
+            terminal.BUDGET_WIND_DOWN, terminal.TIME_BUDGET):
         return ("The budget is spent"
                 + (f" ({reason})" if reason else "")
                 + "; the run wound down and did not finish on time.")

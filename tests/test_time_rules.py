@@ -152,21 +152,47 @@ def test_the_default_schedule_is_the_notices_the_cutoff_and_the_wind_down():
 
 def test_every_notice_states_the_time_left_in_minutes(clock):
     r = rules.TimeRules.from_settings(BUDGET)
-    text = r.notice("notice:0.75", 0.75 * BUDGET, can_call_done=True)
-    assert text == ("Time: 75% of the budget used; 7 min left before the "
-                    "wind-down at 30 min. Plan so you can call Done().")
-    worker = r.notice("notice:0.8", 0.8 * BUDGET, can_call_done=False)
-    assert "6 min left before the wind-down at 30 min" in worker
+    text = r.notice("notice:0.75", r.progress(0.75 * BUDGET, 0),
+                    can_call_done=True)
+    assert text == ("Budget: Time 75% (7 min left). The wind-down begins at "
+                    "time budget of 30 min. Plan so you can call Done().")
+    worker = r.notice("notice:0.8", r.progress(0.8 * BUDGET, 0),
+                      can_call_done=False)
+    assert "Time 80% (6 min left)" in worker
     assert "report what you have and return" in worker
-    cut = r.notice(rules.CUTOFF, 0.9 * BUDGET, can_call_done=True)
-    assert cut.startswith("No new delegations: 3 min left before the wind-down")
+    cut = r.notice(rules.CUTOFF, r.progress(0.9 * BUDGET, 0),
+                   can_call_done=True)
+    assert cut.startswith("No new delegations: Time 90% (3 min left)")
 
 
 def test_the_cutoff_refusal_says_the_new_rule():
     r = rules.TimeRules.from_settings(BUDGET)
-    t = r.cutoff_refusal(0.92 * BUDGET)
+    t = r.cutoff_refusal(r.progress(0.92 * BUDGET, 0))
     assert "No new delegations" in t and "NOT started" in t
-    assert "wind-down at 30 min" in t
+    assert "wind-down begins at time budget of 30 min" in t
+
+
+def test_every_budget_a_config_sets_is_in_the_notice_and_the_first_one_leads():
+    r = rules.TimeRules.from_settings(BUDGET, tokens=1000, evals=50)
+    p = r.progress(0.5 * BUDGET, 640, 20)
+    assert p.driver == rules.TOKENS and round(p.fraction, 2) == 0.64
+    text = r.notice("notice:0.75", p, can_call_done=True)
+    assert "Time 50%" in text and "Tokens 64% (360 output tokens left)" in text
+    assert "Evaluations 40% (30 evaluations left)" in text
+    assert "when the first of them is reached" in text
+
+
+def test_a_tie_goes_to_wall_then_tokens():
+    r = rules.TimeRules.from_settings(BUDGET, tokens=1000, evals=50)
+    assert r.progress(BUDGET, 1000, 50).driver == rules.WALL
+    assert r.progress(0, 1000, 50).driver == rules.TOKENS
+
+
+def test_evaluations_alone_drive_the_schedule():
+    r = rules.TimeRules.from_settings(None, evals=100)
+    assert r.wall is None
+    assert r.due(r.progress(0, 0, 76).fraction) == ["notice:0.75"]
+    assert rules.WIND_DOWN in r.due(r.progress(0, 0, 100).fraction)
 
 
 # -- the thresholds fire at their fractions ---------------------------------
@@ -217,6 +243,29 @@ def test_the_wind_down_fires_once_at_the_budget(entry, clock):
     assert wind_down.active()
     entry._time_rules_cancel()
     assert not wind_down.active()
+
+
+def test_the_evaluation_budget_begins_the_wind_down_before_the_wall_does(
+        entry, clock, monkeypatch):
+    """Approved by Elvis 2026-10-09: evals join the schedule; the first budget
+    to reach its threshold decides, and the record names it."""
+    from adda._src.infra import wind_down
+    from adda._src.runtime import constraint_snapshot
+    entry._eval_budget = 100
+    used = [0]
+    monkeypatch.setattr(constraint_snapshot, "evals_for_node",
+                        lambda node: used[0])
+    clock.at(0.2)
+    entry._time_rules_tick()
+    assert _diag(entry) == []
+    used[0] = 100
+    entry._time_rules_tick()
+    assert "TIME_WIND_DOWN" in _diag(entry)
+    rec = json.loads((entry._current_run_dir / "debug"
+                      / "wind_down.json").read_text())
+    assert rec["budget_trigger"] == "evals" and rec["eval_budget"] == 100
+    assert wind_down.active()
+    entry._time_rules_cancel()
 
 
 # -- interrupt reaches processes safely ------------------------------------

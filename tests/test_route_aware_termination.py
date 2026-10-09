@@ -212,7 +212,7 @@ def _run_to_the_end(node, state, limit=12):
 def test_the_wind_down_closes_ungated_at_the_budget(tmp_path):
     """At the time budget nothing is killed: the entry node is walked through
     save and Done, the close runs ONE reproduction gate, and the run ends
-    TIME_BUDGET (a HALT: UNGATED, banner on top, run_status halted)."""
+    BUDGET_WIND_DOWN (a HALT: UNGATED, banner on top, run_status halted)."""
     import json
 
     from adda._src.nodes import Node
@@ -236,7 +236,7 @@ def test_the_wind_down_closes_ungated_at_the_budget(tmp_path):
     cmd = _run_to_the_end(node, state)
 
     assert cmd.update.get("done") is True
-    assert cmd.update["termination"] == terminal.TIME_BUDGET
+    assert cmd.update["termination"] == terminal.BUDGET_WIND_DOWN
     assert cmd.update["outcome"] == terminal.UNGATED
     report = cmd.update.get("last_report", "")
     assert "BUDGET SPENT" in report and "CONCLUSION X" in report
