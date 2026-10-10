@@ -605,8 +605,9 @@ class NotebookTools:
         # deadlocks (audit run 20260624T021359). The notebook is NOT one of
         # them — writing it raw would bypass the structure the cell tools
         # enforce (named pillars, required WHY-explainers, rev guards).
+        from ....runtime.study_config import deliverable_name
         _required_aux = {
-            Path(x).name for x in (getattr(node, "_required_deliverables", None) or [])
+            deliverable_name(x) for x in (getattr(node, "_required_deliverables", None) or [])
         }
         if p.name not in _required_aux:
             declared = sorted(_required_aux) or "none"

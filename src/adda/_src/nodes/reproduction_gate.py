@@ -77,6 +77,7 @@ class ReproductionGateMixin:
         from ..evaluation.notebook_exec import required_deliverable_name
         from ..runtime import features
         from ..runtime.features import NOTEBOOK_TOOLS
+        from ..runtime.study_config import deliverable_name
         study_dir = Path(state.get("study_dir", "."))
         # WriteDeliverable writes BARE names to study_dir/ (it rejects path
         # separators). Normalise any configured path to its basename so a stray
@@ -92,7 +93,7 @@ class ReproductionGateMixin:
         present: list[str] = []
         missing: list[str] = []
         for p in required:
-            name = Path(p).name
+            name = deliverable_name(p)
             if name in seen:
                 continue
             seen.add(name)

@@ -28,6 +28,7 @@ from typing import Any
 
 from ....prompts.tool_catalog import tool_examples
 from ....runtime import terminal
+from ....runtime.study_config import deliverable_name
 from ...notices import wrap_notice
 from ...parsing import (
     _classify_response,
@@ -246,7 +247,7 @@ def build_sandboxed_write(
             _deliv is not None
             and _norm
             and "/" not in _norm
-            and _norm in {Path(x).name for x in (
+            and _norm in {deliverable_name(x) for x in (
                 deliverable_names() if deliverable_names else [])}
         ):
             _base = _deliv

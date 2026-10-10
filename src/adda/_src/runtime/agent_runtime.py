@@ -1176,6 +1176,9 @@ class AgenticRun:
             result.get("termination"),
             result.get("reviewed"),
         )
+        malformed = self._record_malformed_deliverables(ctx)
+        if malformed and gate_outcome == terminal.GATED:
+            gate_outcome = terminal.UNGATED
         stop_reason = self._warn_if_externally_stopped(report, ctx)
         evals = self._ledgered_eval_count(ctx, result)
         tokens = result.get("token_totals") or {}
@@ -1254,6 +1257,7 @@ class AgenticRun:
             # from file mtimes and gets a different answer.
             wall_s=round(elapsed, 1),
             output_tokens_used=output_tokens_used, token_budget=token_budget,
+            **({"deliverables_malformed": malformed} if malformed else {}),
             **({"tokens_over": cap_stop.get("tokens_over", 0),
                 "deliverables_present": cap_stop.get(
                     "deliverables_present", []),
@@ -1286,6 +1290,27 @@ class AgenticRun:
         log.removeHandler(ctx.log_handler)
         ctx.log_handler.close()
         return report
+
+    def _record_malformed_deliverables(self, ctx: _RunContext) -> list[str]:
+        """The required deliverables that are not in their declared format at
+        the close, on every close path. Each is written to diagnostics.jsonl;
+        the caller keeps the run from GATED."""
+        from .study_config import deliverable_format_errors
+        problems = deliverable_format_errors(
+            self.study_dir, getattr(self, "_required_deliverables", None) or [])
+        for p in problems:
+            try:
+                with (ctx.debug_dir / "diagnostics.jsonl").open(
+                        "a", encoding="utf-8") as f:
+                    f.write(json.dumps({
+                        "ts": datetime.now(tz=timezone.utc).isoformat(
+                            timespec="seconds"),
+                        "node": "(run)",
+                        "error_type": "DELIVERABLE_MALFORMED",
+                        "detail": p}) + "\n")
+            except OSError:
+                pass
+        return problems
 
     @staticmethod
     def _read_wind_down(ctx: _RunContext) -> dict:

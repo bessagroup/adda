@@ -641,6 +641,16 @@ Format per feature: **what** (plain language) · **why** · **where** (files) ·
   equals a configured `required_deliverables` basename to the study dir, where the
   reproduction gate looks for it (`deliverable_dir`, `deliverable_names`). Other bare
   names stay in the delegation root. A Default node keeps the native Write.
+- **Deliverable format:** a `required_deliverables` entry may be a mapping
+  `{path, json_keys}`. `Done()` runs `FeedbackTools._deliverable_format` (before the
+  milestone gate) and returns an ERROR naming the missing and extra top-level keys of
+  a JSON file that is not exactly those keys. Plain string entries keep the existence
+  check. Helpers and config validation: `runtime/study_config.py`
+  (`deliverable_name`, `deliverable_format_errors`); event `DELIVERABLE_FORMAT`.
+  In the wind-down `Done()` does not refuse. Every close (`AgenticRun._finalize_run`)
+  checks the format again: a mismatch writes a `DELIVERABLE_MALFORMED` diagnostics row
+  per file, adds `deliverables_malformed` to `run_status.json`, and keeps the run from
+  GATED.
 - **Status:** done. Bash remains trusted and unsandboxed by design — not
   addressed here; see the (deferred) Bash-boundary discussion this same
   finding raised.

@@ -8,10 +8,11 @@ order Done applies them:
 
 1. :meth:`~FeedbackTools._pending_refusal`      — nothing may close mid-flight
 2. :meth:`~FeedbackTools._capture_retrospective`— the post-accept exit interview
-3. :meth:`~FeedbackTools._milestone_gate`       — process backlog, hard
-4. :meth:`~FeedbackTools._first_call_warning`   — the two-shot confirm
-5. :meth:`~FeedbackTools._must_reproduce`       — the deliverable must RUN
-6. :meth:`~FeedbackTools._critic_gate`          — the adversarial review
+3. :meth:`~FeedbackTools._deliverable_format`   — declared file formats hold
+4. :meth:`~FeedbackTools._milestone_gate`       — process backlog, hard
+5. :meth:`~FeedbackTools._first_call_warning`   — the two-shot confirm
+6. :meth:`~FeedbackTools._must_reproduce`       — the deliverable must RUN
+7. :meth:`~FeedbackTools._critic_gate`          — the adversarial review
 
 Each returns the text to hand back, or None to fall through to the next. Read
 top to bottom and the closing contract is the method list.
@@ -173,6 +174,7 @@ class FeedbackTools:
         for gate in (
             self._pending_refusal,
             self._capture_retrospective,
+            self._deliverable_format,
             self._milestone_gate,
             self._first_call_warning,
             self._must_reproduce,
@@ -356,6 +358,26 @@ class FeedbackTools:
             node._log_missing_retrospectives(
                 f"run closed {node._route['termination']} after a wind-down")
         return prefix + "Run complete."
+
+    def _deliverable_format(self, summary: str, prefix: str) -> str | None:
+        """A required deliverable that declares ``json_keys`` must hold
+        exactly those top-level keys. Existence-only entries are not checked
+        here. In the wind-down there is no time to rework the file, so the
+        close records the mismatch instead (``AgenticRun._finalize_run``)."""
+        from ....runtime.study_config import deliverable_format_errors
+        node = self.node
+        if node._study_dir is None or node._wind_down_active():
+            return None
+        problems = deliverable_format_errors(
+            node._study_dir, getattr(node, "_required_deliverables", None) or [])
+        if not problems:
+            return None
+        node._record_intervention(
+            "DELIVERABLE_FORMAT", "", "; ".join(problems))
+        return (
+            prefix + "ERROR: a required deliverable is not in the declared "
+            "format:\n" + "\n".join(f"- {p}" for p in problems)
+            + "\nFix the file, then re-call Done().")
 
     def _milestone_gate(self, summary: str, prefix: str) -> str | None:
         """Every milestone must be DONE or SKIPPED before the run can close.

@@ -65,3 +65,22 @@ into the study directory. A path with a directory, such as `temp/submission.json
 cannot be declared. If a study's `PROBLEM_STATEMENT.md` asks for a file by name,
 list that file here. A file that you do not list is not checked, and the run can
 finish without it.
+
+An entry can also declare the format of a JSON file. Give the entry as a mapping
+with `path` and `json_keys`:
+
+```yaml
+required_deliverables:
+  - path: design.json
+    json_keys: [lattice, joints, beams]
+```
+
+`Done()` then returns an error unless the file is a JSON object whose top-level
+keys are exactly those keys. The error names the missing and the extra keys. A
+plain filename entry keeps the existence check only.
+
+During the wind-down, `Done()` does not return this error, because the agent has
+no time to fix the file. The run instead records the mismatch as
+`deliverables_malformed` in `run_status.json` and as a `DELIVERABLE_MALFORMED` row
+in `diagnostics.jsonl`. A run with a malformed deliverable never closes GATED, on
+either path.
