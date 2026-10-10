@@ -823,3 +823,12 @@ Audit scripts: scratchpad `audit/`. Local note only.
 ## 65. Two leftovers from the SIGINT flake work (2026-10-09)
 1. `viewer/run_control.py` keeps a persisted epoch `create_time` and compares it with a 1.0 s tolerance. A wall-clock step larger than that makes the viewer treat a live run process as a different process. `resource_backend.proc_start_time` already uses psutil's monotonic identity (af9a31e); run_control should use the same key.
 2. `Node` arms wind-down timers but only `agent_runtime._finalize_run` cancels them. A caller that runs a node outside `agent_runtime` leaks the timers into the process. Tests must cancel by hand (245aa7d).
+
+## 66. QueryStore friction: no S column, float equality, the 1e3 sentinel
+Three separate gaps, all seen in the lattice baseline r2 run 20261010T182423 (D010, D011, D012 retrospectives and critic-1/2). (1) The store holds only `neg_S`; `QueryStore(columns=["S"])` is rejected, so the agent derives S by hand. (2) `where=` with float equality (`x1 == 0.05`) returns 0 rows; the hint appears only after that first empty result. (3) `where=` cannot filter the 1e3 solver-None sentinel as "not stable", so agents cross-check with a script. Judgment call: none is a bug in the spec; each costs a tool call or a script.
+
+## 67. A deliberate off-ledger verification call versus the ORACLE ACCESS hook
+Run 20261010T182423 (D014 retrospective, strategizer and critic-3 retros). The delegation said "do NOT call get_evaluator" for a `design.json` check; the PostToolUse hook then said the same direct solver call "must be re-run through get_evaluator()". The agent followed the delegation, and the hook gave no way to mark the call as a deliberate off-ledger verification. Result: 397 ledger rows plus 1 off-ledger call; the critic saw 397 vs 398 and accepted the labelled call. Wanted: a way to declare a verification call so the hook stays quiet and the call stays visible.
+
+## 68. A registered hypothesis statement cannot be edited
+Run 20261010T182423 (critic-3 and critic-4 retros, strategizer DONE retro). H1 was registered as "at most 6 joints"; the tested family became K=3, d<=27. The statement is immutable, so the narrowing lives only in the status comment and `HypothesisList` shows a statement that contradicts the tested family. Judgment call: immutability protects the pre-registered prediction (Charter §4). Wanted: an append-only "narrowed to" field that the ledger shows next to the original text, without rewriting it. Elvis owns the ledger contract.
