@@ -2227,3 +2227,16 @@ this for every one of them. Before, the exception ended the whole delegation (fo
 example `Read` on a directory). Each error result, raised or returned, also
 writes an `ERROR_RETURN` row to `diagnostics.jsonl` with the tool name and its
 arguments, so the KPI counts it. **Status:** core.
+
+### Best-row block in every delegation report
+
+A delegation report that evaluated something ends with `BEST ROW(S)`: the full
+evaluator output row of that delegation's best design, every output the registered
+oracle declares (read from `run_config.json`, per namespace), feasibility and
+violations included. A reader can no longer take a good value of one metric as a
+good design when another output of the same row says otherwise. The best row follows
+the study's declared `objective` (column, direction, feasible). With no objective
+declared, the block gives the min and the max of the first output and says the
+direction is not guessed; declaring `objective:` in `config.yaml` sharpens it (and
+removes sentinel rows). Code: `ledger_summary.delegation_best_rows`,
+`WorkerSession._best_rows_block`. **Status:** core.

@@ -8,8 +8,9 @@ read from. Nothing here writes.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from f3dasm import ExperimentData
 
@@ -384,6 +385,71 @@ def delegation_evals(store_root: Path | str, delegation_id: str) -> int:
         if s is not None:
             total += int(s.n_per_delegation.get(delegation_id, 0))
     return total
+
+
+def delegation_best_rows(
+    store_dir: Path | str,
+    delegation_id: str,
+    objective: Mapping[str, Any] | None,
+    output_names: Sequence[str] | None = None,
+) -> str | None:
+    """The full evaluator output row of this delegation's best design(s).
+
+    Rows are those stamped with ``delegation_id`` in the one store. A report
+    that names only the target metric lets a reader take a good-looking row as
+    a good design; the full row (every declared output, feasibility and
+    violations included) is what the evaluator actually said about it.
+
+    Declared ``objective``: the best counting row in its direction. Undeclared:
+    the first output's min and max over finite rows, labelled as such, because
+    the direction is not ours to guess. ``output_names`` is the registered
+    oracle's declared outputs (column order); absent, the store's own
+    non-provenance output columns. None when the delegation has no counting row.
+    """
+    from .objective import objective_values
+
+    store_dir = Path(store_dir)
+    csv_path = store_dir / "experiment_data" / "output.csv"
+    if not csv_path.exists():
+        return None
+    try:
+        _, df_out = ExperimentData.from_file(project_dir=store_dir).to_pandas()
+    except Exception:  # noqa: BLE001 — empty/corrupt store
+        return None
+    if "_delegation_id" not in df_out.columns:
+        return None
+    mine = df_out[df_out["_delegation_id"] == delegation_id]
+    if mine.empty:
+        return None
+    present = [c for c in df_out.columns if c not in _PROVENANCE_COLS]
+    cols = [c for c in (output_names or present) if c in df_out.columns] or present
+    if not cols:
+        return None
+    rows = mine.to_dict("records")
+    default_col = objective["column"] if objective else cols[0]
+    vals = objective_values(rows, objective, default_col)
+    counting = [(i, v) for i, v in enumerate(vals) if v is not None]
+    if not counting:
+        return None
+
+    def _row(i: int) -> str:
+        r = rows[i]
+        return ", ".join(f"{c}={r[c]}" for c in cols)
+
+    lines = ["\n\n---", f"BEST ROW(S) ({delegation_id}, full evaluator output):"]
+    if objective:
+        pick = min if objective["direction"] == "min" else max
+        i, _ = pick(counting, key=lambda t: t[1])
+        lines.append(f"  best {default_col} ({objective['direction']}): {_row(i)}")
+    else:
+        lo = min(counting, key=lambda t: t[1])[0]
+        hi = max(counting, key=lambda t: t[1])[0]
+        lines.append(
+            f"  no objective declared; direction not guessed. Extremes of "
+            f"{default_col}:")
+        lines.append(f"  min: {_row(lo)}")
+        lines.append(f"  max: {_row(hi)}")
+    return "\n".join(lines)
 
 
 def load_experiments(

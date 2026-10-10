@@ -814,10 +814,47 @@ class WorkerSession:
                     text = text + _footer
         except Exception:  # noqa: BLE001
             pass
+        text = text + self._best_rows_block()
         _jobs = self._background_job_notes()
         if _jobs:
             text = _jobs + "\n\n" + text
         return text
+
+    def _best_rows_block(self) -> str:
+        """The full evaluator row of this delegation's best design, or "".
+
+        Output names come from the registered oracle of the store the rows
+        landed in (``run_config`` ``oracles[<namespace>]``, else the default
+        ``evaluator_output_names``). Best-effort: never fails a delegation.
+        """
+        _run_exp = self._run_experiment_root()
+        _notes = self.node._current_notes_dir
+        if _run_exp is None or _notes is None:
+            return ""
+        try:
+            import json as _json
+
+            from ....evaluation.ledger_summary import (
+                delegation_best_rows,
+                experiment_stores,
+            )
+            _cfgp = _notes.parent.parent / "debug" / "run_config.json"
+            _cfg = _json.loads(_cfgp.read_text()) if _cfgp.exists() else {}
+            _blocks = []
+            for _st in experiment_stores(_run_exp):
+                _ns = None if _st == Path(_run_exp) else _st.name
+                _names = ((_cfg.get("oracles") or {}).get(_ns, {})
+                          .get("evaluator_output_names") if _ns else None
+                          ) or _cfg.get("evaluator_output_names")
+                _b = delegation_best_rows(
+                    _st, self.delegation_id, _cfg.get("objective"), _names)
+                if _b:
+                    _blocks.append(_b if _ns is None else
+                                   _b.replace("BEST ROW(S)",
+                                              f"BEST ROW(S) [{_ns}]", 1))
+            return "".join(_blocks)
+        except Exception:  # noqa: BLE001
+            return ""
 
     def _mem_cap_bytes(self) -> int | None:
         """The run's hard per-delegation memory cap, or None if unreadable."""
