@@ -63,3 +63,22 @@ def test_tool_kinds():
     assert latency.tool_kind(p + "CorpusAdd") == "lit"
     assert latency.tool_kind(p + "Delegate") == "wait"
     assert latency.tool_kind(p + "HypothesisUpdate") == "adda"
+
+
+def test_a_blocking_tool_is_not_model_time(tmp_path):
+    """The CLI logs message_stop only after a blocking tool returns."""
+    dbg = tmp_path / "run" / "r1" / "debug"
+    rows = _call(0, 100, "Bash", end=100)
+    rows.insert(2, {"ts": _ts(2), "type": "assistant", "text": "go",
+                    "tools": [{"name": "Bash", "input": {},
+                               "tool_use_id": "t1"}]})
+    rows = [r for r in rows if not (r["type"] == "assistant" and r["ts"] == _ts(100))]
+    rows.insert(3, {"ts": _ts(2), "type": "stream_evt",
+                    "evt": "content_block_stop"})
+    _write(dbg / "transcripts/strategizer/turn_001.jsonl", rows)
+    (dbg / "run_status.json").write_text(
+        json.dumps({"status": "GATED", "wall_s": 100}))
+    (dbg / "run_started_at").write_text(str(T0))
+    k = latency.analyse(dbg)["kinds"]
+    assert k["model"] == 2
+    assert k["shell"] == 98

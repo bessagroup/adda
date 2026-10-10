@@ -16,10 +16,12 @@ second; a run's total is not biased by it.
 
 Intervals, per transcript:
 
-* model: from the ``requesting`` status to ``message_stop`` (the first-token
-  wait is inside it).
-* tool: from ``message_stop`` to the ``tool_result`` that answers it, by the
-  tool's kind (below).
+* model: from the ``requesting`` status to the last content record of the call
+  (the first-token wait is inside it). ``message_stop`` is not used: a call
+  that ends in a blocking tool gets its ``message_stop`` only when the tool
+  returns.
+* tool: from the assistant record that carries the call to the ``tool_result``
+  that answers it, by the tool's kind (below).
 * critic: the whole span of a critic transcript.
 
 Tool kinds, which sum into four groups:
@@ -91,6 +93,12 @@ def tool_kind(name: str | None) -> str:
 def transcript_intervals(rows: list[dict]) -> list[tuple[float, float, str]]:
     """Model and tool intervals of one worker transcript.
 
+    A model call runs from its ``requesting`` status to the last content record
+    it wrote (``assistant``, ``partial`` or a ``content_block_*`` event). The
+    ``message_stop`` record is NOT the end: when the call ends in a blocking tool
+    (``Wait``, ``Done``, a long ``Bash``) the CLI logs ``message_stop`` only after
+    the tool returns, so it would count the tool's time as the model's.
+
     A tool starts when the assistant record that carries its call is written
     and ends at the ``tool_result`` that answers its id; the CLI runs tools
     while the model is still streaming, so a tool interval may overlap the
@@ -99,19 +107,37 @@ def transcript_intervals(rows: list[dict]) -> list[tuple[float, float, str]]:
     out: list[tuple[float, float, str]] = []
     started: dict[str, tuple[float, str]] = {}
     requested: float | None = None
+    begun_at: float | None = None
+    last_content: float | None = None
+    stopped: float | None = None
+
+    def close() -> None:
+        nonlocal begun_at, last_content, stopped
+        if begun_at is not None:
+            end = last_content if last_content is not None else stopped
+            if end is not None:
+                out.append((begun_at, end, "model"))
+        begun_at = last_content = stopped = None
+
     for r in rows:
         kind = r.get("type")
         if kind == "system" and r.get("subtype") == "status" and (
                 (r.get("data") or {}).get("status") == "requesting"):
+            close()
             requested = _t(r["ts"])
         elif kind == "stream_evt":
-            if r.get("evt") == "message_start" and requested is None:
-                requested = _t(r["ts"])
-            elif r.get("evt") == "message_stop":
-                if requested is not None:
-                    out.append((requested, _t(r["ts"]), "model"))
+            evt = r.get("evt") or ""
+            if evt == "message_start":
+                close()
+                begun_at = requested if requested is not None else _t(r["ts"])
                 requested = None
-        elif kind == "assistant":
+            elif evt == "message_stop":
+                stopped = _t(r["ts"])
+            elif evt.startswith("content_block") and begun_at is not None:
+                last_content = _t(r["ts"])
+        elif kind in ("assistant", "partial") and begun_at is not None:
+            last_content = _t(r["ts"])
+        if kind == "assistant":
             for tool in r.get("tools") or []:
                 started[tool["tool_use_id"]] = (
                     _t(r["ts"]), tool_kind(tool["name"]))
@@ -120,6 +146,7 @@ def transcript_intervals(rows: list[dict]) -> list[tuple[float, float, str]]:
                 begun = started.pop(x.get("tool_use_id"), None)
                 if begun:
                     out.append((begun[0], _t(r["ts"]), begun[1]))
+    close()
     return out
 
 
