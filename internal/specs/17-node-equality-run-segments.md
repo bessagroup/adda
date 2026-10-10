@@ -44,25 +44,29 @@ Two further role keys, same family:
 
 ## Design
 
-### A. Run segment: the node's own work as a citable record
+### A. Run segment = a delegation row whose target is the node itself
 
 A **run segment** is a named, recorded stretch of a node's own work: scripts plus
-outputs. It is logged exactly like a delegation row: an id, a status, a report.
-It reuses `DelegationLog`; nothing parallel is built.
+outputs. It IS a row in the delegation log: same log, same `D###` id space,
+`from_node == to_node == the node`. `DelegationLog.next_id` and `record_started`
+already take what is needed (id, `hypothesis_ids`, status), so no second code path
+and no new id regex.
 
-- Id: `S###` (own counter per node), so a reader can tell a segment from a
-  delegation. The id regex in `oracle_resolution` and the log accept both.
-- Lifecycle: `OpenSegment(title)` -> `RUNNING`; `CloseSegment(id, report)` ->
-  `OPEN_FOR_REVIEW`; the node's own approval, or the critic's, -> `DONE`. The
-  open/close pair is explicit. Inferring a segment from Bash calls would be a
-  guess, so no inference.
-- Workspace: `debug/delegations/S###/` holds the scripts and outputs, the same
-  layout a delegation uses, so the viewer and the reproduction gate read it with no
-  change.
-- Open question for the boss: should a segment need approval (the delegator's
-  `approve=True` step) or close straight to `DONE`? With no delegator, I propose
-  `CloseSegment` writes `DONE` only when the report names the scripts and the
-  numbers it cites; the validator then judges the substance as for any delegation.
+- `OpenSegment(title, hypothesis_ids)` writes the row, status `RUNNING`.
+  `hypothesis_ids` must be non-empty when the ledger is active, the same rule
+  `Delegate` enforces.
+- `CloseSegment(id, report)` writes the report and sets `DONE`. The report must
+  carry the numbers it supports; the citation check and the validator read it
+  exactly like a delegation report. There is no second party to approve a
+  segment, so no `OPEN_FOR_REVIEW` step; the validator and the critic judge the
+  substance as for any delegation.
+- Workspace: `debug/delegations/D###/` holds the scripts and outputs, the layout a
+  delegation uses, so the viewer, the reproduction gate and the evaluation stamp
+  read it with no change.
+- Open explicit open/close: inferring a segment from Bash calls would be a guess.
+- To confirm in code before building: viewer and `constraint_snapshot` code that
+  assumes `from_node != to_node`, or counts delegation rows as "workers run".
+  The tests below pin both.
 
 ### B. Citation check accepts segments (blocker 2)
 
@@ -79,10 +83,10 @@ still ends with `_ledger is None`, so the original reason for the edge test hold
 
 ### D. Evaluation id for the entry node (blocker 3)
 
-An evaluation must stamp its provenance with the id of the unit of work that made
-it. The entry node's work runs inside an open segment, so the backend injects
-`F3DASM_DELEGATION_ID=S###` for that segment's Bash. With no open segment the
-existing error stays, with the sentence on opening one. `D000` stays as is.
+The segment is a `D###` row, so the stamp already works: the backend injects
+`F3DASM_DELEGATION_ID=D###` for the open segment's Bash, as it does for a
+delegation. With no open segment the existing error stays, plus a sentence on
+`OpenSegment`. `D000` stays as is. `oracle_resolution` changes only that sentence.
 
 ### E. Registration is by capability, not role (blocker 4)
 
@@ -104,20 +108,19 @@ pins this.
 1. `test_leaf_node_with_ledger_tools_owns_ledger`: no outgoing edge, ledger tools
    in the toolset, ledger present. `test_leaf_node_without_ledger_tools_owns_none`:
    same node, no ledger tools, `_ledger is None`.
-2. `test_open_close_segment_logs_row`: a row with id, status, report; `query_all`
-   returns it; the layout under `debug/delegations/S###/` exists.
+2. `test_open_close_segment_logs_row`: a `D###` row with `from_node == to_node`, `hypothesis_ids`, status, report; `query_all` returns it; the layout under `debug/delegations/D###/` exists. `test_open_segment_requires_hypothesis_ids`. `test_segment_rows_not_counted_as_workers`.
 3. `test_close_hypothesis_citing_done_segment_passes`; `..._citing_running_segment_refused`;
    `..._citing_two_segments_refused` (the single-source rule).
 4. `test_cited_segment_report_reaches_validator`: the validator input contains the
    segment report.
-5. `test_get_evaluator_inside_open_segment_stamps_segment_id`; without a segment the
+5. `test_get_evaluator_inside_open_segment_stamps_its_id`; without a segment the
    error names `OpenSegment`.
 6. `test_registration_json_in_any_workspace_registers`: a non-datagenerator role with
    a manifest registers; a datagenerator with none does not.
 7. `test_enforce_ledger_follows_tools_not_role`: a worker with another role string
    and the evaluating tools is guarded; a literature worker is not.
 8. `test_science_monitor_sees_segment_rows`: unledgered and duplicate checks fire on
-   a segment id.
+   a segment row.
 9. Regression: the existing suites for delegations, ledger and monitor pass
    unchanged (`pytest -m "not integration and not ollama and not corpus and not promptmap and not docling"`, then `-m promptmap`).
 10. `internal/FEATURES.md` entries for `OpenSegment` and `CloseSegment`
@@ -133,6 +136,5 @@ headless result is unchanged (same ledger rows, same gate outcome).
 ## Deferred / not decided here
 
 - The single-node prompt: the boss writes it.
-- Whether approval of a segment needs a second party (see A).
 - The strategizer-prompt passages that assume workers exist: the boss's prompt
   covers those; they are not code.
