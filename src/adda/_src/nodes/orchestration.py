@@ -25,7 +25,7 @@ from ..infra import token_clock
 from ..infra import wind_down as _wind_down
 from ..infra.delegation_log import DelegationLog
 from .notices import insert_notice, wrap_notice
-from .parsing import _to_adapter_messages
+from .parsing import _extract_retrospective, _to_adapter_messages
 
 
 class OrchestrationMixin:
@@ -1103,6 +1103,13 @@ class OrchestrationMixin:
         held = self._wind_down_route(state, ai_msg)
         if held is not None:
             return held
+        if self._awaiting_retro and _extract_retrospective(str(ai_msg.content)):
+            # The exit interview was answered in prose, not through Done():
+            # the same record, so capture it rather than ask a fresh session
+            # to answer again (wind_down.py does the same).
+            from .tools.routing.feedback import FeedbackTools
+            FeedbackTools(self)._capture_retrospective(
+                str(ai_msg.content), "")
         accepted = self._route.get("kind") == "done"
         present, missing = self._deliverable_status(state)
         if token_clock.stop_info() is not None:
@@ -1195,6 +1202,13 @@ class OrchestrationMixin:
                 problems.append(
                     f"Delegations still running: {working}."
                     f" {collect} and {close} once they finish."
+                )
+            elif self._awaiting_retro:
+                send = ("Call Done() once more" if self._holds("Done")
+                        else "Reply")
+                problems.append(
+                    "The run is waiting for your retrospective."
+                    f" {send} with a ### Retrospective block."
                 )
             elif self._holds("Done"):
                 problems.append(
