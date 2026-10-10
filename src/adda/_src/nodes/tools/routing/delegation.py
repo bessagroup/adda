@@ -17,6 +17,7 @@ drops ``self``, so the JSON schema the backends infer is unchanged.
 """
 from __future__ import annotations
 
+import json
 import re
 import threading
 import time
@@ -1509,6 +1510,11 @@ class DelegationTools:
             "what the store does not already hold.[[else]]\n"
             "Spend the space on what the worker cannot find itself.[[/if]]\n\n"
             "[[if hypothesis_ledger]]hypothesis_ids must be non-empty when the ledger is active.\n[[/if]]"
+            "constraints (optional): a list of {text, basis}, the limits this task"
+            " carries. basis is 'evidence:<D### or store rows>',"
+            " 'literature:<source>' or 'prior' (a belief with no cited source)."
+            " The worker sees each constraint with its basis and must report"
+            " whether its data contradicted each 'prior' one.\n\n"
             "The worker writes exclusively to {id}/ (relative to their workspace\n"
             "in debug/delegations/).\n\n"
             "[[if hypothesis_ledger]]Set is_falsification_attempt=True when this delegation attacks"
@@ -1706,8 +1712,15 @@ class DelegationTools:
         is_falsification_attempt: bool = False,
         phase: str | None = None,
         namespace: str | None = None,
+        constraints: list | str | None = None,
     ) -> str:
         """Fire a task to a connected agent.
+
+        constraints (optional) is a list of {text, basis}: each limit this task
+        carries, with where it comes from. basis is 'evidence:<D### or store
+        rows>', 'literature:<source>' or 'prior' (a belief without a cited
+        source). The worker sees each with its basis, and must report whether
+        its data contradicted each 'prior' one.
 
         hypothesis_ids should be a list, e.g. hypothesis_ids=['H1','H2'] — a
         string is accepted too (JSON/Python-repr/comma-joined/bare) and
@@ -1751,6 +1764,9 @@ class DelegationTools:
         refusal = self._check_hypothesis_links(h_ids)
         if refusal is not None:
             return refusal
+        _constraints, _bad = _parse_constraints(constraints)
+        if _bad is not None:
+            return _bad
 
         # Resolve the optional process-phase tag (DoE/DataGeneration/ML/…).
         # Unknown/None → None (soft; never refuses), stored as the canonical
@@ -1806,7 +1822,7 @@ class DelegationTools:
 
         task_msg = self._compose_task_message(
             delegation_id, target, intent, expected_report,
-            h_ids, is_falsification_attempt, _snapshot,
+            h_ids, is_falsification_attempt, _snapshot, _constraints,
         )
 
         # Each delegation gets its OWN adapter copy (D1/D2 concurrency fix).
@@ -2126,6 +2142,7 @@ class DelegationTools:
         hypothesis_ids: list | None,
         is_falsification_attempt: bool,
         snapshot: Any,
+        constraints: list[dict[str, str]] | None = None,
     ) -> str:
         """Build the worker's task message: constraints, edge preamble, brief."""
         node = self.node
@@ -2149,6 +2166,9 @@ class DelegationTools:
             hypothesis_ids, is_falsification_attempt)
         if _hyp_brief:
             task_msg += "\n\n" + _hyp_brief
+        _c_brief = _constraints_brief(constraints or [])
+        if _c_brief:
+            task_msg += "\n\n" + _c_brief
 
         if preamble:
             task_msg = preamble + "\n\n" + task_msg
@@ -3384,6 +3404,64 @@ def _parse_hypothesis_ids(hypothesis_ids: list | str | None) -> list[str]:
     if not isinstance(hypothesis_ids, str):
         return [str(h) for h in (hypothesis_ids or [])]
     return decode_list_arg(hypothesis_ids)
+
+
+_BASIS_REFS = ("evidence", "literature")
+_BASIS_HELP = (
+    "basis must be 'evidence:<D### or store rows>', 'literature:<source>' "
+    "or 'prior' (a belief held without a cited source)")
+
+
+def _parse_constraints(raw: Any) -> tuple[list[dict[str, str]], str | None]:
+    """Decode and validate ``Delegate(constraints=...)``.
+
+    Returns ``(constraints, error)``: each constraint is ``{"text", "basis"}``
+    with ``basis`` one of ``evidence:<ref>``, ``literature:<ref>`` or ``prior``.
+    A JSON string encoding the list is accepted, as for ``hypothesis_ids``.
+    """
+    if raw is None or raw == "" or raw == []:
+        return [], None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return [], "ERROR: constraints must be a list of {text, basis} objects."
+    if isinstance(raw, dict):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return [], "ERROR: constraints must be a list of {text, basis} objects."
+    out: list[dict[str, str]] = []
+    for i, c in enumerate(raw):
+        text = c.get("text") if isinstance(c, dict) else None
+        basis = c.get("basis") if isinstance(c, dict) else None
+        if not isinstance(text, str) or not text.strip():
+            return [], f"ERROR: constraints[{i}] needs a non-empty 'text'."
+        if not isinstance(basis, str):
+            return [], f"ERROR: constraints[{i}] needs a 'basis'. {_BASIS_HELP}."
+        basis = basis.strip()
+        kind, _, ref = basis.partition(":")
+        kind = kind.strip().lower()
+        if not (basis.lower() == "prior"
+                or (kind in _BASIS_REFS and ref.strip())):
+            return [], (f"ERROR: constraints[{i}] has basis {basis!r}. "
+                        f"{_BASIS_HELP}.")
+        out.append({"text": text.strip(),
+                    "basis": "prior" if kind == "prior" or basis.lower() == "prior"
+                    else f"{kind}:{ref.strip()}"})
+    return out, None
+
+
+def _constraints_brief(constraints: list[dict[str, str]]) -> str:
+    """The task-message block that shows each constraint with its basis."""
+    if not constraints:
+        return ""
+    lines = ["**Constraints on this task, each with its basis:**"]
+    lines += [f"- {c['text']} [basis: {c['basis']}]" for c in constraints]
+    if any(c["basis"] == "prior" for c in constraints):
+        lines.append(
+            "For each constraint with basis `prior`, your report must say "
+            "whether the data you produced contradicted it.")
+    return "\n".join(lines)
 
 
 def build_delegation_closures(node) -> dict:

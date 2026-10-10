@@ -2227,3 +2227,14 @@ this for every one of them. Before, the exception ended the whole delegation (fo
 example `Read` on a directory). Each error result, raised or returned, also
 writes an `ERROR_RETURN` row to `diagnostics.jsonl` with the tool name and its
 arguments, so the KPI counts it. **Status:** core.
+
+### Delegate `constraints` with a stated basis
+
+`Delegate(constraints=[{text, basis}, ...])` (optional) carries the limits a task
+rests on. `basis` is `evidence:<D### or store rows>`, `literature:<source>` or
+`prior` (a belief with no cited source); anything else is refused before dispatch.
+The worker's brief lists each constraint with its basis. When any basis is `prior`,
+the brief adds that the report must say, per `prior` constraint, whether the data
+the worker produced contradicted it. This stops an unsourced belief from reaching a
+worker as if it were a finding. Code: `_parse_constraints`, `_constraints_brief` in
+`nodes/tools/routing/delegation.py`. **Status:** core.
