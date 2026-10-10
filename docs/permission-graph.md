@@ -236,8 +236,8 @@ the science do not change with it.
 
 Long autonomous runs need guardrails:
 
-- **Budgets** (`budget`, `token_budget`, `eval_budget`) are enforced together;
-  the first to reach 100% starts the wind-down (notices from 75%
+- **Budgets** (`budget`, `token_budget`) are enforced together; `eval_budget`
+  only sends notices. The first of the two to reach 100% starts the wind-down (notices from 75%
   every 5%, no new delegations at 90%, the wind-down at 100%: nothing is
   killed, code refuses new work, each node saves what it has, and the run
   closes `budget_wind_down` after one reproduction gate and one critic review; it

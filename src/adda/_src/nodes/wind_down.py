@@ -1,8 +1,7 @@
-"""The wind-down: how a run ends when the first budget it sets (wall time, output
-tokens or evaluations) is spent.
+"""The wind-down: how a run ends when the first of its wall or token budgets is spent.
 
 The budgets are the real limit and nothing is killed. At ``wind_down_at`` x
-the first budget to reach it, the entry node (which holds the run clock) begins the wind-down:
+the first of those budgets to reach it, the entry node (which holds the run clock) begins the wind-down:
 
 * W0, the freeze. The gate in ``infra/wind_down.py`` refuses every tool that
   would start new work (``Delegate``, ``Bash``, ``RunNotebook`` ...) with an

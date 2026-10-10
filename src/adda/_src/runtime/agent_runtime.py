@@ -283,8 +283,8 @@ class AgenticRun:
         self._mem_cap_bytes = resolve_mem_cap_bytes(cfg.get("mem_cap"))
         self._required_deliverables = cfg.get("required_deliverables") or []
 
-        # Every budget the config sets is enforced at once: wall seconds,
-        # generated output tokens, evaluations (approved by Elvis 2026-10-09).
+        # Wall seconds and generated output tokens end the run together; the
+        # evaluation budget only sends notices (Elvis, 2026-10-09).
         try:
             self._token_budget = token_clock.parse(
                 {**cfg, **({"budget": budget} if budget is not None else {})})

@@ -24,9 +24,9 @@ from typing import Any
 
 @dataclass(frozen=True)
 class ConstraintSnapshot:
-    """A point-in-time read of the run's budgets. Every budget set (wall,
-    tokens, evaluations) starts the wind-down when reached
-    (``runtime/time_rules.py``); this block only reports them."""
+    """A point-in-time read of the run's budgets. The wall and token
+    budgets start the wind-down when reached; the evaluation budget only sends
+    notices (``runtime/time_rules.py``). This block only reports them."""
 
     eval_budget: int | None
     evals_used: int

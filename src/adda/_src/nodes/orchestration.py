@@ -102,6 +102,7 @@ class OrchestrationMixin:
         # holds the run clock, ever sets ``_time_rules``.
         self._time_rules: Any = None
         self._time_fired: set[str] = set()
+        self._eval_step_fired = -1
         self._time_lock = threading.Lock()
         self._time_timers: list[threading.Timer] = []
         self._time_closed = False

@@ -84,12 +84,12 @@ not count—only hard failures do. Read `run.log` for what was failing; this
 usually means a broken evaluator or an unreachable backend, not a science
 problem. Set it to `0` to turn it off.
 
-**The run closed as `budget_wind_down`.** Every budget you set (`budget`,
-`token_budget`, `eval_budget`) is a real limit, and the run ends by a
+**The run closed as `budget_wind_down`.** The wall and token budgets (`budget`,
+`token_budget`) are real limits, and the run ends by a
 wind-down, not an abrupt stop. Thresholds, each a fraction of the budget
 furthest along (wall time counts from the run start):
 
-- `runtime: budget_warn_from` (default `0.75`) and `runtime: budget_warn_every` (default `0.05`): a budget notice, when `budget_notes` is on. Each notice names what is left of every budget set.
+- `runtime: budget_warn_from` (default `0.75`) and `runtime: budget_warn_every` (default `0.05`): a budget notice, when `budget_notes` is on. Each notice names what is left of the wall and token budgets. The evaluation budget sends its own notice on the same steps.
 - `runtime: delegation_cutoff_at` (default `0.90`): `Delegate()` refuses to start anything new. Running delegations continue, and `Wait`, `Done` and the deliverable tools stay open.
 - `runtime: wind_down_at` (default `1.0`): the wind-down begins. Nothing is terminated. Code refuses `Delegate()`, new metered evaluations and every tool that starts new work, each with an `ERROR` that names the rule. Each node has `runtime: wind_down_tool_calls` (default `50`) tool calls. The entry node is walked through three steps: wait for running work, save every result not yet stored (a note that names the file and how it was produced), then write the deliverable and call `Done()`. At most `runtime: wind_down_turns` (default `2`) forced turns per step. The close runs the reproduction gate once and one critic review, with no rework, and records both. The run is `GATED` if the gate passes and the critic returns PASS, with `termination: budget_wind_down` and `budget_trigger` (the budget that set it) recorded; otherwise it is `UNGATED` and halted (resumable). Nothing is cancelled.
 
@@ -107,7 +107,7 @@ wind-down: it gets no notices and no gate. adda ends its session when the
 wall budget passes or the count reaches `token_budget`, with no message to the
 agent; `run_status.json` then records termination `budget_stop`,
 `budget_trigger`, `tokens_over` and the deliverables present or missing. That
-arm has no metered evaluator, so `eval_budget` cannot stop it. These checks run inside the run, so they cannot help if it has
+arm has no metered evaluator, so `eval_budget` sends it no notices. These checks run inside the run, so they cannot help if it has
 genuinely wedged; for that, launch under the external watchdog (twice the
 budget)—see
 [Launching under a watchdog](author-a-study.md#launching-under-a-watchdog).

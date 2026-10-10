@@ -2,15 +2,19 @@
 
 A config may set ``budget`` (wall clock), ``token_budget`` (output tokens
 summed over every node) and ``eval_budget`` (evaluations in the canonical
-store). Each budget has a progress fraction; the schedule keys on the one
-furthest along (``Progress``). Elvis approved on 2026-10-09 that the evaluation
-budget joins this schedule; before, it was a soft nudge only.
+store). The schedule keys on the wall and token budgets only: the one furthest
+along drives it (``Progress``). The evaluation budget only nudges (Elvis,
+2026-10-09): it sends a notice from ``budget_warn_from``, then every
+``budget_warn_every``, with the evaluations left. It does not count toward the
+delegation cutoff, does not start the wind-down and never refuses an
+evaluation.
 
 Thresholds, each a fraction of a budget:
 
 * ``budget_warn_from`` (0.75), then every ``budget_warn_every`` (0.05): a
-  one-line notice with every budget's share used and what is left, to the entry
-  node and to running delegations.
+  one-line notice with the wall and token shares used and what is left, to the
+  entry node and to running delegations. The evaluation budget has its own
+  notice on the same steps (``eval_notice``).
 * ``delegation_cutoff_at`` (0.90): no new delegations; running ones continue.
 * ``wind_down_at`` (1.0): the wind-down begins (``nodes/wind_down.py``).
   Nothing is killed. Code refuses new delegations and new metered evaluations,
@@ -58,7 +62,7 @@ REMOVED: dict[str, str] = {
 }
 
 NOTICE, CUTOFF, WIND_DOWN = "notice", "cutoff", "wind_down"
-WALL, TOKENS, EVALS = "wall", "tokens", "evals"
+WALL, TOKENS = "wall", "tokens"
 
 
 def now() -> float:
@@ -103,26 +107,29 @@ def validate(cfg: dict, explicit: dict) -> None:
 class Progress:
     """How far each budget that is set has run, as a fraction of that budget.
 
-    The schedule keys on the budget that is furthest along: ``fraction`` is the
-    larger of the two and ``driver`` names it (``"wall"`` or ``"tokens"``).
+    The schedule keys on the wall and token budgets: ``fraction`` is the larger
+    of the two (0 when neither is set) and ``driver`` names it (``"wall"`` or
+    ``"tokens"``). ``evals`` only feeds the evaluation notices.
     """
     wall: float | None = None
     tokens: float | None = None
     evals: float | None = None
 
     def by_kind(self) -> dict[str, float]:
-        return {k: f for k, f in ((WALL, self.wall), (TOKENS, self.tokens),
-                                  (EVALS, self.evals)) if f is not None}
+        """The wall and token fractions that are set."""
+        return {k: f for k, f in ((WALL, self.wall), (TOKENS, self.tokens))
+                if f is not None}
 
     @property
     def fraction(self) -> float:
-        return max(self.by_kind().values())
+        return max(self.by_kind().values(), default=0.0)
 
     @property
-    def driver(self) -> str:
-        """The budget furthest along (wall wins a tie, then tokens)."""
+    def driver(self) -> str | None:
+        """The budget furthest along (wall wins a tie, then tokens), or
+        ``None`` when neither is set."""
         kinds = self.by_kind()
-        return max(kinds, key=lambda k: kinds[k])
+        return max(kinds, key=lambda k: kinds[k]) if kinds else None
 
 
 @dataclass(frozen=True)
@@ -159,10 +166,18 @@ class TimeRules:
             tokens=None if self.tokens is None else tokens_used / self.tokens,
             evals=None if self.evals is None else evals_used / self.evals)
 
+    @property
+    def keyed(self) -> bool:
+        """True when a wall or token budget is set, so the cutoff and the
+        wind-down exist."""
+        return self.wall is not None or self.tokens is not None
+
     def schedule(self) -> list[tuple[str, float]]:
         """Every threshold as ``(name, fraction)``, in time order. A notice
         that falls on the cutoff is the cutoff's own line."""
         out: list[tuple[str, float]] = []
+        if not self.keyed:
+            return out
         k = 0
         while True:
             f = round(self.warn_from + k * self.warn_every, 6)
@@ -189,6 +204,21 @@ class TimeRules:
     def due(self, fraction: float) -> list[str]:
         return [n for n, f in self.schedule() if fraction >= f]
 
+    def eval_step(self, fraction: float) -> int | None:
+        """The notice step the evaluation budget has reached, or ``None``
+        below ``warn_from``. Step ``k`` is at ``warn_from + k * warn_every``;
+        the steps go on past 100%."""
+        if fraction < self.warn_from - 1e-9:
+            return None
+        return int((fraction - self.warn_from) / self.warn_every + 1e-9)
+
+    def eval_notice(self, used: float) -> str:
+        left = self.evals - used
+        text = (f"Evaluations: {_pct(used / self.evals)}% of the budget used "
+                + (f"({int(left):,} left)." if left >= 0
+                   else f"({int(-left):,} over)."))
+        return f"Budget: {text}"
+
     # -- text: every budget that is set, each in its own unit ---------------
 
     def _parts(self) -> list[tuple[str, str, float]]:
@@ -198,16 +228,12 @@ class TimeRules:
             out.append(("Time", WALL, self.wall))
         if self.tokens is not None:
             out.append(("Tokens", TOKENS, float(self.tokens)))
-        if self.evals is not None:
-            out.append(("Evaluations", EVALS, float(self.evals)))
         return out
 
     @staticmethod
     def _amount(kind: str, value: float) -> str:
         if kind == TOKENS:
             return f"{int(value):,} output tokens"
-        if kind == EVALS:
-            return f"{int(value):,} evaluations"
         return _mins(value)
 
     def _left_text(self, kind: str, value: float) -> str:
@@ -264,7 +290,7 @@ class TimeRules:
         return f"Budget: {clock} Plan so you can {end}."
 
 
-_NAME = {WALL: "time", TOKENS: "token", EVALS: "evaluation"}
+_NAME = {WALL: "time", TOKENS: "token"}
 
 
 def _pct(frac: float) -> str:

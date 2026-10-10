@@ -172,13 +172,13 @@ def test_the_cutoff_refusal_says_the_new_rule():
     assert "wind-down begins at time budget of 30 min" in t
 
 
-def test_every_budget_a_config_sets_is_in_the_notice_and_the_first_one_leads():
+def test_the_wall_and_token_budgets_are_in_the_notice_and_the_first_one_leads():
     r = rules.TimeRules.from_settings(BUDGET, tokens=1000, evals=50)
     p = r.progress(0.5 * BUDGET, 640, 20)
     assert p.driver == rules.TOKENS and round(p.fraction, 2) == 0.64
     text = r.notice("notice:0.75", p, can_call_done=True)
     assert "Time 50%" in text and "Tokens 64% (360 output tokens left)" in text
-    assert "Evaluations 40% (30 evaluations left)" in text
+    assert "Evaluations" not in text
     assert "when the first of them is reached" in text
 
 
@@ -188,11 +188,31 @@ def test_a_tie_goes_to_wall_then_tokens():
     assert r.progress(0, 1000, 50).driver == rules.TOKENS
 
 
-def test_evaluations_alone_drive_the_schedule():
+def test_the_evaluation_fraction_never_drives_the_schedule():
+    r = rules.TimeRules.from_settings(BUDGET, evals=100)
+    p = r.progress(0.1 * BUDGET, 0, 250)
+    assert p.driver == rules.WALL and p.fraction == pytest.approx(0.1)
+    alone = rules.TimeRules.from_settings(None, evals=100)
+    p = alone.progress(0, 0, 250)
+    assert p.driver is None and p.fraction == 0.0
+    assert alone.schedule() == [] and alone.due(p.fraction) == []
+
+
+def test_the_evaluation_notice_names_what_is_left_and_says_nothing_of_stopping():
     r = rules.TimeRules.from_settings(None, evals=100)
-    assert r.wall is None
-    assert r.due(r.progress(0, 0, 76).fraction) == ["notice:0.75"]
-    assert rules.WIND_DOWN in r.due(r.progress(0, 0, 100).fraction)
+    assert r.eval_notice(85) == (
+        "Budget: Evaluations: 85% of the budget used (15 left).")
+    assert r.eval_notice(110).endswith("(10 over).")
+    for text in (r.eval_notice(85), r.eval_notice(110)):
+        assert not any(w in text.lower() for w in
+                       ("wind", "stop", "soft", "hard", "refus", "cutoff"))
+
+
+def test_the_evaluation_notice_steps_are_the_notice_steps():
+    r = rules.TimeRules.from_settings(None, evals=100)
+    assert r.eval_step(0.74) is None
+    assert [r.eval_step(f) for f in (0.75, 0.79, 0.80, 0.90, 1.0, 1.2)] == [
+        0, 0, 1, 3, 5, 9]
 
 
 # -- the thresholds fire at their fractions ---------------------------------
@@ -245,26 +265,47 @@ def test_the_wind_down_fires_once_at_the_budget(entry, clock):
     assert not wind_down.active()
 
 
-def test_the_evaluation_budget_begins_the_wind_down_before_the_wall_does(
-        entry, clock, monkeypatch):
-    """Approved by Elvis 2026-10-09: evals join the schedule; the first budget
-    to reach its threshold decides, and the record names it."""
-    from adda._src.infra import wind_down
+def _evals(monkeypatch, used):
     from adda._src.runtime import constraint_snapshot
-    entry._eval_budget = 100
-    used = [0]
     monkeypatch.setattr(constraint_snapshot, "evals_for_node",
                         lambda node: used[0])
+
+
+def test_the_evaluation_budget_only_sends_notices(entry, clock, monkeypatch):
+    """Elvis 2026-10-09: evals send notices from 75% every 5% and never reach
+    the cutoff or the wind-down, even far over the budget."""
+    from adda._src.infra import wind_down
+    settings.configure({})
+    entry._eval_budget = 100
+    used = [0]
+    _evals(monkeypatch, used)
     clock.at(0.2)
     entry._time_rules_tick()
     assert _diag(entry) == []
-    used[0] = 100
+    for n, count in ((74, 0), (75, 1), (79, 1), (80, 2), (200, 3)):
+        used[0] = n
+        entry._time_rules_tick()
+        entry._time_rules_tick()
+        assert _diag(entry).count("TIME_NOTICE") == count
+    sent = [m for m in entry._notifications if m.startswith("[TIME")]
+    assert sent[0] == "[TIME — Budget: Evaluations: 75% of the budget used (25 left).]"
+    assert "TIME_WIND_DOWN" not in _diag(entry)
+    assert "TIME_CUTOFF" not in _diag(entry)
+    assert entry._time_cutoff_refusal() is None
+    assert not wind_down.active()
+    entry._time_rules_cancel()
+
+
+def test_with_only_an_evaluation_budget_nothing_winds_down(
+        entry, clock, monkeypatch):
+    from adda._src.infra import wind_down
+    settings.configure({})
+    entry._budget_seconds = None
+    entry._eval_budget = 10
+    _evals(monkeypatch, [50])
     entry._time_rules_tick()
-    assert "TIME_WIND_DOWN" in _diag(entry)
-    rec = json.loads((entry._current_run_dir / "debug"
-                      / "wind_down.json").read_text())
-    assert rec["budget_trigger"] == "evals" and rec["eval_budget"] == 100
-    assert wind_down.active()
+    assert _diag(entry) == ["TIME_NOTICE"]
+    assert entry._time_cutoff_refusal() is None and not wind_down.active()
     entry._time_rules_cancel()
 
 

@@ -167,10 +167,9 @@ class InstrumentedDataGenerator(DataGenerator):
         self.dedup_scope = dedup_scope
         self.delegation_id = delegation_id
         self.source = source
-        # The evaluation budget is enforced by the run's budget schedule
-        # (nodes/time_rules.py; approved by Elvis 2026-10-09), which counts
-        # canonical store rows. This wrapper only refuses a live evaluation
-        # once the wind-down begins (stop_after).
+        # The evaluation budget only sends notices (nodes/time_rules.py;
+        # Elvis, 2026-10-09). This wrapper refuses a live evaluation only once
+        # a wall or token wind-down begins (stop_after).
         # Cumulative count of dedup-on-write skips across this delegation's
         # lifetime (real compute was spent on each, though no row landed).
         self._dedup_skipped_total = 0

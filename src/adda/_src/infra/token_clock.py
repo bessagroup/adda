@@ -2,7 +2,8 @@
 of the run (entry node, specialists, critic, validators).
 
 It is one budget among those a config may set (``budget`` wall, ``token_budget``,
-``eval_budget``); they are enforced together (``runtime/time_rules.py``). Input
+``eval_budget``); wall and tokens end the run together, evaluations only
+send notices (``runtime/time_rules.py``). Input
 tokens are not counted: the multi-agent design re-reads context on purpose and
 is not charged for it.
 
@@ -42,8 +43,8 @@ def parse(cfg: dict) -> int | None:
     """
     if "budget_clock" in cfg:
         raise ValueError(
-            "budget_clock was removed: every budget a config sets is enforced "
-            "at once. Delete budget_clock; set budget (wall clock), "
+            "budget_clock was removed: the wall and token budgets "
+            "are enforced together. Delete budget_clock; set budget (wall clock), "
             "token_budget, or both")
     tokens = cfg.get("token_budget")
     if tokens is None:

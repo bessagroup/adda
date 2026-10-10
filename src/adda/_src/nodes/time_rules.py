@@ -2,8 +2,9 @@
 start of the wind-down (``runtime/time_rules.py`` holds the thresholds and the
 notice text; ``nodes/wind_down.py`` runs the wind-down).
 
-Every budget the config sets counts at once; the schedule keys on the one
-furthest along. Only the entry node holds the run clock (``_run_start``); every
+The schedule (notices, delegation cutoff, wind-down) keys on the wall and token
+budgets, the one furthest along. The evaluation budget only sends its own
+notices (Elvis, 2026-10-09); it never reaches the cutoff or the wind-down. Only the entry node holds the run clock (``_run_start``); every
 other node reaches it through ``_time_entry``. The same code serves every node
 and both backends. A timer thread per threshold fires the wall notice even when
 the entry node sits in one long CLI turn; a model call that ends moves the
@@ -150,8 +151,15 @@ class TimeRulesMixin:
             due = [p for p in rules.due(prog.fraction)
                    if p not in self._time_fired]
             self._time_fired.update(due)
+            step = rules.eval_step(prog.evals) if prog.evals is not None \
+                else None
+            eval_due = step is not None and step > self._eval_step_fired
+            if eval_due:
+                self._eval_step_fired = step
         if due:
             self._time_fire(due[-1], prog)
+        if eval_due:
+            self._eval_notify(prog)
 
     def _time_fire(self, phase: str, prog: _rules.Progress) -> None:
         from ..runtime import features
@@ -171,12 +179,25 @@ class TimeRulesMixin:
         if features.enabled("budget_notes"):
             self._time_broadcast(phase, prog)
 
+    def _eval_notify(self, prog: _rules.Progress) -> None:
+        """The evaluation budget's notice (the same steps as the others)."""
+        from ..runtime import features
+
+        text = self._time_rules.eval_notice(prog.evals * self._time_rules.evals)
+        self._record_intervention(
+            "TIME_NOTICE", "(run)", text, fault="observation")
+        if features.enabled("budget_notes"):
+            self._time_post(text, text)
+
     def _time_broadcast(self, phase: str, prog: _rules.Progress) -> None:
         """The notice to the entry node and to every running delegation."""
         rules = self._time_rules
         entry_text = rules.notice(
             phase, prog, can_call_done=self._holds("Done"))
         worker_text = rules.notice(phase, prog, can_call_done=False)
+        self._time_post(entry_text, worker_text)
+
+    def _time_post(self, entry_text: str, worker_text: str) -> None:
         with self._notifications_lock:
             self._notifications.append(f"[TIME — {entry_text}]")
         run_dir = self._current_run_dir
@@ -197,7 +218,7 @@ class TimeRulesMixin:
         decides whether the earlier notices are sent.
         """
         entry = self._time_entry()
-        if entry is None:
+        if entry is None or not entry._time_rules.keyed:
             return None
         rules = entry._time_rules
         prog = self._time_progress(entry)

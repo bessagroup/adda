@@ -17,16 +17,17 @@ reads.
 | `backend` | `claude`, `ollama`, `openrouter`, or `vllm`. | `claude` |
 | `budget` | Wall-clock limit, as `"HH:MM:SS"` or seconds. | none |
 | `token_budget` | A positive integer of generated tokens, summed over every agent, the critic and the verdict checks among them. Input tokens do not count. A backend that reports no output tokens stops the run with an error; adda never estimates. Use it to give two models the same budget regardless of GPU speed or queue time. | none |
-| `eval_budget` | How many real evaluations the run may spend, counted as the rows in the canonical store. | none |
+| `eval_budget` | How many real evaluations the run should spend, counted as the rows in the canonical store. It only sends notices; it never stops the run or refuses an evaluation. | none |
 | `watchdog_wall_s` | The wall-clock limit for `python -m adda.watchdog`, as `"HH:MM:SS"` or seconds. Use it when the run has no `budget`, because there is then no wall budget to take a multiple of. Setting it next to a `budget` is an error. | none |
 
-Every budget you set is enforced at once (`budget`, `token_budget` and
-`eval_budget`; the evaluation budget joined them on 2026-10-09, approved by
-Elvis). Each has a progress fraction, and the schedule follows the one that is
+The wall and token budgets (`budget` and `token_budget`) are enforced together.
+Each has a progress fraction, and the schedule follows the one that is
 furthest along: notices from 75%, no new delegations at 90%, and the wind-down
-at 100%, when the first budget reaches it (`runtime:` keys in the
+at 100%, when the first of them reaches it (`runtime:` keys in the
 [runtime reference](runtime-reference.md)). `run_status.json` records which
-budget set the stop in `budget_trigger` (`wall`, `tokens` or `evals`). The old
+budget set the stop in `budget_trigger` (`wall` or `tokens`). The evaluation
+budget only sends notices, from 75% and then every 5%, with the evaluations
+left. It does not count toward the cutoff or the wind-down. The old
 `budget_clock` key was removed; a config that has it is rejected.
 | `budget_usd` | **Hard** cost ceiling. The run halts when spend reaches it, and you can raise it and resume. Inactive on a backend with no per-call cost data, such as Ollama. | none |
 | `required_deliverables` | Extra files that must exist before the run can finish. | none |

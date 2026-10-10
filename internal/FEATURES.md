@@ -1132,18 +1132,18 @@ adda has not reviewed), `DEFAULT_TOOLS_EXPANDED` (non-Claude backend).
 
 ## D. Resource governance
 
-### Eval budget joins the budget schedule (replaces the soft nudge)
-- **What:** `eval_budget` is no longer a nudge. It is one budget of the schedule
-  (see "Output-token budget" below): notices from 75%, cutoff at 90%, wind-down
-  at 100%, keyed on the budget furthest along. **Approved by Elvis on
-  2026-10-09** (CLAUDE.md §4 had kept budgets soft; this supersedes it for
-  evals). The count is the canonical store rows
-  (`runtime/constraint_snapshot.py::evals_for_node`); the old nudge also
-  counted dedup-skipped evaluations, the schedule does not.
-- **Where:** `nodes/time_rules.py` (an `EVAL_POLL_S` = 5 s poll timer, since
-  rows land in campaign subprocesses, plus the checkpoint ticks). The
-  `InstrumentedDataGenerator` no longer takes `eval_budget`; it only refuses a
-  live evaluation after the wind-down begins (`stop_after`).
+### Eval budget nudges only
+- **What:** `eval_budget` only sends notices (Elvis, 2026-10-09). The first
+  comes at `budget_warn_from` (75%), then one every `budget_warn_every` (5%),
+  also past 100%, each showing the evaluations left ("Evaluations: 85% of the
+  budget used (60 left)."). It does not count toward the delegation cutoff,
+  does not start the wind-down and never refuses an evaluation. The count is
+  the canonical store rows (`runtime/constraint_snapshot.py::evals_for_node`).
+- **Where:** `nodes/time_rules.py::_eval_notify` (an `EVAL_POLL_S` = 5 s poll
+  timer, since rows land in campaign subprocesses, plus the checkpoint ticks);
+  text and steps in `runtime/time_rules.py::eval_notice` and `eval_step`. The
+  `InstrumentedDataGenerator` takes no `eval_budget`; it refuses a live
+  evaluation only after a wall or token wind-down begins (`stop_after`).
 - **Status:** done (`tests/test_time_rules.py`).
 
 ### Hard memory cap (host safety)
@@ -1483,19 +1483,20 @@ because a worker can run on another host. `infra/host_provenance.py`; test
   `tests/test_wind_down.py`, `tests/test_delegate_time_cutoff.py`,
   `tests/test_route_aware_termination.py`).
 
-### Budgets enforced together (`budget`, `token_budget`, `eval_budget`)
-- **What:** every budget a config sets is enforced at once; the first to reach
-  the wind-down threshold decides. `budget_clock` was removed (a config with it
+### Budgets enforced together (`budget`, `token_budget`)
+- **What:** the wall and token budgets a config sets are enforced at once; the
+  first to reach the wind-down threshold decides. `budget_clock` was removed (a config with it
   is rejected). `Progress(wall, tokens, evals)` holds each budget's fraction;
-  the schedule keys on the largest (`driver`: wall wins a tie, then tokens).
-  Notices state every budget's share and what is left, each in its own unit
-  (minutes, output tokens, evaluations). `token_budget` is the output tokens
+  the schedule keys on the larger of wall and tokens (`driver`: wall wins a
+  tie, then tokens). Notices state each budget's share and what is left, each
+  in its own unit (minutes, output tokens). The evaluation budget has its own
+  notices (see "Eval budget nudges only"). `token_budget` is the output tokens
   summed over EVERY node (entry, specialists, critic, validators); input
-  tokens do not count. Approved by Elvis 2026-10-09 (the eval budget joining).
+  tokens do not count.
 - **Terminations:** the wind-down closes `budget_wind_down` (non-halt; can be
   GATED; legacy `time_budget` still read). The plain arm's stop is
   `budget_stop` (halt; legacy `token_budget`). `budget_trigger` (`wall`,
-  `tokens`, `evals`) is in `wind_down.json` and `run_status.json`.
+  `tokens`) is in `wind_down.json` and `run_status.json`.
 - **Counting:** one process-wide counter (`infra/token_clock.py`), fed per
   model call and idempotent per call key. Claude: the final `output_tokens` of
   each API message, as its `message_delta` arrives
@@ -1504,7 +1505,7 @@ because a worker can run on another host. `infra/host_provenance.py`; test
   `usage_metadata` of each AI message and of each summary call. A call that
   reports no count raises `TokenUsageMissing`: never estimated.
 - **Triggers:** wall time: one timer per threshold. Tokens: a listener on the
-  counter fires the tick on its own thread. Evals: the 5 s poll. At the
+  counter fires the tick on its own thread. Evals: the 5 s poll, for the evaluation notices only. At the
   wind-down begin the entry node always writes `eval_stop_epoch` into
   `debug/run_config.json`, which the metered evaluator reads at each call.
 - **Record:** `run_status.json` and the ledger carry `output_tokens_used` and
