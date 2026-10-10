@@ -63,7 +63,7 @@ and no new id regex.
 - Workspace: `debug/delegations/D###/` holds the scripts and outputs, the layout a
   delegation uses, so the viewer, the reproduction gate and the evaluation stamp
   read it with no change.
-- Open explicit open/close: inferring a segment from Bash calls would be a guess.
+- Explicit open/close: inferring a segment from Bash calls would be a guess.
 - To confirm in code before building: viewer and `constraint_snapshot` code that
   assumes `from_node != to_node`, or counts delegation rows as "workers run".
   The tests below pin both.
