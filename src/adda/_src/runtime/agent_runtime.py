@@ -1802,14 +1802,19 @@ class AgenticRun:
     def _resolve_base_url(self, name: str, agent: Agent, adapter_cls) -> str | None:
         """The endpoint a node's adapter uses: node config, then the top-level
         config, then this run's SLURM-served server; ``None`` leaves the
-        adapter's own env/default. A node-level URL on a backend with no
-        endpoint is an error; the run-wide ones apply only where one exists."""
+        adapter's own env/default. An adapter with ``BASE_URL_NODE_ONLY`` (the
+        claude backend, whose endpoint is a Messages-API proxy, never the
+        model server) takes the node's own URL only. A node-level URL on a backend with no
+        endpoint is an error; the run-wide ones apply only where one
+        exists."""
         if "base_url" not in inspect.signature(adapter_cls.__init__).parameters:
             if agent.base_url:
                 raise ValueError(
                     f"nodes.{name}.base_url is set but backend "
                     f"{agent.backend or self._backend!r} has no endpoint")
             return None
+        if getattr(adapter_cls, "BASE_URL_NODE_ONLY", False):
+            return agent.base_url
         return agent.base_url or self._base_url or self._served_base_url
 
     def _make_adapter(self, name: str, agent: Agent):

@@ -1101,6 +1101,20 @@ hook (neither the raw-oracle nudge nor the store notices); no disallowed tools.
 The CLI keeps `setting_sources=[]`, `bypassPermissions`, the session env, cwd and
 the stream buffer.
 
+**Claude Code on an OpenAI-compatible model** (`backends/anthropic_proxy.py`; BACKLOG
+#61): a translating proxy, `python -m adda._src.backends.anthropic_proxy --upstream
+<openai base url> [--model M] [--port 8001]`, from the Anthropic Messages API to
+`/v1/chat/completions`, streaming included. `system` plus every `system`-role message
+become one leading system message (vLLM 0.19.1's `/v1/messages` answers 400 on the
+inline one); `tool_use`/`tool_result` map to `tool_calls`/`tool` messages; `thinking`
+blocks are dropped; output tokens come from the upstream `usage`. A node on the
+`claude` backend with its own `base_url` gets `ANTHROPIC_BASE_URL`, a placeholder
+`ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` in the session
+env (`claude._build_session_env`); the claude backend takes the node's `base_url` only
+(`BASE_URL_NODE_ONLY`). Tests: `tests/test_anthropic_proxy.py` (stub vLLM server).
+Checked once by hand with the real CLI 2.1.293 against a scripted stub: tool call,
+`Bash` run, final answer, `output_tokens` counted.
+
 **`ClaudeCodeAgent`** (`agents/claude_code.py`, exported from `adda`): the same plain
 node as a class, `Graph(nodes={"solo": ClaudeCodeAgent()}, edges=(), entry="solo")`.
 The first message is the statement byte for byte (no `Human:` prefix); the system

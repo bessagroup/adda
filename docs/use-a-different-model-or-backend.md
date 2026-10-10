@@ -94,6 +94,35 @@ base_url: http://host:8000/v1
 export OPENROUTER_API_KEY=...        # the key stays in the environment
 ```
 
+### Claude Code on an OpenAI-compatible model (Qwen on vLLM)
+
+A node on the `claude` backend runs real Claude Code, which speaks the Anthropic
+Messages API. vLLM's own `/v1/messages` route rejects part of what Claude Code
+sends (an inline `system` message, HTTP 400 on vLLM 0.19.1), so run adda's
+translating proxy next to the model server:
+
+```bash
+python -m adda._src.backends.anthropic_proxy \
+    --upstream http://localhost:8000/v1 --port 8001
+```
+
+Then point the node at the proxy. Only a node's own `base_url` reaches the
+`claude` backend; the top-level `base_url` and the `llm_slurm` endpoint do not,
+because the proxy address is not the model server's address.
+
+```yaml
+nodes:
+  solo:
+    backend: claude
+    model: Qwen/Qwen3-32B      # shown to Claude Code; the proxy serves its --model
+    base_url: http://127.0.0.1:8001
+```
+
+The proxy sends every request, including Claude Code's side requests for a
+small model, to one upstream model: `--model`, or the first model the server
+lists. Output tokens come from the server's `usage`. `/v1/messages/count_tokens`
+is an estimate that only Claude Code's own context display reads.
+
 ### A local model on a Slurm GPU node (vLLM)
 
 adda can own a model served on a separate Slurm GPU allocation for the whole

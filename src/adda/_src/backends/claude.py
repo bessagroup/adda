@@ -382,12 +382,15 @@ async def _stream_with_idle_timeout(
         yield msg
 
 
-def _build_session_env(plain: bool = False) -> dict:
+def _build_session_env(plain: bool = False,
+                       base_url: str | None = None) -> dict:
     """Per-session env vars injected into the worker subprocess (thread-local).
 
     ``plain`` (a plain Claude Code session) leaves the Bash timeout at the
     CLI's own default (``BASH_DEFAULT_TIMEOUT_MS`` unset; 120000 ms in CLI
-    2.1.294).
+    2.1.294). ``base_url`` points the CLI at another Messages-API endpoint
+    (``backends/anthropic_proxy.py``) with a placeholder token, and stops the
+    CLI's side traffic to Anthropic.
 
     - ``F3DASM_DELEGATION_ID`` (race-safe) so get_evaluator() resolves without
       the worker cd-ing into its D### dir (audit Finding 2).
@@ -420,6 +423,10 @@ def _build_session_env(plain: bool = False) -> dict:
         pin_study_root,
     )
     env: dict = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
+    if base_url:
+        env["ANTHROPIC_BASE_URL"] = base_url
+        env["ANTHROPIC_AUTH_TOKEN"] = "adda-proxy"
+        env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
     # The agent's shell must run the SAME interpreter as the agent loop, so
     # `python`/`uv run python` in Bash can import whatever the framework can
     # (f3dasm, adda, the study's deps). Without this, bash `python` resolves
@@ -481,6 +488,7 @@ class ClaudeAdapter:
     # are injected as Python closures (MCP), not passed here.
     #: This backend has its own default system prompt that a node may keep.
     HAS_BASE_PROMPT = True
+    BASE_URL_NODE_ONLY = True
     base_prompt: str | None = None
     NATIVE_TOOLS = frozenset({
         "Bash", "Edit", "Read", "Write", "Glob", "Grep",
@@ -515,8 +523,10 @@ class ClaudeAdapter:
         extra_allowed_tools: list[str] | None = None,
         persistent: bool = False,
         max_history_pairs: int = 5,
+        base_url: str | None = None,
     ) -> None:
         self.model = model
+        self._base_url = base_url
         self.system_prompt = system_prompt
         self.study_dir = Path(study_dir) if study_dir else None
         # "Default" is a marker, not a tool name: the node takes the CLI's
@@ -838,7 +848,8 @@ class ClaudeAdapter:
         # Per-session env: the SDK MERGES this over the inherited environment
         # (PATH etc. preserved), so bare extra keys are safe. See
         # _build_session_env for what is injected and why.
-        _sess_env: dict = _build_session_env(plain=_plain)
+        _sess_env: dict = _build_session_env(
+            plain=_plain, base_url=self._base_url)
         if self._session_token:
             _sess_env[_interrupt.SESSION_TOKEN_ENV] = self._session_token
 

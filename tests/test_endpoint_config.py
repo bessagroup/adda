@@ -78,15 +78,18 @@ def test_endpoint_reaches_the_adapter_without_the_environment(tmp_path, monkeypa
 
 
 def test_a_node_endpoint_on_a_backend_without_one_is_refused(tmp_path):
-    from adda._src.backends.claude import ClaudeAdapter
+    class NoEndpoint:
+        def __init__(self, model=None):
+            pass
+
     run = _run(tmp_path)
     agent = _A()
     agent.base_url = "http://x/v1"
     with pytest.raises(ValueError, match="no endpoint"):
-        run._resolve_base_url("a", agent, ClaudeAdapter)
+        run._resolve_base_url("a", agent, NoEndpoint)
     agent.base_url = None
     run._base_url = "http://x/v1"
-    assert run._resolve_base_url("a", agent, ClaudeAdapter) is None
+    assert run._resolve_base_url("a", agent, NoEndpoint) is None
 
 
 @pytest.mark.parametrize("var", ["VLLM_BASE_URL", "OLLAMA_BASE_URL",
