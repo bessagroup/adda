@@ -234,6 +234,26 @@ class DelegationLog:
                 f.write(json.dumps(patch_row) + "\n")
             return True
 
+    def mark_task_constraints(
+        self, delegation_id: str, task_constraints: list[dict]
+    ) -> bool:
+        """Patch in the ``[{text, basis}]`` this delegation's brief carried.
+
+        A PATCH row, like mark_session_started, so it survives the terminal
+        record's last-wins collapse.
+        """
+        with self._lock:
+            if not any(r.get("id") == delegation_id for r in self._load_all()):
+                return False
+            patch_row = {
+                "id": delegation_id,
+                "patch": {"task_constraints": task_constraints},
+                "ts": _now_iso(),
+            }
+            with self._path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(patch_row) + "\n")
+            return True
+
     def query_received(
         self,
         node_name: str,

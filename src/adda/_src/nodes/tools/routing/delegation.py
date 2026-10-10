@@ -1820,6 +1820,10 @@ class DelegationTools:
                 session_started_at=None if queue_reason else started_at,
             )
 
+        if _constraints and node._delegation_log is not None:
+            node._delegation_log.mark_task_constraints(
+                delegation_id, _constraints)
+
         task_msg = self._compose_task_message(
             delegation_id, target, intent, expected_report,
             h_ids, is_falsification_attempt, _snapshot, _constraints,

@@ -2233,7 +2233,7 @@ arguments, so the KPI counts it. **Status:** core.
 `Delegate(constraints=[{text, basis}, ...])` (optional) carries the limits a task
 rests on. `basis` is `evidence:<D### or store rows>`, `literature:<source>` or
 `prior` (a belief with no cited source); anything else is refused before dispatch.
-The worker's brief lists each constraint with its basis. When any basis is `prior`,
+The worker's brief lists each constraint with its basis, and `delegation_log.jsonl` records them under `task_constraints` (a patch row, so the terminal record keeps it). When any basis is `prior`,
 the brief adds that the report must say, per `prior` constraint, whether the data
 the worker produced contradicted it. This stops an unsourced belief from reaching a
 worker as if it were a finding. Code: `_parse_constraints`, `_constraints_brief` in

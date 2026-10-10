@@ -92,3 +92,15 @@ def test_delegate_without_constraints_is_unchanged(tmp_path):
         "target": "implementer", "intent": "do work", "expected_report": "",
         "hypothesis_ids": [h1], "wait": True})
     assert "[basis:" not in "\n".join(worker.seen)
+
+
+def test_constraints_are_logged_and_survive_the_terminal_record(tmp_path):
+    node, _ = _node(tmp_path)
+    h1, _ = _register_two_hypotheses(node)
+    tools = _structured_tools(node._build_routing_closures())
+    tools["Delegate"].invoke({
+        "target": "implementer", "intent": "do work", "expected_report": "",
+        "hypothesis_ids": [h1], "wait": True, "constraints": GOOD})
+    rec = node._delegation_log._load_all()[-1]
+    assert rec["task_constraints"] == _parse_constraints(GOOD)[0]
+    assert rec["status"] != "RUNNING"
