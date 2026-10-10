@@ -2227,3 +2227,13 @@ this for every one of them. Before, the exception ended the whole delegation (fo
 example `Read` on a directory). Each error result, raised or returned, also
 writes an `ERROR_RETURN` row to `diagnostics.jsonl` with the tool name and its
 arguments, so the KPI counts it. **Status:** core.
+
+### Latency breakdown (`internal/tools/latency.py`)
+
+`python internal/tools/latency.py <debug-or-run-dir> ...` reads a run's
+`debug/` records (`transcripts/`, `run_status.json`, `run_started_at`; never a
+grep) and splits wall time into model generation, tool execution (shell and
+simulator; literature tools), adda orchestration (critic, adda tools, `Wait`,
+`Delegate`, `Done`) and idle. A sweep gives each second to the highest-ranked
+activity running; a second table lists node-seconds by kind with the overlap
+kept. Tests `tests/test_latency_tool.py`. **Status:** done.
